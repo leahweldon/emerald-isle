@@ -20,8 +20,8 @@ struct Atmosphere {
     glm::vec3 zenithColour{0.24f, 0.45f, 0.72f};
 
     // Height fog: density at sea level (per metre), falling off exponentially with altitude.
-    float fogDensity = 5e-6f;
-    float fogScaleHeight = 8000.0f;
+    float fogDensity = 1.5e-5f;
+    float fogScaleHeight = 2000.0f; // a low haze layer, so low views get a soft sea horizon
 
     // Sets uSunDir, uSunColour, uAmbient, uHorizonColour, uZenithColour, uFogDensity and uFogFalloff.
     void apply(Shader& shader) const;

@@ -25,8 +25,9 @@ namespace {
 
 constexpr float kOrbitSpeed = 0.05f; // radians per second
 
-// Metres. Far enough that height fog is opaque before the edge.
-constexpr float kSeaHalfSize = 10000e3f;
+// Metres. The sea plane reaches the far plane (corners at ~0.99x far) so it meets the horizon.
+constexpr float kFarPlane = 15000e3f;
+constexpr float kSeaHalfSize = 0.7f * kFarPlane;
 // Material layers, in the order terrain.frag indexes them (kGrass, kSand, kHeath, kRock).
 constexpr const char* kMaterials[] = {"Grass004", "Ground054", "Ground037", "Rock058"};
 constexpr GLuint kColourUnit = 0;
@@ -163,11 +164,12 @@ Application::Application(AppOptions options)
     m_seaShader->use();
     m_seaShader->set("uCoastMask", static_cast<int>(kCoastUnit));
     m_seaShader->set("uTerrainSize", glm::vec2(m_terrain->width(), m_terrain->depth()));
+    m_seaShader->set("uSeaRadius", kSeaHalfSize);
 
     // Default orbit starts from the overview preset.
     const std::string view = m_options.view.empty() ? "overview" : m_options.view;
     applyViewPreset(*findViewPreset(view), m_camera);
-    m_camera.farPlane = 15000e3f;
+    m_camera.farPlane = kFarPlane;
 }
 
 Application::~Application() = default;

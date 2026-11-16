@@ -23,7 +23,8 @@ void main()
     vec3 ray = normalize(far.xyz / far.w);
 
     float up = max(ray.y, 0.0);
-    vec3 colour = mix(uHorizonColour, uZenithColour, 1.0 - exp(-4.0 * up));
+    // Gentle start so the haze above the horizon mirrors the sea fading into it below.
+    vec3 colour = mix(uHorizonColour, uZenithColour, 1.0 - exp(-2.5 * up));
 
     // Sun disc (~1 degree radius) and glow, in the same direction used for lighting.
     float cosAngle = dot(ray, uSunDir);

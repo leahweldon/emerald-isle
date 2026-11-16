@@ -12,6 +12,7 @@ uniform float uFogDensity;
 uniform float uFogFalloff;
 uniform sampler2D uCoastMask;  // blurred land mask, see TerrainMesh::bindCoastMask
 uniform vec2 uTerrainSize;     // heightmap extent in XZ, metres
+uniform float uSeaRadius;      // nearest edge of the camera-centred plane, metres
 
 // sRGB, converted in main().
 const vec3 kSea     = vec3(0.04, 0.20, 0.23);
@@ -57,6 +58,9 @@ void main()
     vec3 colour = water * (uAmbient + uSunColour * diffuse) + uSunColour * specular * 0.4;
 
     // Same fog as terrain.frag.
-    colour = mix(colour, uHorizonColour, fogAmount(uCameraPos, vWorldPos));
+    // Ramp fog to exactly 1 at the plane's edge, so the sea reaches the sky's horizon colour
+    // whatever the camera height.
+    float edge = smoothstep(0.25, 1.0, length(vWorldPos.xz - uCameraPos.xz) / uSeaRadius);
+    colour = mix(colour, uHorizonColour, max(fogAmount(uCameraPos, vWorldPos), edge));
     fragColour = vec4(linearToSrgb(colour), 1.0);
 }
