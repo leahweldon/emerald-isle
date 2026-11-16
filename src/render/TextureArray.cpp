@@ -74,8 +74,25 @@ TextureArray::TextureArray(const std::vector<std::filesystem::path>& layers, Enc
     if (GLAD_GL_ARB_texture_filter_anisotropic || GLAD_GL_EXT_texture_filter_anisotropic) {
         GLfloat supported = 1.0f;
         glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &supported);
-        m_anisotropy = std::min(supported, kMaxAnisotropy);
-        glTexParameterf(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_ANISOTROPY, m_anisotropy);
+        glTexParameterf(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_ANISOTROPY,
+                        std::min(supported, kMaxAnisotropy));
+        glGetTexParameterfv(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_ANISOTROPY, &m_anisotropy);
+    }
+
+    GLint minFilter = 0;
+    glGetTexParameteriv(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, &minFilter);
+    m_trilinear = minFilter == GL_LINEAR_MIPMAP_LINEAR;
+    // Count levels the driver actually allocated.
+    for (GLint level = 0;; ++level) {
+        GLint levelWidth = 0;
+        glGetTexLevelParameteriv(GL_TEXTURE_2D_ARRAY, level, GL_TEXTURE_WIDTH, &levelWidth);
+        if (levelWidth == 0) {
+            break;
+        }
+        m_mipLevels = level + 1;
+        if (levelWidth == 1) {
+            break;
+        }
     }
 
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0);

@@ -27,6 +27,10 @@ const float kTileNear = 2000.0;
 const float kTileFar  = 9000.0;
 const float kTileRock = 3000.0;
 
+// Texture detail fades to each material's average colour over this range, to stop distant shimmer.
+const float kDetailFadeStart = 50000.0;
+const float kDetailFadeEnd   = 150000.0;
+
 // Linear-space multipliers on the decoded albedo.
 const vec3 kHeathTint = vec3(0.22, 0.18, 0.11); // darkens Ground037 towards peat and heather
 const vec3 kGrassTint = vec3(0.70, 1.00, 0.61); // lusher green
@@ -137,6 +141,12 @@ vec3 linearToSrgb(vec3 c)
     return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 
+// Average colour of a layer: its 1x1 mip.
+vec3 materialAverage(float layer)
+{
+    return textureLod(uMaterialColour, vec3(0.5, 0.5, layer), 16.0).rgb;
+}
+
 // Height fog: optical depth of exponentially thinning air along the view ray.
 float fogAmount(vec3 cameraPos, vec3 worldPos)
 {
@@ -188,28 +198,58 @@ void main()
     float wHeath = (1.0 - wRock) * (1.0 - sand) * heath;
     float wGrass = (1.0 - wRock) * (1.0 - sand) * (1.0 - heath);
 
-    // Only sample materials that contribute; most pixels need one or two.
+    // Only sample materials that contribute; most pixels need one or two. Past the fade range
+    // only the average colour is fetched.
     const float kMinWeight = 0.002;
+    float detail = 1.0 - smoothstep(kDetailFadeStart, kDetailFadeEnd, length(vWorldPos - uCameraPos));
     vec3 albedo = vec3(0.0);
     vec3 normalSum = vec3(0.0);
     vec3 c, nm;
     if (wGrass > kMinWeight) {
-        sampleFlat(kGrass, n, dPdx, dPdy, c, nm);
+        c = materialAverage(kGrass);
+        nm = n;
+        if (detail > 0.0) {
+            vec3 dc, dn;
+            sampleFlat(kGrass, n, dPdx, dPdy, dc, dn);
+            c = mix(c, dc, detail);
+            nm = mix(n, dn, detail);
+        }
         albedo += c * kGrassTint * wGrass;
         normalSum += nm * wGrass;
     }
     if (wSand > kMinWeight) {
-        sampleFlat(kSand, n, dPdx, dPdy, c, nm);
+        c = materialAverage(kSand);
+        nm = n;
+        if (detail > 0.0) {
+            vec3 dc, dn;
+            sampleFlat(kSand, n, dPdx, dPdy, dc, dn);
+            c = mix(c, dc, detail);
+            nm = mix(n, dn, detail);
+        }
         albedo += c * wSand;
         normalSum += nm * wSand;
     }
     if (wHeath > kMinWeight) {
-        sampleFlat(kHeath, n, dPdx, dPdy, c, nm);
+        c = materialAverage(kHeath);
+        nm = n;
+        if (detail > 0.0) {
+            vec3 dc, dn;
+            sampleFlat(kHeath, n, dPdx, dPdy, dc, dn);
+            c = mix(c, dc, detail);
+            nm = mix(n, dn, detail);
+        }
         albedo += c * kHeathTint * wHeath;
         normalSum += nm * wHeath;
     }
     if (wRock > kMinWeight) {
-        sampleTriplanar(kRock, n, dPdx, dPdy, c, nm);
+        c = materialAverage(kRock);
+        nm = n;
+        if (detail > 0.0) {
+            vec3 dc, dn;
+            sampleTriplanar(kRock, n, dPdx, dPdy, dc, dn);
+            c = mix(c, dc, detail);
+            nm = mix(n, dn, detail);
+        }
         albedo += c * kRockTint * wRock;
         normalSum += nm * wRock;
     }

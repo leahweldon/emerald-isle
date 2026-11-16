@@ -155,7 +155,9 @@ Application::Application(AppOptions options)
                                                       TextureArray::Encoding::Srgb);
     m_materialNormal = std::make_unique<TextureArray>(materialFiles(materialDir, "NormalGL"),
                                                       TextureArray::Encoding::Linear);
-    std::printf("Materials: %zu layers, anisotropy %.0fx\n", std::size(kMaterials),
+    std::printf("Materials: %zu layers, %d mip levels, %s, anisotropy %.0fx\n",
+                std::size(kMaterials), m_materialColour->mipLevels(),
+                m_materialColour->trilinear() ? "trilinear" : "NOT trilinear",
                 static_cast<double>(m_materialColour->anisotropy()));
 
     m_terrainShader->use();

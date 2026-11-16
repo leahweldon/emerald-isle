@@ -22,12 +22,16 @@ public:
 
     void bind(GLuint unit) const;
 
-    // Applied anisotropy level, 1 if unsupported.
+    // Read back from the driver after creation, to confirm filtering is active.
     float anisotropy() const { return m_anisotropy; }
+    int mipLevels() const { return m_mipLevels; }
+    bool trilinear() const { return m_trilinear; }
 
 private:
     GLuint m_texture = 0;
     float m_anisotropy = 1.0f;
+    int m_mipLevels = 0;
+    bool m_trilinear = false;
 };
 
 } // namespace emerald
