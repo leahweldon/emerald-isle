@@ -23,7 +23,6 @@ namespace emerald {
 
 namespace {
 
-constexpr float kOrbitSpeed = 0.05f; // radians per second
 
 // Metres. The sea plane reaches the far plane (corners at ~0.99x far) so it meets the horizon.
 constexpr float kFarPlane = 15000e3f;
@@ -45,8 +44,6 @@ std::vector<std::filesystem::path> materialFiles(const std::filesystem::path& di
     return files;
 }
 
-// Caps per-frame motion so startup stalls do not jump the camera.
-constexpr float kMaxStepSeconds = 1.0f / 30.0f;
 
 void printUsage(const char* program)
 {
@@ -173,10 +170,20 @@ Application::Application(AppOptions options)
     m_seaShader->set("uTerrainSize", glm::vec2(m_terrain->width(), m_terrain->depth()));
     m_seaShader->set("uSeaRadius", kSeaHalfSize);
 
-    // Default orbit starts from the overview preset.
-    const std::string view = m_options.view.empty() ? "overview" : m_options.view;
-    applyViewPreset(*findViewPreset(view), m_camera);
     m_camera.farPlane = kFarPlane;
+    m_controller = std::make_unique<CameraController>(
+        m_camera, [this](float x, float z) { return m_terrain->groundHeight(x, z); });
+
+    // No --view: slow orbit from the overview. With --view: free-fly from that pose, still
+    // until there is input, so screenshots are reproducible.
+    if (m_options.view.empty()) {
+        const ViewPreset& overview = *findViewPreset("overview");
+        m_controller->startOrbit(overview.target, overview.azimuth, overview.elevation,
+                                 overview.distance, true);
+    } else {
+        applyViewPreset(*findViewPreset(m_options.view), m_camera);
+        m_controller->startFreeFly();
+    }
 }
 
 Application::~Application() = default;
@@ -186,6 +193,7 @@ int Application::run()
     while (!m_window.shouldClose()) {
         const float delta = m_timer.tick();
 
+        m_window.input().beginFrame();
         m_window.pollEvents();
         update(delta);
         render();
@@ -217,10 +225,7 @@ int Application::run()
 
 void Application::update(float deltaSeconds)
 {
-    // Presets stay fixed so screenshots are reproducible.
-    if (m_options.view.empty()) {
-        m_camera.orbit(kOrbitSpeed * std::min(deltaSeconds, kMaxStepSeconds));
-    }
+    m_controller->update(m_window, deltaSeconds);
 }
 
 void Application::render()
@@ -261,8 +266,8 @@ void Application::setSceneUniforms(Shader& shader)
 {
     shader.set("uView", m_camera.view());
     shader.set("uProjection", m_camera.projection(m_window.aspectRatio()));
-    shader.set("uCameraPos", m_camera.position());
-    m_atmosphere.apply(shader, m_camera.position().y);
+    shader.set("uCameraPos", m_camera.position);
+    m_atmosphere.apply(shader, m_camera.position.y);
 }
 
 void Application::updateTitle()

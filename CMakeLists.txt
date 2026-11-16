@@ -64,8 +64,10 @@ find_package(OpenGL REQUIRED)
 add_executable(emerald-isle
     src/main.cpp
     src/core/Application.cpp
+    src/core/CameraController.cpp
     src/core/Window.cpp
     src/core/FrameTimer.cpp
+    src/core/Input.cpp
     src/core/Screenshot.cpp
     src/render/Atmosphere.cpp
     src/render/Camera.cpp

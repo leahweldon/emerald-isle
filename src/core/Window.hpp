@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/Input.hpp"
+
 #include <string>
 
 struct GLFWwindow;
@@ -38,13 +40,25 @@ public:
 
     GLFWwindow* native() const { return m_handle; }
 
+    Input& input() { return m_input; }
+    const Input& input() const { return m_input; }
+
+    // Hides the cursor and reports unbounded (raw where supported) motion for mouse look.
+    void setCursorCaptured(bool captured);
+    bool cursorCaptured() const { return m_cursorCaptured; }
+
 private:
     static void onFramebufferResize(GLFWwindow* handle, int width, int height);
     static void onKey(GLFWwindow* handle, int key, int scancode, int action, int mods);
+    static void onMouseButton(GLFWwindow* handle, int button, int action, int mods);
+    static void onCursor(GLFWwindow* handle, double x, double y);
+    static void onScroll(GLFWwindow* handle, double xOffset, double yOffset);
 
     GLFWwindow* m_handle = nullptr;
     int m_framebufferWidth = 0;
     int m_framebufferHeight = 0;
+    Input m_input;
+    bool m_cursorCaptured = false;
 };
 
 } // namespace emerald

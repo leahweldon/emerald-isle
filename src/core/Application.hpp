@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/CameraController.hpp"
 #include "core/FrameTimer.hpp"
 #include "core/Window.hpp"
 #include "render/Atmosphere.hpp"
@@ -57,6 +58,7 @@ private:
     std::unique_ptr<SeaPlane> m_sea;
     std::unique_ptr<Shader> m_seaShader;
     Camera m_camera;
+    std::unique_ptr<CameraController> m_controller;
     Atmosphere m_atmosphere;
     int m_frameCount = 0;
 };

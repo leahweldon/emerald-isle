@@ -23,7 +23,7 @@ const ViewPreset* findViewPreset(const std::string& name);
 // Comma-separated preset names, for usage text.
 std::string viewPresetNames();
 
-// Sets the camera's target, angles, distance and clip planes from the preset.
+// Places the camera at the preset pose and sets its near plane.
 void applyViewPreset(const ViewPreset& preset, Camera& camera);
 
 } // namespace emerald
