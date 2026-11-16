@@ -52,7 +52,7 @@ build\Release\emerald-isle.exe       # Windows (Visual Studio generator)
 | `--frames <n>` | Exit after rendering *n* frames |
 | `--screenshot <file>` | Save the final frame as a PNG, then exit |
 | `--terrain-step <n>` | Use every *n*th heightmap pixel (default 2); higher is faster |
-| `--view <name>` | Fixed camera preset instead of the orbit: `overview`, `kerry`, `wicklow` |
+| `--view <name>` | Fixed camera preset instead of the orbit: `overview`, `kerry`, `wicklow`, `glenbeigh` |
 
 The window title shows the averaged frame rate and frame time. Press **Esc** to quit.
 
