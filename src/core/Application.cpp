@@ -260,7 +260,7 @@ void Application::setSceneUniforms(Shader& shader)
     shader.set("uView", m_camera.view());
     shader.set("uProjection", m_camera.projection(m_window.aspectRatio()));
     shader.set("uCameraPos", m_camera.position());
-    m_atmosphere.apply(shader);
+    m_atmosphere.apply(shader, m_camera.position().y);
 }
 
 void Application::updateTitle()

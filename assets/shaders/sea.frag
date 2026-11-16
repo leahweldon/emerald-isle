@@ -14,14 +14,9 @@ uniform sampler2D uCoastMask;  // blurred land mask, see TerrainMesh::bindCoastM
 uniform vec2 uTerrainSize;     // heightmap extent in XZ, metres
 uniform float uSeaRadius;      // nearest edge of the camera-centred plane, metres
 
-// sRGB, converted in main().
-const vec3 kSea     = vec3(0.04, 0.20, 0.23);
-const vec3 kShallow = vec3(0.12, 0.36, 0.36); // matches terrain.frag
-
-vec3 srgbToLinear(vec3 c)
-{
-    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
-}
+// Linear space. Saturated so distant water stays blue-green through the haze.
+const vec3 kSea     = vec3(0.004, 0.055, 0.085);
+const vec3 kShallow = vec3(0.020, 0.160, 0.150); // matches terrain.frag
 
 // Lighting is linear; the default framebuffer expects sRGB.
 vec3 linearToSrgb(vec3 c)
@@ -50,7 +45,7 @@ void main()
 
     // Shallower-looking water near land. No bathymetry, so distance to coast stands in for depth.
     float coast = texture(uCoastMask, vWorldPos.xz / uTerrainSize + 0.5).r;
-    vec3 water = mix(srgbToLinear(kSea), srgbToLinear(kShallow), smoothstep(0.02, 0.5, coast));
+    vec3 water = mix(kSea, kShallow, smoothstep(0.02, 0.5, coast));
 
     float diffuse = max(dot(n, uSunDir), 0.0);
     // Blinn-Phong glint from the sun.
@@ -59,8 +54,12 @@ void main()
 
     // Same fog as terrain.frag.
     // Ramp fog to exactly 1 at the plane's edge, so the sea reaches the sky's horizon colour
-    // whatever the camera height.
-    float edge = smoothstep(0.25, 1.0, length(vWorldPos.xz - uCameraPos.xz) / uSeaRadius);
+    // whatever the camera height. Linear in 1/distance, which is roughly linear on screen near
+    // the horizon, so the fade spreads over many rows instead of a few.
+    float d = max(length(vWorldPos.xz - uCameraPos.xz), 1.0);
+    float nearEdge = 0.1 * uSeaRadius;
+    float edge = smoothstep(0.0, 1.0, clamp((1.0 / nearEdge - 1.0 / d) /
+                                            (1.0 / nearEdge - 1.0 / uSeaRadius), 0.0, 1.0));
     colour = mix(colour, uHorizonColour, max(fogAmount(uCameraPos, vWorldPos), edge));
     fragColour = vec4(linearToSrgb(colour), 1.0);
 }

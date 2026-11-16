@@ -17,14 +17,15 @@ glm::vec3 sunDirection(float bearingDegrees, float elevationDegrees)
                                     -horizontal * std::cos(bearing)));
 }
 
-void Atmosphere::apply(Shader& shader) const
+void Atmosphere::apply(Shader& shader, float cameraHeight) const
 {
     shader.set("uSunDir", sunDir);
     shader.set("uSunColour", glm::convertSRGBToLinear(sunColour));
     shader.set("uAmbient", glm::convertSRGBToLinear(ambient));
     shader.set("uHorizonColour", glm::convertSRGBToLinear(horizonColour));
     shader.set("uZenithColour", glm::convertSRGBToLinear(zenithColour));
-    shader.set("uFogDensity", fogDensity);
+    const float t = glm::smoothstep(highAltitudeStart, highAltitudeEnd, cameraHeight);
+    shader.set("uFogDensity", fogDensity * glm::mix(1.0f, highAltitudeFogScale, t));
     shader.set("uFogFalloff", 1.0f / fogScaleHeight);
 }
 

@@ -38,7 +38,7 @@ const float kDetailFadeEnd   = 150000.0;
 const vec3 kHeathTint = vec3(0.22, 0.18, 0.11); // darkens Ground037 towards peat and heather
 const vec3 kGrassTint = vec3(0.70, 1.00, 0.61); // lusher green
 const vec3 kRockTint  = vec3(1.80, 1.35, 0.95); // Rock058 is blue-grey; shift to warm grey-brown
-const vec3 kShallow   = vec3(0.12, 0.36, 0.36); // sRGB, matches sea.frag
+const vec3 kShallow   = vec3(0.020, 0.160, 0.150); // linear, matches sea.frag
 
 float hash(vec2 p)
 {
@@ -130,11 +130,6 @@ void sampleTriplanar(float layer, vec3 n, vec3 dPdx, vec3 dPdy, out vec3 colour,
     colour = textureGrad(uMaterialColour, uvX, gxX, gyX).rgb * w.x +
              textureGrad(uMaterialColour, uvY, gxY, gyY).rgb * w.y +
              textureGrad(uMaterialColour, uvZ, gxZ, gyZ).rgb * w.z;
-}
-
-vec3 srgbToLinear(vec3 c)
-{
-    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
 }
 
 // Lighting is linear; the default framebuffer expects sRGB.
@@ -278,7 +273,7 @@ void main()
     albedo *= mix(vec3(0.70, 0.75, 0.65), vec3(1.23, 1.14, 0.89), macro);
 
     // Fade the last metres above sea level into shallow water to soften the pixel coastline.
-    albedo = mix(srgbToLinear(kShallow), albedo, smoothstep(0.0, 2.5, metres));
+    albedo = mix(kShallow, albedo, smoothstep(0.0, 2.5, metres));
 
     float diffuse = max(dot(shadingNormal, uSunDir), 0.0);
     vec3 colour = albedo * (uAmbient + uSunColour * diffuse);
