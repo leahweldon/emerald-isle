@@ -224,18 +224,14 @@ void Application::update(float deltaSeconds)
 
 void Application::render()
 {
+    // Re-renders the sky cubemap only when the sun has changed.
+    m_sky->update(m_atmosphere);
+
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     const glm::mat4 projection = m_camera.projection(m_window.aspectRatio());
     const glm::mat4 rotationOnly(glm::mat3(m_camera.view()));
-
-    // Sky is a background pass: no depth test or write.
-    glDisable(GL_DEPTH_TEST);
-    glDepthMask(GL_FALSE);
-    m_sky->draw(glm::inverse(projection * rotationOnly), m_atmosphere);
-    glDepthMask(GL_TRUE);
-    glEnable(GL_DEPTH_TEST);
 
     m_terrainShader->use();
     setSceneUniforms(*m_terrainShader);
@@ -253,6 +249,9 @@ void Application::render()
     glPolygonOffset(1.0f, 1.0f);
     m_sea->draw();
     glDisable(GL_POLYGON_OFFSET_FILL);
+
+    // Skybox last, at the far plane, so it is only shaded where nothing else was drawn.
+    m_sky->drawBackground(glm::inverse(projection * rotationOnly), m_atmosphere);
 }
 
 void Application::setSceneUniforms(Shader& shader)

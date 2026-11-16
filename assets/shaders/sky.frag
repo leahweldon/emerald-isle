@@ -1,7 +1,8 @@
 #version 330 core
 
-// Single-scattering Rayleigh + Mie sky, ray-marched per pixel.
+// Single-scattering Rayleigh + Mie sky, ray-marched per pixel when rendering the cubemap.
 // Constants mirror src/render/Atmosphere.cpp (used there for sun transmittance).
+// The sun disc is smaller than a cubemap texel, so skybox.frag draws it analytically.
 
 in vec2 vUv;
 out vec4 fragColour;
@@ -23,7 +24,7 @@ const float kScaleHeightRayleigh = 7994.0;
 const float kScaleHeightMie = 1200.0;
 const float kMieG = 0.70;
 const float kSunIntensity = 20.0;
-const float kSunAngularRadius = 0.0047; // radians, ~0.27 degrees
+const float kSunAngularRadius = 0.0047; // radians, ~0.27 degrees; matches skybox.frag
 const int kViewSamples = 16;
 const int kLightSamples = 8;
 // Single scattering over-extinguishes near-horizontal paths (no multiple scattering), turning the
@@ -40,15 +41,6 @@ float raySphereFar(vec3 origin, vec3 dir, float radius)
         return -1.0;
     }
     return -b + sqrt(disc);
-}
-
-// Display transform shared by every pass that writes to the screen: linear below 0.8, then a
-// smooth shoulder to 1 so the bright sky around the sun compresses instead of clipping.
-vec3 toneMap(vec3 c)
-{
-    const float knee = 0.8;
-    vec3 over = max(c - knee, 0.0);
-    return min(c, vec3(knee)) + (1.0 - knee) * (1.0 - exp(-over / (1.0 - knee)));
 }
 
 vec3 linearToSrgb(vec3 c)
@@ -115,14 +107,11 @@ void main()
     }
     vec3 colour = kSunIntensity * (sumR * kBetaRayleigh * phaseR + sumM * kBetaMie * phaseM);
 
-    // Sun disc with limb darkening, seen through the atmosphere along this ray, plus a soft halo.
+    // Soft halo around the sun, wide enough to survive the cubemap resolution.
     vec3 transmittance = exp(-((kBetaRayleigh + kBetaOzone) * depthR + kBetaMie * 1.1 * depthM));
     float r = acos(clamp(dot(ray, uSunDir), -1.0, 1.0)) / kSunAngularRadius;
-    float edge = fwidth(r);
-    float limb = 1.0 - 0.6 * (1.0 - sqrt(max(1.0 - r * r, 0.0)));
-    colour += kSunIntensity * transmittance * limb * (1.0 - smoothstep(1.0 - edge, 1.0 + edge, r));
     colour += kSunIntensity * transmittance * 0.02 * exp(-r * r / 40.0);
 
     colour *= uExposure;
-    fragColour = vec4(uEncodeSrgb ? linearToSrgb(toneMap(colour)) : colour, 1.0);
+    fragColour = vec4(uEncodeSrgb ? linearToSrgb(colour) : colour, 1.0);
 }
