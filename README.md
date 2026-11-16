@@ -6,14 +6,14 @@ A real-time terrain renderer of Ireland, written in C++17 and modern shader-base
 
 > **Work in progress.** This is a ground-up rebuild of my Year 4 Computer Graphics final project at Trinity College Dublin, *Toward a Futuristic Emerald Isle*. The original used legacy fixed-function OpenGL; this version is built on a programmable pipeline, runs on macOS, Windows and Linux, and implements the features the original only approximated.
 
-![MacGillycuddy's Reeks, Kerry, from the east, with per-pixel lighting, blended materials and height fog (--view kerry)](docs/images/hero.png)
+![MacGillycuddy's Reeks, Kerry, from the east, with blended materials, sky lighting and height fog (--view kerry)](docs/images/hero.png)
 
 ## Roadmap
 
 - [x] **1. Foundations:** cross-platform build, OpenGL 3.3 core context, shader loading, FPS display, CI
 - [x] **2. Terrain:** mesh generated from an Ireland heightmap, with per-vertex normals and directional lighting
 - [x] **3. Surface materials:** grass, rock and sand blended by height and slope
-- [ ] **4. Sky and camera:** cubemap sky and a free-fly camera
+- [x] **4. Sky and camera:** cubemap sky and a free-fly camera
 - [ ] **5. Infinite world:** terrain chunks streamed around the camera, with level of detail
 - [ ] **6. Shadows:** shadow mapping from a moving sun, with a day/night cycle
 - [ ] **7. Water:** planar reflections and animated waves
@@ -23,9 +23,11 @@ A real-time terrain renderer of Ireland, written in C++17 and modern shader-base
 
 ## Screenshots
 
-Each image is reproducible with `--view <name> --screenshot <file>`.
+Each image is reproducible with `--view <name> --screenshot <file>`, plus the sun options where shown.
 
-![Milestone 3: the whole island from the south-east with blended materials, low south-west sun and height fog (--view overview)](docs/images/milestone-03.png)
+![Milestone 4: low sun over Dingle Bay from the Glenbeigh hills, with the atmospheric sky and sun glint (--view glenbeigh --sun-bearing 290 --sun-elevation 4)](docs/images/milestone-04.png)
+
+![The whole island from the south-east (--view overview)](docs/images/milestone-03.png)
 
 ## Building
 
@@ -58,9 +60,29 @@ build\Release\emerald-isle.exe       # Windows (Visual Studio generator)
 | `--frames <n>` | Exit after rendering *n* frames |
 | `--screenshot <file>` | Save the final frame as a PNG, then exit |
 | `--terrain-step <n>` | Use every *n*th heightmap pixel (default 2); higher is faster |
-| `--view <name>` | Fixed camera preset instead of the orbit: `overview`, `kerry`, `wicklow`, `glenbeigh` |
+| `--view <name>` | Start in free-fly at a preset pose instead of the orbit: `overview`, `kerry`, `wicklow`, `glenbeigh` |
+| `--sun-bearing <deg>` | Sun compass bearing, 0 = north (default 225, south-west) |
+| `--sun-elevation <deg>` | Sun elevation above the horizon (default 22) |
 
-The window title shows the averaged frame rate and frame time. Press **Esc** to quit.
+The window title shows the averaged frame rate and frame time.
+
+### Controls
+
+| Key | Action |
+|---|---|
+| **W** / **S** | Fly forward / back |
+| **A** / **D** | Strafe left / right |
+| **Q** / **E** | Down / up |
+| **←** / **→**, **↑** / **↓** | Turn, pitch |
+| Right mouse button + drag | Look around |
+| **Tab** | Capture the cursor for mouse look (press again to release) |
+| **Shift** | Move 5× faster |
+| Scroll wheel | Change base speed (×1.25 per notch) |
+| **C** | Switch between free-fly and orbit around the point in view |
+| **P** | Print the camera pose as a `--view` preset line for `src/render/ViewPresets.cpp` |
+| **Esc** | Quit |
+
+Without `--view` the app starts in a slow orbit of the island; press **C** to take control. The camera stays at least 30 m above the ground and sea.
 
 ## Project structure
 
