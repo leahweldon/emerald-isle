@@ -4,6 +4,7 @@
 #include <glm/glm.hpp>
 
 #include <filesystem>
+#include <vector>
 
 namespace emerald {
 
@@ -48,6 +49,10 @@ public:
     glm::vec2 heightTextureSize() const { return m_heightTextureSize; }
     float metresPerPixel() const { return m_metresPerPixel; }
 
+    // World-space surface height at (x, z): bilinear over the full-resolution heightmap, never
+    // below sea level (0). Used to keep the camera above the ground.
+    float groundHeight(float x, float z) const;
+
     float verticalExaggeration() const { return m_exaggeration; }
     float width() const { return m_width; }
     float depth() const { return m_depth; }
@@ -60,6 +65,9 @@ private:
     GLuint m_heightTexture = 0;
     glm::vec2 m_heightTextureSize{0.0f};
     float m_metresPerPixel = 0.0f;
+    std::vector<float> m_heights; // full-resolution world-space heights, row 0 north
+    int m_heightsWidth = 0;
+    int m_heightsHeight = 0;
     GLsizei m_indexCount = 0;
     float m_exaggeration = 1.0f;
     float m_width = 0.0f;
