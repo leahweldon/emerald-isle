@@ -67,6 +67,7 @@ add_executable(emerald-isle
     src/core/Window.cpp
     src/core/FrameTimer.cpp
     src/core/Screenshot.cpp
+    src/render/Atmosphere.cpp
     src/render/Camera.cpp
     src/render/SeaPlane.cpp
     src/render/Shader.cpp

@@ -3,25 +3,26 @@
 in vec2 vUv;
 out vec4 fragColour;
 
-uniform float uTime;
-uniform vec2 uResolution;
-
-const vec3 kHorizon = vec3(0.86, 0.90, 0.93);
-const vec3 kZenith  = vec3(0.24, 0.45, 0.72);
-const vec3 kSun     = vec3(1.00, 0.88, 0.62);
+uniform mat4 uInvViewProjRotation; // inverse of projection * rotation-only view
+uniform vec3 uSunDir;
+uniform vec3 uSunColour;
+uniform vec3 uHorizonColour;
+uniform vec3 uZenithColour;
 
 void main()
 {
-    // Smooth vertical blend from a pale horizon to a deeper blue overhead.
-    float height = clamp(vUv.y, 0.0, 1.0);
-    vec3 colour = mix(kHorizon, kZenith, pow(height, 0.7));
+    // World-space view ray for this pixel.
+    vec4 far = uInvViewProjRotation * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
+    vec3 ray = normalize(far.xyz / far.w);
 
-    // A soft sun that drifts slowly across the sky, corrected for aspect ratio.
-    vec2 sunPos = vec2(0.5 + 0.3 * sin(uTime * 0.1), 0.8);
-    vec2 offset = (vUv - sunPos) * vec2(uResolution.x / uResolution.y, 1.0);
-    float glow = exp(-dot(offset, offset) * 18.0);
-    float disc = smoothstep(0.035, 0.03, length(offset));
-    colour += kSun * (0.45 * glow + disc);
+    float up = max(ray.y, 0.0);
+    vec3 colour = mix(uHorizonColour, uZenithColour, 1.0 - exp(-4.0 * up));
+
+    // Sun disc (~1 degree radius) and glow, in the same direction used for lighting.
+    float cosAngle = dot(ray, uSunDir);
+    float disc = smoothstep(0.99980, 0.99986, cosAngle);
+    float glow = 0.35 * pow(max(cosAngle, 0.0), 300.0) + 0.12 * pow(max(cosAngle, 0.0), 12.0);
+    colour += uSunColour * (glow + disc);
 
     fragColour = vec4(colour, 1.0);
 }

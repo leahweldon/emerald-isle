@@ -19,8 +19,6 @@ namespace emerald {
 
 namespace {
 
-// Towards the sun: from the north-west, the usual relief-shading direction.
-const glm::vec3 kSunDir = glm::normalize(glm::vec3(-0.5f, 0.7f, -0.5f));
 constexpr float kOrbitSpeed = 0.05f; // radians per second
 
 // Metres. Fog ends inside the sea plane so its edge is never visible.
@@ -182,13 +180,13 @@ void Application::render()
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    const glm::vec2 resolution(static_cast<float>(m_window.framebufferWidth()),
-                               static_cast<float>(m_window.framebufferHeight()));
+    const glm::mat4 projection = m_camera.projection(m_window.aspectRatio());
+    const glm::mat4 rotationOnly(glm::mat3(m_camera.view()));
 
     // Sky is a background pass: no depth test or write.
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
-    m_sky->draw(static_cast<float>(m_timer.elapsedSeconds()), resolution);
+    m_sky->draw(glm::inverse(projection * rotationOnly), m_atmosphere);
     glDepthMask(GL_TRUE);
     glEnable(GL_DEPTH_TEST);
 
@@ -216,9 +214,7 @@ void Application::setSceneUniforms(Shader& shader)
     shader.set("uView", m_camera.view());
     shader.set("uProjection", m_camera.projection(m_window.aspectRatio()));
     shader.set("uCameraPos", m_camera.position());
-    shader.set("uSunDir", kSunDir);
-    shader.set("uSunColour", glm::vec3(1.0f, 0.95f, 0.85f));
-    shader.set("uAmbient", glm::vec3(0.30f, 0.33f, 0.38f));
+    m_atmosphere.apply(shader);
     shader.set("uFogStart", kFogStart);
     shader.set("uFogEnd", kFogEnd);
 }

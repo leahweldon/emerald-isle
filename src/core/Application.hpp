@@ -2,6 +2,7 @@
 
 #include "core/FrameTimer.hpp"
 #include "core/Window.hpp"
+#include "render/Atmosphere.hpp"
 #include "render/Camera.hpp"
 
 #include <filesystem>
@@ -51,6 +52,7 @@ private:
     std::unique_ptr<SeaPlane> m_sea;
     std::unique_ptr<Shader> m_seaShader;
     Camera m_camera;
+    Atmosphere m_atmosphere;
     int m_frameCount = 0;
 };
 

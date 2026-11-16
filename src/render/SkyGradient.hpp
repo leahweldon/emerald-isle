@@ -1,13 +1,14 @@
 #pragma once
 
+#include "render/Atmosphere.hpp"
 #include "render/Shader.hpp"
 
 #include <filesystem>
 
 namespace emerald {
 
-// Draws a full-screen sky gradient with a soft sun glow.
-// It is a placeholder background for the first milestone and is replaced by a cubemap sky later.
+// Full-screen sky: horizon-to-zenith gradient by view-ray elevation, with a sun disc.
+// Placeholder until the cubemap sky.
 class SkyGradient {
 public:
     explicit SkyGradient(const std::filesystem::path& shaderDir);
@@ -16,7 +17,8 @@ public:
     SkyGradient(const SkyGradient&) = delete;
     SkyGradient& operator=(const SkyGradient&) = delete;
 
-    void draw(float timeSeconds, const glm::vec2& resolution);
+    // invViewProjRotation: inverse of projection * view with translation removed.
+    void draw(const glm::mat4& invViewProjRotation, const Atmosphere& atmosphere);
 
 private:
     Shader m_shader;
