@@ -65,42 +65,51 @@ vec3 unpackNormal(vec3 rgb)
     return rgb * 2.0 - 1.0;
 }
 
+// Sampling uses textureGrad with derivatives taken once in main(), so materials can be skipped
+// in non-uniform branches without breaking mip selection.
+
 // Top-down projection: colour and whiteout-blended normal at one tile size.
-void sampleTop(float layer, float tile, vec3 n, out vec3 colour, out vec3 normal)
+void sampleTop(float layer, float tile, vec3 n, vec3 dPdx, vec3 dPdy, out vec3 colour,
+               out vec3 normal)
 {
-    vec2 uv = vWorldPos.xz / tile;
-    colour = texture(uMaterialColour, vec3(uv, layer)).rgb;
-    vec3 t = unpackNormal(texture(uMaterialNormal, vec3(uv, layer)).rgb);
+    vec3 uv = vec3(vWorldPos.xz / tile, layer);
+    vec2 gx = dPdx.xz / tile;
+    vec2 gy = dPdy.xz / tile;
+    colour = textureGrad(uMaterialColour, uv, gx, gy).rgb;
+    vec3 t = unpackNormal(textureGrad(uMaterialNormal, uv, gx, gy).rgb);
     normal = vec3(t.x + n.x, abs(t.z) * n.y, t.y + n.z);
 }
 
 // Flat materials: average of two tile scales.
-void sampleFlat(float layer, vec3 n, out vec3 colour, out vec3 normal)
+void sampleFlat(float layer, vec3 n, vec3 dPdx, vec3 dPdy, out vec3 colour, out vec3 normal)
 {
     vec3 c0, n0, c1, n1;
-    sampleTop(layer, kTileNear, n, c0, n0);
-    sampleTop(layer, kTileFar, n, c1, n1);
+    sampleTop(layer, kTileNear, n, dPdx, dPdy, c0, n0);
+    sampleTop(layer, kTileFar, n, dPdx, dPdy, c1, n1);
     colour = 0.5 * (c0 + c1);
     normal = normalize(n0 + n1);
 }
 
 // Triplanar projection with whiteout normal blending, for steep faces.
-void sampleTriplanar(float layer, vec3 n, out vec3 colour, out vec3 normal)
+void sampleTriplanar(float layer, vec3 n, vec3 dPdx, vec3 dPdy, out vec3 colour, out vec3 normal)
 {
     vec3 w = pow(abs(n), vec3(4.0));
     w /= (w.x + w.y + w.z);
     vec3 s = sign(n);
 
-    vec2 uvX = vWorldPos.zy / kTileRock;
-    vec2 uvY = vWorldPos.xz / kTileRock;
-    vec2 uvZ = vWorldPos.xy / kTileRock;
-    uvX.x *= s.x;
-    uvY.x *= s.y;
-    uvZ.x *= -s.z;
+    vec3 uvX = vec3(vWorldPos.zy / kTileRock * vec2(s.x, 1.0), layer);
+    vec3 uvY = vec3(vWorldPos.xz / kTileRock * vec2(s.y, 1.0), layer);
+    vec3 uvZ = vec3(vWorldPos.xy / kTileRock * vec2(-s.z, 1.0), layer);
+    vec2 gxX = dPdx.zy / kTileRock * vec2(s.x, 1.0);
+    vec2 gyX = dPdy.zy / kTileRock * vec2(s.x, 1.0);
+    vec2 gxY = dPdx.xz / kTileRock * vec2(s.y, 1.0);
+    vec2 gyY = dPdy.xz / kTileRock * vec2(s.y, 1.0);
+    vec2 gxZ = dPdx.xy / kTileRock * vec2(-s.z, 1.0);
+    vec2 gyZ = dPdy.xy / kTileRock * vec2(-s.z, 1.0);
 
-    vec3 tX = unpackNormal(texture(uMaterialNormal, vec3(uvX, layer)).rgb);
-    vec3 tY = unpackNormal(texture(uMaterialNormal, vec3(uvY, layer)).rgb);
-    vec3 tZ = unpackNormal(texture(uMaterialNormal, vec3(uvZ, layer)).rgb);
+    vec3 tX = unpackNormal(textureGrad(uMaterialNormal, uvX, gxX, gyX).rgb);
+    vec3 tY = unpackNormal(textureGrad(uMaterialNormal, uvY, gxY, gyY).rgb);
+    vec3 tZ = unpackNormal(textureGrad(uMaterialNormal, uvZ, gxZ, gyZ).rgb);
     tX.x *= s.x;
     tY.x *= s.y;
     tZ.x *= -s.z;
@@ -109,9 +118,9 @@ void sampleTriplanar(float layer, vec3 n, out vec3 colour, out vec3 normal)
     tZ = vec3(tZ.xy + n.xy, abs(tZ.z) * n.z);
     normal = normalize(tX.zyx * w.x + tY.xzy * w.y + tZ.xyz * w.z);
 
-    colour = texture(uMaterialColour, vec3(uvX, layer)).rgb * w.x +
-             texture(uMaterialColour, vec3(uvY, layer)).rgb * w.y +
-             texture(uMaterialColour, vec3(uvZ, layer)).rgb * w.z;
+    colour = textureGrad(uMaterialColour, uvX, gxX, gyX).rgb * w.x +
+             textureGrad(uMaterialColour, uvY, gxY, gyY).rgb * w.y +
+             textureGrad(uMaterialColour, uvZ, gxZ, gyZ).rgb * w.z;
 }
 
 // Height fog: optical depth of exponentially thinning air along the view ray.
@@ -129,6 +138,10 @@ float fogAmount(vec3 cameraPos, vec3 worldPos)
 
 void main()
 {
+    // Taken before any branch or discard.
+    vec3 dPdx = dFdx(vWorldPos);
+    vec3 dPdy = dFdy(vWorldPos);
+
     // Below sea level is covered by the sea plane.
     if (vWorldPos.y < 0.0) {
         discard;
@@ -154,16 +167,35 @@ void main()
     float wHeath = (1.0 - wRock) * (1.0 - sand) * heath;
     float wGrass = (1.0 - wRock) * (1.0 - sand) * (1.0 - heath);
 
-    vec3 cGrass, nGrass, cSand, nSand, cHeath, nHeath, cRock, nRock;
-    sampleFlat(kGrass, n, cGrass, nGrass);
-    sampleFlat(kSand, n, cSand, nSand);
-    sampleFlat(kHeath, n, cHeath, nHeath);
-    sampleTriplanar(kRock, n, cRock, nRock);
-    cHeath *= kHeathTint;
-    cGrass *= kGrassTint;
-
-    vec3 albedo = cGrass * wGrass + cSand * wSand + cHeath * wHeath + cRock * wRock;
-    vec3 shadingNormal = normalize(nGrass * wGrass + nSand * wSand + nHeath * wHeath + nRock * wRock);
+    // Only sample materials that contribute; most pixels need one or two.
+    const float kMinWeight = 0.002;
+    vec3 albedo = vec3(0.0);
+    vec3 normalSum = vec3(0.0);
+    vec3 c, nm;
+    if (wGrass > kMinWeight) {
+        sampleFlat(kGrass, n, dPdx, dPdy, c, nm);
+        albedo += c * kGrassTint * wGrass;
+        normalSum += nm * wGrass;
+    }
+    if (wSand > kMinWeight) {
+        sampleFlat(kSand, n, dPdx, dPdy, c, nm);
+        albedo += c * wSand;
+        normalSum += nm * wSand;
+    }
+    if (wHeath > kMinWeight) {
+        sampleFlat(kHeath, n, dPdx, dPdy, c, nm);
+        albedo += c * kHeathTint * wHeath;
+        normalSum += nm * wHeath;
+    }
+    if (wRock > kMinWeight) {
+        sampleTriplanar(kRock, n, dPdx, dPdy, c, nm);
+        albedo += c * wRock;
+        normalSum += nm * wRock;
+    }
+    // Skipped weights are below kMinWeight; renormalise so they do not darken the result.
+    albedo /= max(wGrass * step(kMinWeight, wGrass) + wSand * step(kMinWeight, wSand) +
+                  wHeath * step(kMinWeight, wHeath) + wRock * step(kMinWeight, wRock), 1e-4);
+    vec3 shadingNormal = normalize(normalSum + n * 1e-4);
 
     // Large-scale colour variation hides repetition across the island.
     float macro = fbm(vWorldPos.xz / 40000.0 + 3.0);
