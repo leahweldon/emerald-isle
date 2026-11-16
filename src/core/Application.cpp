@@ -123,10 +123,10 @@ Application::Application(AppOptions options)
         m_options.assetDir / "textures" / "ireland-heightmap.png", terrainConfig);
     m_sea = std::make_unique<SeaPlane>(kSeaHalfSize);
 
-    // Low enough that the horizon is in view.
-    m_camera.distance = 520e3f;
-    m_camera.elevation = 0.3f;
-    m_camera.azimuth = -0.35f;
+    // Low enough that the horizon is in view; starts south-east so the south-west sun side-lights.
+    m_camera.distance = 400e3f;
+    m_camera.elevation = 0.2f;
+    m_camera.azimuth = 0.8f;
     // Near plane kept large for depth precision where the coast meets the sea.
     m_camera.nearPlane = 5e3f;
     m_camera.farPlane = 15000e3f;
