@@ -2,6 +2,7 @@
 
 #include "core/FrameTimer.hpp"
 #include "core/Window.hpp"
+#include "render/Camera.hpp"
 
 #include <filesystem>
 #include <memory>
@@ -10,6 +11,8 @@
 namespace emerald {
 
 class SkyGradient;
+class TerrainMesh;
+class Shader;
 
 struct AppOptions {
     WindowConfig window;
@@ -39,6 +42,9 @@ private:
     Window m_window;
     FrameTimer m_timer;
     std::unique_ptr<SkyGradient> m_sky;
+    std::unique_ptr<TerrainMesh> m_terrain;
+    std::unique_ptr<Shader> m_terrainShader;
+    Camera m_camera;
     int m_frameCount = 0;
 };
 
