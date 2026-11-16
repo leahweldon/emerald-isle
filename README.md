@@ -6,13 +6,13 @@ A real-time terrain renderer of Ireland, written in C++17 and modern shader-base
 
 > **Work in progress.** This is a ground-up rebuild of my Year 4 Computer Graphics final project at Trinity College Dublin, *Toward a Futuristic Emerald Isle*. The original used legacy fixed-function OpenGL; this version is built on a programmable pipeline, runs on macOS, Windows and Linux, and implements the features the original only approximated.
 
-![Milestone 2: Copernicus DEM terrain of Ireland with directional lighting, sea and fog](docs/images/milestone-02.png)
+![Looking west-north-west from the Glenbeigh hills across Dingle Bay to the Dingle peninsula and the Atlantic (--view glenbeigh)](docs/images/hero.png)
 
 ## Roadmap
 
 - [x] **1. Foundations:** cross-platform build, OpenGL 3.3 core context, shader loading, FPS display, CI
 - [x] **2. Terrain:** mesh generated from an Ireland heightmap, with per-vertex normals and directional lighting
-- [ ] **3. Surface materials:** grass, rock and sand blended by height and slope
+- [x] **3. Surface materials:** grass, rock and sand blended by height and slope
 - [ ] **4. Sky and camera:** cubemap sky and a free-fly camera
 - [ ] **5. Infinite world:** terrain chunks streamed around the camera, with level of detail
 - [ ] **6. Shadows:** shadow mapping from a moving sun, with a day/night cycle
@@ -20,6 +20,12 @@ A real-time terrain renderer of Ireland, written in C++17 and modern shader-base
 - [ ] **8. Weather:** GPU-instanced rain
 - [ ] **9. Tools:** in-app panel for toggling features and viewing frame timings
 - [ ] **10. Web:** WebGL build with a live demo
+
+## Screenshots
+
+Each image is reproducible with `--view <name> --screenshot <file>`.
+
+![Milestone 3: the whole island from the south-east with blended materials, low south-west sun and height fog (--view overview)](docs/images/milestone-03.png)
 
 ## Building
 
@@ -61,10 +67,11 @@ The window title shows the averaged frame rate and frame time. Press **Esc** to 
 ```text
 src/
   core/     window and context, frame timing, application loop, screenshots
-  render/   shaders, camera, terrain mesh and render passes
+  render/   shaders, atmosphere, camera and view presets, terrain mesh, materials, sea
 assets/
   shaders/  GLSL source
   textures/ Ireland heightmap (16-bit, built by tools/make_heightmap.py)
+    materials/  CC0 colour and normal maps from ambientCG
 tools/      data preparation scripts
 external/
   glad/     OpenGL 3.3 core loader (generated with glad2)
@@ -79,3 +86,7 @@ Contains modified Copernicus DEM data, © DLR e.V. 2010–2014 and © Airbus Def
 ## Built with
 
 [GLFW](https://www.glfw.org/) · [glad](https://github.com/Dav1dde/glad) · [GLM](https://github.com/g-truc/glm) · [stb](https://github.com/nothings/stb)
+
+## Credits
+
+Terrain textures are CC0 from [ambientCG](https://ambientcg.com/); elevation data is from Copernicus DEM. Every asset, with its source URL and licence, is listed in [CREDITS.md](CREDITS.md).
