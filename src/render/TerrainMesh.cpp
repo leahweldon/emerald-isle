@@ -16,11 +16,6 @@ namespace emerald {
 
 namespace {
 
-struct Vertex {
-    glm::vec3 position;
-    glm::vec3 normal;
-};
-
 struct Heightmap {
     int width = 0;
     int height = 0;
@@ -134,24 +129,14 @@ TerrainMesh::TerrainMesh(const std::filesystem::path& heightmapPath, const Terra
     const float originX = -0.5f * m_width;
     const float originZ = -0.5f * m_depth;
 
-    std::vector<Vertex> vertices;
+    std::vector<glm::vec3> vertices;
     vertices.reserve(static_cast<std::size_t>(cols) * static_cast<std::size_t>(rows));
     for (int r = 0; r < rows; ++r) {
         const int y = std::min(r * step, map.height - 1);
         for (int c = 0; c < cols; ++c) {
             const int x = std::min(c * step, map.width - 1);
-
-            // Central differences over neighbouring samples, in world units.
-            const float dx = map.at(x + step, y) - map.at(x - step, y);
-            const float dz = map.at(x, y + step) - map.at(x, y - step);
-            const float run = 2.0f * static_cast<float>(step) * spacing;
-
-            Vertex v;
-            v.position = glm::vec3(originX + static_cast<float>(x) * spacing,
-                                   map.at(x, y),
-                                   originZ + static_cast<float>(y) * spacing);
-            v.normal = glm::normalize(glm::vec3(-dx, run, -dz));
-            vertices.push_back(v);
+            vertices.emplace_back(originX + static_cast<float>(x) * spacing, map.at(x, y),
+                                  originZ + static_cast<float>(y) * spacing);
         }
     }
 
@@ -177,19 +162,27 @@ TerrainMesh::TerrainMesh(const std::filesystem::path& heightmapPath, const Terra
 
     glBindVertexArray(m_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertices.size() * sizeof(Vertex)),
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertices.size() * sizeof(glm::vec3)),
                  vertices.data(), GL_STATIC_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(indices.size() * sizeof(GLuint)),
                  indices.data(), GL_STATIC_DRAW);
 
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
-                          reinterpret_cast<const void*>(offsetof(Vertex, position)));
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
-                          reinterpret_cast<const void*>(offsetof(Vertex, normal)));
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), nullptr);
     glBindVertexArray(0);
+
+    glGenTextures(1, &m_heightTexture);
+    glBindTexture(GL_TEXTURE_2D, m_heightTexture);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, map.width, map.height, 0, GL_RED, GL_FLOAT,
+                 map.values.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    m_heightTextureSize = glm::vec2(static_cast<float>(map.width), static_cast<float>(map.height));
+    m_metresPerPixel = spacing;
 
     // About 920 m per texel, blurred over roughly 4-5 km.
     int maskWidth = 0;
@@ -218,6 +211,7 @@ TerrainMesh::~TerrainMesh()
     glDeleteBuffers(1, &m_vbo);
     glDeleteVertexArrays(1, &m_vao);
     glDeleteTextures(1, &m_coastMask);
+    glDeleteTextures(1, &m_heightTexture);
 }
 
 void TerrainMesh::draw() const
@@ -231,6 +225,12 @@ void TerrainMesh::bindCoastMask(GLuint unit) const
 {
     glActiveTexture(GL_TEXTURE0 + unit);
     glBindTexture(GL_TEXTURE_2D, m_coastMask);
+}
+
+void TerrainMesh::bindHeightTexture(GLuint unit) const
+{
+    glActiveTexture(GL_TEXTURE0 + unit);
+    glBindTexture(GL_TEXTURE_2D, m_heightTexture);
 }
 
 } // namespace emerald

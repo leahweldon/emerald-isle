@@ -33,6 +33,7 @@ constexpr const char* kMaterials[] = {"Grass004", "Ground054", "Ground037", "Roc
 constexpr GLuint kColourUnit = 0;
 constexpr GLuint kNormalUnit = 1;
 constexpr GLuint kCoastUnit = 2;
+constexpr GLuint kHeightUnit = 3;
 
 std::vector<std::filesystem::path> materialFiles(const std::filesystem::path& dir, const char* map)
 {
@@ -163,6 +164,9 @@ Application::Application(AppOptions options)
     m_terrainShader->use();
     m_terrainShader->set("uMaterialColour", static_cast<int>(kColourUnit));
     m_terrainShader->set("uMaterialNormal", static_cast<int>(kNormalUnit));
+    m_terrainShader->set("uHeightTexture", static_cast<int>(kHeightUnit));
+    m_terrainShader->set("uHeightTextureSize", m_terrain->heightTextureSize());
+    m_terrainShader->set("uTexelSpacing", m_terrain->metresPerPixel());
     m_seaShader->use();
     m_seaShader->set("uCoastMask", static_cast<int>(kCoastUnit));
     m_seaShader->set("uTerrainSize", glm::vec2(m_terrain->width(), m_terrain->depth()));
@@ -238,6 +242,7 @@ void Application::render()
     m_terrainShader->set("uExaggeration", m_terrain->verticalExaggeration());
     m_materialColour->bind(kColourUnit);
     m_materialNormal->bind(kNormalUnit);
+    m_terrain->bindHeightTexture(kHeightUnit);
     m_terrain->draw();
 
     // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.

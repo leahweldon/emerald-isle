@@ -1,7 +1,6 @@
 #version 330 core
 
 in vec3 vWorldPos;
-in vec3 vNormal;
 out vec4 fragColour;
 
 uniform vec3 uCameraPos;
@@ -12,6 +11,10 @@ uniform vec3 uHorizonColour;
 uniform float uFogDensity;
 uniform float uFogFalloff;
 uniform float uExaggeration;
+
+uniform sampler2D uHeightTexture;  // world-space heights, see TerrainMesh::bindHeightTexture
+uniform vec2 uHeightTextureSize;   // texels
+uniform float uTexelSpacing;       // metres between texels
 
 uniform sampler2DArray uMaterialColour;
 uniform sampler2DArray uMaterialNormal;
@@ -141,6 +144,18 @@ vec3 linearToSrgb(vec3 c)
     return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 
+// Per-pixel normal from central differences one texel apart; heights are already exaggerated.
+vec3 terrainNormal()
+{
+    vec2 uv = vWorldPos.xz / (uTexelSpacing * uHeightTextureSize) + 0.5;
+    vec2 texel = 1.0 / uHeightTextureSize;
+    float west  = textureLod(uHeightTexture, uv - vec2(texel.x, 0.0), 0.0).r;
+    float east  = textureLod(uHeightTexture, uv + vec2(texel.x, 0.0), 0.0).r;
+    float north = textureLod(uHeightTexture, uv - vec2(0.0, texel.y), 0.0).r;
+    float south = textureLod(uHeightTexture, uv + vec2(0.0, texel.y), 0.0).r;
+    return normalize(vec3(west - east, 2.0 * uTexelSpacing, north - south));
+}
+
 // Average colour of a layer: its 1x1 mip.
 vec3 materialAverage(float layer)
 {
@@ -171,7 +186,7 @@ void main()
         discard;
     }
 
-    vec3 n = normalize(vNormal);
+    vec3 n = terrainNormal();
     float metres = vWorldPos.y / uExaggeration;
     float slope = 1.0 - n.y;
 
@@ -185,12 +200,12 @@ void main()
     sand *= 1.0 - smoothstep(0.05, 0.15, slope);
 
     // Heath follows slope and patch noise; height only nudges it, so summits get heath/grass mixes.
-    float heathScore = 3.0 * slope + 0.8 * (patches - 0.5) + 0.3 * (broad - 0.5) +
+    float heathScore = 2.2 * slope + 0.8 * (patches - 0.5) + 0.3 * (broad - 0.5) +
                        0.5 * smoothstep(100.0, 500.0, metres);
     float heath = smoothstep(0.35, 0.65, heathScore);
 
-    // Rock only on genuinely steep faces: roughly the steepest 0.6% of land on this mesh.
-    float rock = smoothstep(0.18, 0.30, slope + 0.04 * (local - 0.5));
+    // Rock only on genuinely steep faces: roughly the steepest 0.8% of land.
+    float rock = smoothstep(0.25, 0.40, slope + 0.05 * (local - 0.5));
 
     // Rock overrides everything; sand overrides grass and heath.
     float wRock = rock;
