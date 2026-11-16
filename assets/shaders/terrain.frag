@@ -28,6 +28,7 @@ const float kTileFar  = 9000.0;
 const float kTileRock = 3000.0;
 
 const vec3 kHeathTint = vec3(0.50, 0.46, 0.36); // darkens Ground037 towards peat and heather
+const vec3 kShallow   = vec3(0.12, 0.36, 0.36); // matches sea.frag
 const vec3 kGrassTint = vec3(0.85, 1.00, 0.80); // lusher green
 
 float hash(vec2 p)
@@ -167,6 +168,9 @@ void main()
     // Large-scale colour variation hides repetition across the island.
     float macro = fbm(vWorldPos.xz / 40000.0 + 3.0);
     albedo *= mix(vec3(0.85, 0.88, 0.82), vec3(1.10, 1.06, 0.95), macro);
+
+    // Fade the last metres above sea level into shallow water to soften the pixel coastline.
+    albedo = mix(kShallow, albedo, smoothstep(0.0, 2.5, metres));
 
     float diffuse = max(dot(shadingNormal, uSunDir), 0.0);
     vec3 colour = albedo * (uAmbient + uSunColour * diffuse);

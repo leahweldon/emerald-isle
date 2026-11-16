@@ -31,6 +31,7 @@ constexpr float kSeaHalfSize = 10000e3f;
 constexpr const char* kMaterials[] = {"Grass004", "Ground054", "Ground037", "Rock058"};
 constexpr GLuint kColourUnit = 0;
 constexpr GLuint kNormalUnit = 1;
+constexpr GLuint kCoastUnit = 2;
 
 std::vector<std::filesystem::path> materialFiles(const std::filesystem::path& dir, const char* map)
 {
@@ -157,6 +158,9 @@ Application::Application(AppOptions options)
     m_terrainShader->use();
     m_terrainShader->set("uMaterialColour", static_cast<int>(kColourUnit));
     m_terrainShader->set("uMaterialNormal", static_cast<int>(kNormalUnit));
+    m_seaShader->use();
+    m_seaShader->set("uCoastMask", static_cast<int>(kCoastUnit));
+    m_seaShader->set("uTerrainSize", glm::vec2(m_terrain->width(), m_terrain->depth()));
 
     // Default orbit starts from the overview preset.
     const std::string view = m_options.view.empty() ? "overview" : m_options.view;
@@ -233,6 +237,7 @@ void Application::render()
     // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.
     m_seaShader->use();
     setSceneUniforms(*m_seaShader);
+    m_terrain->bindCoastMask(kCoastUnit);
     glEnable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(1.0f, 1.0f);
     m_sea->draw();
