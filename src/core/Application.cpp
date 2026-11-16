@@ -56,9 +56,21 @@ void printUsage(const char* program)
         "  --frames <n>          Exit after rendering n frames\n"
         "  --screenshot <file>   Save the last frame as a PNG, then exit\n"
         "  --terrain-step <n>    Use every nth heightmap pixel (default 2)\n"
-        "  --view <name>         Fixed camera preset: %s\n"
+        "  --view <name>         Start from a camera preset: %s\n"
+        "  --sun-bearing <deg>   Sun compass bearing, 0 = north (default 225)\n"
+        "  --sun-elevation <deg> Sun elevation above the horizon (default 22)\n"
         "  --help                Show this message\n",
         EMERALD_VERSION, program, viewPresetNames().c_str());
+}
+
+float parseFloat(const char* flag, const char* value, float min, float max)
+{
+    char* end = nullptr;
+    const float parsed = std::strtof(value, &end);
+    if (end == value || *end != '\0' || !(parsed >= min && parsed <= max)) {
+        throw std::invalid_argument(std::string("Invalid value for ") + flag + ": " + value);
+    }
+    return parsed;
 }
 
 int parsePositive(const char* flag, const char* value)
@@ -115,6 +127,10 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
                 throw std::invalid_argument("Unknown view '" + options.view +
                                             "' (available: " + viewPresetNames() + ")");
             }
+        } else if (std::strcmp(arg, "--sun-bearing") == 0 && hasValue) {
+            options.sunBearing = parseFloat(arg, argv[++i], -360.0f, 360.0f);
+        } else if (std::strcmp(arg, "--sun-elevation") == 0 && hasValue) {
+            options.sunElevation = parseFloat(arg, argv[++i], -10.0f, 90.0f);
         } else {
             throw std::invalid_argument(std::string("Unknown or incomplete option: ") + arg +
                                         " (run with --help for usage)");
@@ -170,6 +186,7 @@ Application::Application(AppOptions options)
     m_seaShader->set("uTerrainSize", glm::vec2(m_terrain->width(), m_terrain->depth()));
     m_seaShader->set("uSeaRadius", kSeaHalfSize);
 
+    m_atmosphere.sunDir = sunDirection(m_options.sunBearing, m_options.sunElevation);
     m_camera.farPlane = kFarPlane;
     m_controller = std::make_unique<CameraController>(
         m_camera, [this](float x, float z) { return m_terrain->groundHeight(x, z); });

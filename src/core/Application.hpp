@@ -28,6 +28,9 @@ struct AppOptions {
     int terrainStep = 2;
     // Fixed camera preset name; empty means the default slow orbit.
     std::string view;
+    // Sun position in degrees (compass bearing, elevation); defaults to the Atmosphere default.
+    float sunBearing = 225.0f;
+    float sunElevation = 22.0f;
     std::filesystem::path assetDir;
 };
 
