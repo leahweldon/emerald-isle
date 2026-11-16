@@ -68,7 +68,8 @@ add_executable(emerald-isle
     src/core/FrameTimer.cpp
     src/core/Screenshot.cpp
     src/render/Shader.cpp
-    src/render/SkyGradient.cpp)
+    src/render/SkyGradient.cpp
+    src/render/TerrainMesh.cpp)
 
 target_include_directories(emerald-isle PRIVATE src)
 target_link_libraries(emerald-isle PRIVATE glfw glad glm::glm stb OpenGL::GL)
