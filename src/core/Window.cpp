@@ -142,9 +142,9 @@ void Window::onCursor(GLFWwindow* handle, double x, double y)
     static_cast<Window*>(glfwGetWindowUserPointer(handle))->m_input.onCursor(x, y);
 }
 
-void Window::onScroll(GLFWwindow* handle, double /*xOffset*/, double yOffset)
+void Window::onScroll(GLFWwindow* handle, double xOffset, double yOffset)
 {
-    static_cast<Window*>(glfwGetWindowUserPointer(handle))->m_input.onScroll(yOffset);
+    static_cast<Window*>(glfwGetWindowUserPointer(handle))->m_input.onScroll(xOffset, yOffset);
 }
 
 } // namespace emerald

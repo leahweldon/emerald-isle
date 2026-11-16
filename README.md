@@ -68,21 +68,21 @@ The window title shows the averaged frame rate and frame time.
 
 ### Controls
 
-| Key | Action |
-|---|---|
-| **W** / **S** | Fly forward / back |
-| **A** / **D** | Strafe left / right |
-| **Q** / **E** | Down / up |
-| **←** / **→**, **↑** / **↓** | Turn, pitch |
-| Right mouse button + drag | Look around |
-| **Tab** | Capture the cursor for mouse look (press again to release) |
-| **Shift** | Move 5× faster |
-| Scroll wheel | Change base speed (×1.25 per notch) |
-| **C** | Switch between free-fly and orbit around the point in view |
-| **P** | Print the camera pose as a `--view` preset line for `src/render/ViewPresets.cpp` |
-| **Esc** | Quit |
+| Action | Trackpad | Mouse |
+|---|---|---|
+| Fly forward / back | **W** / **S** | **W** / **S** |
+| Strafe left / right | **A** / **D** | **A** / **D** |
+| Down / up | **Q** / **E** | **Q** / **E** |
+| Look around | Two-finger scroll (drags the view) | Hold the right button and drag; the wheel tilts |
+| Free look | **Tab** captures the cursor, then move a finger; **Tab** again to release | **Tab**, then move the mouse |
+| Turn / pitch | **←** **→** / **↑** **↓** | **←** **→** / **↑** **↓** |
+| Faster | Hold **Shift** (5×) | Hold **Shift** (5×) |
+| Change base speed | **[** / **]** or **-** / **=** (×1.25 per press) | **[** / **]** or **-** / **=** |
+| Free-fly ↔ orbit | **C** | **C** |
+| Print pose as a `--view` preset line | **P** | **P** |
+| Quit | **Esc** | **Esc** |
 
-Without `--view` the app starts in a slow orbit of the island; press **C** to take control. The camera stays at least 30 m above the ground and sea.
+The window title shows the frame rate, frame time and current base speed (or "orbit"). Without `--view` the app starts in a slow orbit of the island; press **C** to take control. The camera stays at least 30 m above the ground and sea.
 
 ## Project structure
 

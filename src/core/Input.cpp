@@ -17,7 +17,7 @@ void Input::beginFrame()
 {
     m_pressed.fill(false);
     m_mouseDelta = glm::vec2(0.0f);
-    m_scrollDelta = 0.0f;
+    m_scrollDelta = glm::vec2(0.0f);
 }
 
 bool Input::isDown(int key) const
@@ -66,9 +66,9 @@ void Input::onCursor(double x, double y)
     m_haveCursor = true;
 }
 
-void Input::onScroll(double yOffset)
+void Input::onScroll(double xOffset, double yOffset)
 {
-    m_scrollDelta += static_cast<float>(yOffset);
+    m_scrollDelta += glm::vec2(static_cast<float>(xOffset), static_cast<float>(yOffset));
 }
 
 } // namespace emerald

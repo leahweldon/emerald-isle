@@ -289,10 +289,16 @@ void Application::setSceneUniforms(Shader& shader)
 
 void Application::updateTitle()
 {
-    char title[128];
-    std::snprintf(title, sizeof(title), "%s  |  %.0f FPS  |  %.2f ms",
+    char speed[32];
+    if (m_controller->mode() == CameraController::Mode::FreeFly) {
+        std::snprintf(speed, sizeof(speed), "%.0f m/s", static_cast<double>(m_controller->baseSpeed()));
+    } else {
+        std::snprintf(speed, sizeof(speed), "orbit");
+    }
+    char title[160];
+    std::snprintf(title, sizeof(title), "%s  |  %.0f FPS  |  %.2f ms  |  %s",
                   m_options.window.title.c_str(),
-                  m_timer.framesPerSecond(), m_timer.frameTimeMs());
+                  m_timer.framesPerSecond(), m_timer.frameTimeMs(), speed);
     m_window.setTitle(title);
 }
 

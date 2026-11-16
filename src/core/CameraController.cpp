@@ -15,12 +15,18 @@ namespace {
 
 constexpr float kMinClearance = 30.0f;     // metres above ground or sea
 constexpr float kFastMultiplier = 5.0f;    // with Shift
-constexpr float kSpeedStep = 1.25f;        // per scroll notch
+constexpr float kSpeedStep = 1.25f;        // per [ ] or - = press
 constexpr float kMinSpeed = 10.0f;
 constexpr float kMaxSpeed = 50000.0f;
 constexpr float kResponse = 6.0f;          // 1/s; velocity reaches ~95% of target in 0.5 s
 constexpr float kMouseSensitivity = 0.0025f; // radians per screen pixel
 constexpr float kTurnRate = 1.2f;          // radians per second, arrow keys
+// Two-finger scroll look. macOS trackpads send many small fractional deltas (and inertia after
+// the fingers lift); a per-frame cap stops bursts jumping the view and a short low-pass evens out
+// the uneven event rate.
+constexpr float kScrollSensitivity = 0.02f; // radians per scroll unit
+constexpr float kMaxScrollPerFrame = 15.0f; // scroll units
+constexpr float kScrollSmoothing = 25.0f;   // 1/s
 constexpr float kOrbitSpeed = 0.05f;       // radians per second
 constexpr float kMaxStep = 0.1f;           // seconds; larger frame gaps are clamped
 constexpr float kTargetFallback = 20000.0f; // metres, when the view ray misses the ground
@@ -49,6 +55,7 @@ void CameraController::startFreeFly()
 {
     m_mode = Mode::FreeFly;
     m_velocity = glm::vec3(0.0f);
+    m_scrollTurn = glm::vec2(0.0f);
     keepAboveGround();
     updateNearPlane();
 }
@@ -91,9 +98,13 @@ void CameraController::updateFreeFly(Window& window, float dt)
     if (input.wasPressed(GLFW_KEY_TAB)) {
         window.setCursorCaptured(!window.cursorCaptured());
     }
-    if (input.scrollDelta() != 0.0f) {
-        m_baseSpeed = std::clamp(m_baseSpeed * std::pow(kSpeedStep, input.scrollDelta()), kMinSpeed,
-                                 kMaxSpeed);
+    const int faster = (input.wasPressed(GLFW_KEY_RIGHT_BRACKET) ? 1 : 0) +
+                       (input.wasPressed(GLFW_KEY_EQUAL) ? 1 : 0);
+    const int slower = (input.wasPressed(GLFW_KEY_LEFT_BRACKET) ? 1 : 0) +
+                       (input.wasPressed(GLFW_KEY_MINUS) ? 1 : 0);
+    if (faster != slower) {
+        m_baseSpeed = std::clamp(m_baseSpeed * std::pow(kSpeedStep, static_cast<float>(faster - slower)),
+                                 kMinSpeed, kMaxSpeed);
     }
 
     // Look: mouse while captured or with the right button held, plus arrow keys.
@@ -101,6 +112,17 @@ void CameraController::updateFreeFly(Window& window, float dt)
         m_camera.yaw += input.mouseDelta().x * kMouseSensitivity;
         m_camera.pitch -= input.mouseDelta().y * kMouseSensitivity;
     }
+    // Two-finger scroll drags the scene: fingers right turn the view left, fingers up tilt it down
+    // (with macOS natural scrolling). Converted to a rate so the smoothing is frame-rate independent.
+    if (dt > 0.0f) {
+        const glm::vec2 scroll = glm::clamp(input.scrollDelta(), glm::vec2(-kMaxScrollPerFrame),
+                                            glm::vec2(kMaxScrollPerFrame));
+        const glm::vec2 targetTurn = scroll * kScrollSensitivity / dt;
+        m_scrollTurn += (targetTurn - m_scrollTurn) * (1.0f - std::exp(-kScrollSmoothing * dt));
+        m_camera.yaw -= m_scrollTurn.x * dt;
+        m_camera.pitch += m_scrollTurn.y * dt;
+    }
+
     const auto axis = [&input](int positive, int negative) {
         return (input.isDown(positive) ? 1.0f : 0.0f) - (input.isDown(negative) ? 1.0f : 0.0f);
     };

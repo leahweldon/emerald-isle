@@ -12,8 +12,9 @@ namespace emerald {
 class Window;
 
 // Drives a Camera from input. Free-fly: WASD move, Q/E down/up, arrows turn and pitch, Shift
-// faster, scroll changes speed, mouse look with the right button held or after Tab captures the
-// cursor. Orbit: slow rotation around a target. C switches mode, P prints a --view preset line.
+// faster, [ ] or - = change speed, two-finger scroll (or wheel) turns, mouse look with the right
+// button held or after Tab captures the cursor. Orbit: slow rotation around a target.
+// C switches mode, P prints a --view preset line.
 class CameraController {
 public:
     enum class Mode { Orbit, FreeFly };
@@ -30,6 +31,7 @@ public:
     void update(Window& window, float deltaSeconds);
 
     Mode mode() const { return m_mode; }
+    float baseSpeed() const { return m_baseSpeed; } // metres per second, before Shift
 
     // The current pose as a ViewPreset initialiser line, for src/render/ViewPresets.cpp.
     std::string presetLine() const;
@@ -50,6 +52,7 @@ private:
     // Free-fly state.
     glm::vec3 m_velocity{0.0f};
     float m_baseSpeed = 300.0f; // metres per second
+    glm::vec2 m_scrollTurn{0.0f}; // smoothed scroll look rate, radians per second
 
     // Orbit state.
     glm::vec3 m_orbitTarget{0.0f};
