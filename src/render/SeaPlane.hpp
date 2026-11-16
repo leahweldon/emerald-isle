@@ -4,7 +4,7 @@
 
 namespace emerald {
 
-// Flat quad at y = 0, centred on the origin. Placeholder until the water pass.
+// Flat quad at y = 0. sea.vert centres it on the camera. Placeholder until the water pass.
 class SeaPlane {
 public:
     explicit SeaPlane(float halfSize);

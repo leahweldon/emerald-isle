@@ -8,8 +8,9 @@ uniform vec3 uCameraPos;
 uniform vec3 uSunDir;     // towards the sun, normalised
 uniform vec3 uSunColour;
 uniform vec3 uAmbient;
-uniform float uFogStart;
-uniform float uFogEnd;
+uniform vec3 uHorizonColour;
+uniform float uFogDensity;
+uniform float uFogFalloff;
 uniform float uExaggeration;
 
 const vec3 kSand     = vec3(0.76, 0.70, 0.52);
@@ -25,6 +26,19 @@ vec3 heightColour(float metres)
     return mix(c, kPeak, smoothstep(550.0, 800.0, metres));
 }
 
+// Height fog: optical depth of exponentially thinning air along the view ray.
+float fogAmount(vec3 cameraPos, vec3 worldPos)
+{
+    vec3 ray = worldPos - cameraPos;
+    float dist = length(ray);
+    float k = uFogFalloff;
+    float base = exp(-k * cameraPos.y);
+    float rise = k * ray.y;
+    // Integral of exp(-k * height) over the ray, divided by its length.
+    float avg = abs(rise) > 1e-4 ? (base - exp(-k * worldPos.y)) / rise : base;
+    return 1.0 - exp(-uFogDensity * dist * avg);
+}
+
 void main()
 {
     // Below sea level is covered by the sea plane.
@@ -38,7 +52,7 @@ void main()
     float diffuse = max(dot(n, uSunDir), 0.0);
     vec3 colour = heightColour(metres) * (uAmbient + uSunColour * diffuse);
 
-    // Fog is alpha: blending over the sky pass fades terrain into the sky behind it.
-    float fog = smoothstep(uFogStart, uFogEnd, length(vWorldPos - uCameraPos));
-    fragColour = vec4(colour, 1.0 - fog);
+    // Fog colour is the sky's horizon colour, so distant terrain meets the sky without a seam.
+    colour = mix(colour, uHorizonColour, fogAmount(uCameraPos, vWorldPos));
+    fragColour = vec4(colour, 1.0);
 }

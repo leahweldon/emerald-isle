@@ -21,10 +21,8 @@ namespace {
 
 constexpr float kOrbitSpeed = 0.05f; // radians per second
 
-// Metres. Fog ends inside the sea plane so its edge is never visible.
-constexpr float kFogStart = 500e3f;
-constexpr float kFogEnd = 1500e3f;
-constexpr float kSeaHalfSize = 2500e3f;
+// Metres. Far enough that height fog is opaque before the edge.
+constexpr float kSeaHalfSize = 10000e3f;
 // Caps per-frame motion so startup stalls do not jump the camera.
 constexpr float kMaxStepSeconds = 1.0f / 30.0f;
 
@@ -131,7 +129,7 @@ Application::Application(AppOptions options)
     m_camera.azimuth = -0.35f;
     // Near plane kept large for depth precision where the coast meets the sea.
     m_camera.nearPlane = 5e3f;
-    m_camera.farPlane = 3500e3f;
+    m_camera.farPlane = 15000e3f;
 }
 
 Application::~Application() = default;
@@ -190,9 +188,6 @@ void Application::render()
     glDepthMask(GL_TRUE);
     glEnable(GL_DEPTH_TEST);
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
     m_terrainShader->use();
     setSceneUniforms(*m_terrainShader);
     m_terrainShader->set("uExaggeration", m_terrain->verticalExaggeration());
@@ -205,8 +200,6 @@ void Application::render()
     glPolygonOffset(1.0f, 1.0f);
     m_sea->draw();
     glDisable(GL_POLYGON_OFFSET_FILL);
-
-    glDisable(GL_BLEND);
 }
 
 void Application::setSceneUniforms(Shader& shader)
@@ -215,8 +208,6 @@ void Application::setSceneUniforms(Shader& shader)
     shader.set("uProjection", m_camera.projection(m_window.aspectRatio()));
     shader.set("uCameraPos", m_camera.position());
     m_atmosphere.apply(shader);
-    shader.set("uFogStart", kFogStart);
-    shader.set("uFogEnd", kFogEnd);
 }
 
 void Application::updateTitle()

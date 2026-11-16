@@ -22,6 +22,8 @@ void Atmosphere::apply(Shader& shader) const
     shader.set("uAmbient", ambient);
     shader.set("uHorizonColour", horizonColour);
     shader.set("uZenithColour", zenithColour);
+    shader.set("uFogDensity", fogDensity);
+    shader.set("uFogFalloff", 1.0f / fogScaleHeight);
 }
 
 } // namespace emerald
