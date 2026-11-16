@@ -150,8 +150,10 @@ Application::Application(AppOptions options)
     m_sea = std::make_unique<SeaPlane>(kSeaHalfSize);
 
     const std::filesystem::path materialDir = m_options.assetDir / "textures" / "materials";
-    m_materialColour = std::make_unique<TextureArray>(materialFiles(materialDir, "Color"));
-    m_materialNormal = std::make_unique<TextureArray>(materialFiles(materialDir, "NormalGL"));
+    m_materialColour = std::make_unique<TextureArray>(materialFiles(materialDir, "Color"),
+                                                      TextureArray::Encoding::Srgb);
+    m_materialNormal = std::make_unique<TextureArray>(materialFiles(materialDir, "NormalGL"),
+                                                      TextureArray::Encoding::Linear);
     std::printf("Materials: %zu layers, anisotropy %.0fx\n", std::size(kMaterials),
                 static_cast<double>(m_materialColour->anisotropy()));
 

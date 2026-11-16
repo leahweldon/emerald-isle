@@ -13,8 +13,21 @@ uniform float uFogFalloff;
 uniform sampler2D uCoastMask;  // blurred land mask, see TerrainMesh::bindCoastMask
 uniform vec2 uTerrainSize;     // heightmap extent in XZ, metres
 
+// sRGB, converted in main().
 const vec3 kSea     = vec3(0.04, 0.20, 0.23);
 const vec3 kShallow = vec3(0.12, 0.36, 0.36); // matches terrain.frag
+
+vec3 srgbToLinear(vec3 c)
+{
+    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+
+// Lighting is linear; the default framebuffer expects sRGB.
+vec3 linearToSrgb(vec3 c)
+{
+    c = max(c, vec3(0.0));
+    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
 
 // Height fog: optical depth of exponentially thinning air along the view ray.
 float fogAmount(vec3 cameraPos, vec3 worldPos)
@@ -36,7 +49,7 @@ void main()
 
     // Shallower-looking water near land. No bathymetry, so distance to coast stands in for depth.
     float coast = texture(uCoastMask, vWorldPos.xz / uTerrainSize + 0.5).r;
-    vec3 water = mix(kSea, kShallow, smoothstep(0.02, 0.5, coast));
+    vec3 water = mix(srgbToLinear(kSea), srgbToLinear(kShallow), smoothstep(0.02, 0.5, coast));
 
     float diffuse = max(dot(n, uSunDir), 0.0);
     // Blinn-Phong glint from the sun.
@@ -45,5 +58,5 @@ void main()
 
     // Same fog as terrain.frag.
     colour = mix(colour, uHorizonColour, fogAmount(uCameraPos, vWorldPos));
-    fragColour = vec4(colour, 1.0);
+    fragColour = vec4(linearToSrgb(colour), 1.0);
 }

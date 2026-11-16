@@ -27,9 +27,11 @@ const float kTileNear = 2000.0;
 const float kTileFar  = 9000.0;
 const float kTileRock = 3000.0;
 
-const vec3 kHeathTint = vec3(0.50, 0.46, 0.36); // darkens Ground037 towards peat and heather
-const vec3 kShallow   = vec3(0.12, 0.36, 0.36); // matches sea.frag
-const vec3 kGrassTint = vec3(0.85, 1.00, 0.80); // lusher green
+// Linear-space multipliers on the decoded albedo.
+const vec3 kHeathTint = vec3(0.22, 0.18, 0.11); // darkens Ground037 towards peat and heather
+const vec3 kGrassTint = vec3(0.70, 1.00, 0.61); // lusher green
+const vec3 kRockTint  = vec3(1.80, 1.35, 0.95); // Rock058 is blue-grey; shift to warm grey-brown
+const vec3 kShallow   = vec3(0.12, 0.36, 0.36); // sRGB, matches sea.frag
 
 float hash(vec2 p)
 {
@@ -123,6 +125,18 @@ void sampleTriplanar(float layer, vec3 n, vec3 dPdx, vec3 dPdy, out vec3 colour,
              textureGrad(uMaterialColour, uvZ, gxZ, gyZ).rgb * w.z;
 }
 
+vec3 srgbToLinear(vec3 c)
+{
+    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+
+// Lighting is linear; the default framebuffer expects sRGB.
+vec3 linearToSrgb(vec3 c)
+{
+    c = max(c, vec3(0.0));
+    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+
 // Height fog: optical depth of exponentially thinning air along the view ray.
 float fogAmount(vec3 cameraPos, vec3 worldPos)
 {
@@ -189,7 +203,7 @@ void main()
     }
     if (wRock > kMinWeight) {
         sampleTriplanar(kRock, n, dPdx, dPdy, c, nm);
-        albedo += c * wRock;
+        albedo += c * kRockTint * wRock;
         normalSum += nm * wRock;
     }
     // Skipped weights are below kMinWeight; renormalise so they do not darken the result.
@@ -199,15 +213,15 @@ void main()
 
     // Large-scale colour variation hides repetition across the island.
     float macro = fbm(vWorldPos.xz / 40000.0 + 3.0);
-    albedo *= mix(vec3(0.85, 0.88, 0.82), vec3(1.10, 1.06, 0.95), macro);
+    albedo *= mix(vec3(0.70, 0.75, 0.65), vec3(1.23, 1.14, 0.89), macro);
 
     // Fade the last metres above sea level into shallow water to soften the pixel coastline.
-    albedo = mix(kShallow, albedo, smoothstep(0.0, 2.5, metres));
+    albedo = mix(srgbToLinear(kShallow), albedo, smoothstep(0.0, 2.5, metres));
 
     float diffuse = max(dot(shadingNormal, uSunDir), 0.0);
     vec3 colour = albedo * (uAmbient + uSunColour * diffuse);
 
     // Fog colour is the sky's horizon colour, so distant terrain meets the sky without a seam.
     colour = mix(colour, uHorizonColour, fogAmount(uCameraPos, vWorldPos));
-    fragColour = vec4(colour, 1.0);
+    fragColour = vec4(linearToSrgb(colour), 1.0);
 }

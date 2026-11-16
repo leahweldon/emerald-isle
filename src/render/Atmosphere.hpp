@@ -11,15 +11,16 @@ class Shader;
 glm::vec3 sunDirection(float bearingDegrees, float elevationDegrees);
 
 // Sun and sky parameters shared by every pass, so the visible sun matches the lighting.
+// Colours are authored in sRGB and converted to linear in apply(); shaders light in linear space.
 struct Atmosphere {
     glm::vec3 sunDir = sunDirection(225.0f, 22.0f); // south-west, low afternoon sun
     glm::vec3 sunColour{1.0f, 0.92f, 0.80f};
-    glm::vec3 ambient{0.30f, 0.34f, 0.40f};
+    glm::vec3 ambient{0.42f, 0.47f, 0.55f};
     glm::vec3 horizonColour{0.80f, 0.86f, 0.91f};
     glm::vec3 zenithColour{0.24f, 0.45f, 0.72f};
 
     // Height fog: density at sea level (per metre), falling off exponentially with altitude.
-    float fogDensity = 8e-6f;
+    float fogDensity = 5e-6f;
     float fogScaleHeight = 8000.0f;
 
     // Sets uSunDir, uSunColour, uAmbient, uHorizonColour, uZenithColour, uFogDensity and uFogFalloff.

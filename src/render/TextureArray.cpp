@@ -15,12 +15,12 @@ constexpr float kMaxAnisotropy = 8.0f;
 
 using Pixels = std::unique_ptr<stbi_uc, void (*)(void*)>;
 
-Pixels loadRgb(const std::filesystem::path& path, int& width, int& height)
+Pixels loadRgba(const std::filesystem::path& path, int& width, int& height)
 {
     // GL textures start at the bottom row; NormalGL maps assume that orientation.
     stbi_set_flip_vertically_on_load(1);
     int channels = 0;
-    Pixels pixels(stbi_load(path.string().c_str(), &width, &height, &channels, 3), stbi_image_free);
+    Pixels pixels(stbi_load(path.string().c_str(), &width, &height, &channels, 4), stbi_image_free);
     stbi_set_flip_vertically_on_load(0);
     if (!pixels) {
         throw std::runtime_error("Could not load texture " + path.string() + ": " +
@@ -31,8 +31,10 @@ Pixels loadRgb(const std::filesystem::path& path, int& width, int& height)
 
 } // namespace
 
-TextureArray::TextureArray(const std::vector<std::filesystem::path>& layers)
+TextureArray::TextureArray(const std::vector<std::filesystem::path>& layers, Encoding encoding)
 {
+    const GLint internalFormat = encoding == Encoding::Srgb ? GL_SRGB8_ALPHA8 : GL_RGBA8;
+
     if (layers.empty()) {
         throw std::invalid_argument("TextureArray needs at least one layer");
     }
@@ -46,12 +48,12 @@ TextureArray::TextureArray(const std::vector<std::filesystem::path>& layers)
     for (std::size_t i = 0; i < layers.size(); ++i) {
         int w = 0;
         int h = 0;
-        const Pixels pixels = loadRgb(layers[i], w, h);
+        const Pixels pixels = loadRgba(layers[i], w, h);
         if (i == 0) {
             width = w;
             height = h;
-            glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGB8, width, height,
-                         static_cast<GLsizei>(layers.size()), 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+            glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, internalFormat, width, height,
+                         static_cast<GLsizei>(layers.size()), 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
         } else if (w != width || h != height) {
             glDeleteTextures(1, &m_texture);
             throw std::runtime_error("Texture " + layers[i].string() + " is " + std::to_string(w) +
@@ -59,7 +61,7 @@ TextureArray::TextureArray(const std::vector<std::filesystem::path>& layers)
                                      std::to_string(width) + "x" + std::to_string(height));
         }
         glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, static_cast<GLint>(i), width, height, 1,
-                        GL_RGB, GL_UNSIGNED_BYTE, pixels.get());
+                        GL_RGBA, GL_UNSIGNED_BYTE, pixels.get());
     }
 
     glGenerateMipmap(GL_TEXTURE_2D_ARRAY);

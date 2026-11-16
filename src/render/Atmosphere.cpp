@@ -2,6 +2,8 @@
 
 #include "render/Shader.hpp"
 
+#include <glm/gtc/color_space.hpp>
+
 #include <cmath>
 
 namespace emerald {
@@ -18,10 +20,10 @@ glm::vec3 sunDirection(float bearingDegrees, float elevationDegrees)
 void Atmosphere::apply(Shader& shader) const
 {
     shader.set("uSunDir", sunDir);
-    shader.set("uSunColour", sunColour);
-    shader.set("uAmbient", ambient);
-    shader.set("uHorizonColour", horizonColour);
-    shader.set("uZenithColour", zenithColour);
+    shader.set("uSunColour", glm::convertSRGBToLinear(sunColour));
+    shader.set("uAmbient", glm::convertSRGBToLinear(ambient));
+    shader.set("uHorizonColour", glm::convertSRGBToLinear(horizonColour));
+    shader.set("uZenithColour", glm::convertSRGBToLinear(zenithColour));
     shader.set("uFogDensity", fogDensity);
     shader.set("uFogFalloff", 1.0f / fogScaleHeight);
 }

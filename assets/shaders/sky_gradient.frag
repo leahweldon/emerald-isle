@@ -9,6 +9,13 @@ uniform vec3 uSunColour;
 uniform vec3 uHorizonColour;
 uniform vec3 uZenithColour;
 
+// Lighting is linear; the default framebuffer expects sRGB.
+vec3 linearToSrgb(vec3 c)
+{
+    c = max(c, vec3(0.0));
+    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+
 void main()
 {
     // World-space view ray for this pixel.
@@ -24,5 +31,5 @@ void main()
     float glow = 0.35 * pow(max(cosAngle, 0.0), 300.0) + 0.12 * pow(max(cosAngle, 0.0), 12.0);
     colour += uSunColour * (glow + disc);
 
-    fragColour = vec4(colour, 1.0);
+    fragColour = vec4(linearToSrgb(colour), 1.0);
 }

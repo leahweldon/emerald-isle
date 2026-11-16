@@ -7,11 +7,14 @@
 
 namespace emerald {
 
-// GL_TEXTURE_2D_ARRAY of same-sized RGB images, one layer per file, with mipmaps,
+// GL_TEXTURE_2D_ARRAY of same-sized images, one layer per file, with mipmaps,
 // repeat wrapping and anisotropic filtering when the driver supports it.
 class TextureArray {
 public:
-    explicit TextureArray(const std::vector<std::filesystem::path>& layers);
+    // Srgb for colour maps (decoded to linear when sampled), Linear for data such as normal maps.
+    enum class Encoding { Srgb, Linear };
+
+    TextureArray(const std::vector<std::filesystem::path>& layers, Encoding encoding);
     ~TextureArray();
 
     TextureArray(const TextureArray&) = delete;
