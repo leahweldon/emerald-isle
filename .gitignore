@@ -13,3 +13,7 @@ cmake-build-*/
 *.png
 !docs/**/*.png
 !assets/**/*.png
+
+# Tool environments and downloaded data
+tools/.venv/
+tools/.cache/
