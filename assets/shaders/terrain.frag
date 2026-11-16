@@ -169,11 +169,18 @@ void main()
     float broad = fbm(vWorldPos.xz / 25000.0);
     float local = fbm(vWorldPos.xz / 6000.0 + 17.0);
 
+    float patches = fbm(vWorldPos.xz / 2500.0 + 5.0);
+
     float sand = 1.0 - smoothstep(2.0, 6.0 + 8.0 * local, metres);
     sand *= 1.0 - smoothstep(0.05, 0.15, slope);
-    float heath = smoothstep(180.0 + 120.0 * broad, 320.0 + 120.0 * broad, metres);
-    float rock = smoothstep(0.16 + 0.08 * (local - 0.5), 0.30, slope);
-    rock = max(rock, 0.7 * smoothstep(750.0, 900.0, metres));
+
+    // Heath follows slope and patch noise; height only nudges it, so summits get heath/grass mixes.
+    float heathScore = 3.0 * slope + 0.8 * (patches - 0.5) + 0.3 * (broad - 0.5) +
+                       0.5 * smoothstep(100.0, 500.0, metres);
+    float heath = smoothstep(0.35, 0.65, heathScore);
+
+    // Rock only on genuinely steep faces: roughly the steepest 0.6% of land on this mesh.
+    float rock = smoothstep(0.18, 0.30, slope + 0.04 * (local - 0.5));
 
     // Rock overrides everything; sand overrides grass and heath.
     float wRock = rock;
