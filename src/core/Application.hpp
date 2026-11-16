@@ -15,6 +15,7 @@ class SkyGradient;
 class TerrainMesh;
 class SeaPlane;
 class Shader;
+class TextureArray;
 
 struct AppOptions {
     WindowConfig window;
@@ -51,6 +52,8 @@ private:
     std::unique_ptr<SkyGradient> m_sky;
     std::unique_ptr<TerrainMesh> m_terrain;
     std::unique_ptr<Shader> m_terrainShader;
+    std::unique_ptr<TextureArray> m_materialColour;
+    std::unique_ptr<TextureArray> m_materialNormal;
     std::unique_ptr<SeaPlane> m_sea;
     std::unique_ptr<Shader> m_seaShader;
     Camera m_camera;

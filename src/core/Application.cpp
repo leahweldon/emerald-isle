@@ -5,6 +5,7 @@
 #include "render/SeaPlane.hpp"
 #include "render/SkyGradient.hpp"
 #include "render/TerrainMesh.hpp"
+#include "render/TextureArray.hpp"
 #include "render/ViewPresets.hpp"
 
 #include <glad/gl.h>
@@ -13,8 +14,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace emerald {
 
@@ -24,6 +27,20 @@ constexpr float kOrbitSpeed = 0.05f; // radians per second
 
 // Metres. Far enough that height fog is opaque before the edge.
 constexpr float kSeaHalfSize = 10000e3f;
+// Material layers, in the order terrain.frag indexes them (kGrass, kSand, kHeath, kRock).
+constexpr const char* kMaterials[] = {"Grass004", "Ground054", "Ground037", "Rock058"};
+constexpr GLuint kColourUnit = 0;
+constexpr GLuint kNormalUnit = 1;
+
+std::vector<std::filesystem::path> materialFiles(const std::filesystem::path& dir, const char* map)
+{
+    std::vector<std::filesystem::path> files;
+    for (const char* name : kMaterials) {
+        files.push_back(dir / (std::string(name) + "_1K-JPG_" + map + ".jpg"));
+    }
+    return files;
+}
+
 // Caps per-frame motion so startup stalls do not jump the camera.
 constexpr float kMaxStepSeconds = 1.0f / 30.0f;
 
@@ -131,6 +148,16 @@ Application::Application(AppOptions options)
         m_options.assetDir / "textures" / "ireland-heightmap.png", terrainConfig);
     m_sea = std::make_unique<SeaPlane>(kSeaHalfSize);
 
+    const std::filesystem::path materialDir = m_options.assetDir / "textures" / "materials";
+    m_materialColour = std::make_unique<TextureArray>(materialFiles(materialDir, "Color"));
+    m_materialNormal = std::make_unique<TextureArray>(materialFiles(materialDir, "NormalGL"));
+    std::printf("Materials: %zu layers, anisotropy %.0fx\n", std::size(kMaterials),
+                static_cast<double>(m_materialColour->anisotropy()));
+
+    m_terrainShader->use();
+    m_terrainShader->set("uMaterialColour", static_cast<int>(kColourUnit));
+    m_terrainShader->set("uMaterialNormal", static_cast<int>(kNormalUnit));
+
     // Default orbit starts from the overview preset.
     const std::string view = m_options.view.empty() ? "overview" : m_options.view;
     applyViewPreset(*findViewPreset(view), m_camera);
@@ -199,6 +226,8 @@ void Application::render()
     m_terrainShader->use();
     setSceneUniforms(*m_terrainShader);
     m_terrainShader->set("uExaggeration", m_terrain->verticalExaggeration());
+    m_materialColour->bind(kColourUnit);
+    m_materialNormal->bind(kNormalUnit);
     m_terrain->draw();
 
     // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.

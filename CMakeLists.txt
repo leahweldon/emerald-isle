@@ -73,6 +73,7 @@ add_executable(emerald-isle
     src/render/Shader.cpp
     src/render/SkyGradient.cpp
     src/render/TerrainMesh.cpp
+    src/render/TextureArray.cpp
     src/render/ViewPresets.cpp)
 
 target_include_directories(emerald-isle PRIVATE src)
