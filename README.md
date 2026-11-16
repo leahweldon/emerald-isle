@@ -6,7 +6,7 @@ A real-time terrain renderer of Ireland, written in C++17 and modern shader-base
 
 > **Work in progress.** This is a ground-up rebuild of my Year 4 Computer Graphics final project at Trinity College Dublin, *Toward a Futuristic Emerald Isle*. The original used legacy fixed-function OpenGL; this version is built on a programmable pipeline, runs on macOS, Windows and Linux, and implements the features the original only approximated.
 
-![Looking west-north-west from the Glenbeigh hills across Dingle Bay to the Dingle peninsula and the Atlantic (--view glenbeigh)](docs/images/hero.png)
+![MacGillycuddy's Reeks, Kerry, from the east, with per-pixel lighting, blended materials and height fog (--view kerry)](docs/images/hero.png)
 
 ## Roadmap
 
