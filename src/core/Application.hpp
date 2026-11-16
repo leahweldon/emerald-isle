@@ -24,6 +24,8 @@ struct AppOptions {
     std::string screenshotPath;
     // Heightmap sampling step; higher is faster and coarser.
     int terrainStep = 2;
+    // Fixed camera preset name; empty means the default slow orbit.
+    std::string view;
     std::filesystem::path assetDir;
 };
 

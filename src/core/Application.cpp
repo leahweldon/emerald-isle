@@ -5,6 +5,7 @@
 #include "render/SeaPlane.hpp"
 #include "render/SkyGradient.hpp"
 #include "render/TerrainMesh.hpp"
+#include "render/ViewPresets.hpp"
 
 #include <glad/gl.h>
 
@@ -37,8 +38,9 @@ void printUsage(const char* program)
         "  --frames <n>          Exit after rendering n frames\n"
         "  --screenshot <file>   Save the last frame as a PNG, then exit\n"
         "  --terrain-step <n>    Use every nth heightmap pixel (default 2)\n"
+        "  --view <name>         Fixed camera preset: %s\n"
         "  --help                Show this message\n",
-        EMERALD_VERSION, program);
+        EMERALD_VERSION, program, viewPresetNames().c_str());
 }
 
 int parsePositive(const char* flag, const char* value)
@@ -89,6 +91,12 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.screenshotPath = argv[++i];
         } else if (std::strcmp(arg, "--terrain-step") == 0 && hasValue) {
             options.terrainStep = parsePositive(arg, argv[++i]);
+        } else if (std::strcmp(arg, "--view") == 0 && hasValue) {
+            options.view = argv[++i];
+            if (!findViewPreset(options.view)) {
+                throw std::invalid_argument("Unknown view '" + options.view +
+                                            "' (available: " + viewPresetNames() + ")");
+            }
         } else {
             throw std::invalid_argument(std::string("Unknown or incomplete option: ") + arg +
                                         " (run with --help for usage)");
@@ -123,12 +131,9 @@ Application::Application(AppOptions options)
         m_options.assetDir / "textures" / "ireland-heightmap.png", terrainConfig);
     m_sea = std::make_unique<SeaPlane>(kSeaHalfSize);
 
-    // Low enough that the horizon is in view; starts south-east so the south-west sun side-lights.
-    m_camera.distance = 400e3f;
-    m_camera.elevation = 0.2f;
-    m_camera.azimuth = 0.8f;
-    // Near plane kept large for depth precision where the coast meets the sea.
-    m_camera.nearPlane = 5e3f;
+    // Default orbit starts from the overview preset.
+    const std::string view = m_options.view.empty() ? "overview" : m_options.view;
+    applyViewPreset(*findViewPreset(view), m_camera);
     m_camera.farPlane = 15000e3f;
 }
 
@@ -170,7 +175,10 @@ int Application::run()
 
 void Application::update(float deltaSeconds)
 {
-    m_camera.orbit(kOrbitSpeed * std::min(deltaSeconds, kMaxStepSeconds));
+    // Presets stay fixed so screenshots are reproducible.
+    if (m_options.view.empty()) {
+        m_camera.orbit(kOrbitSpeed * std::min(deltaSeconds, kMaxStepSeconds));
+    }
 }
 
 void Application::render()
