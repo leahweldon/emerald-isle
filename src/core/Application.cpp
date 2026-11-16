@@ -3,7 +3,7 @@
 #include "core/Screenshot.hpp"
 #include "render/Shader.hpp"
 #include "render/SeaPlane.hpp"
-#include "render/SkyGradient.hpp"
+#include "render/Sky.hpp"
 #include "render/TerrainMesh.hpp"
 #include "render/TextureArray.hpp"
 #include "render/ViewPresets.hpp"
@@ -140,7 +140,7 @@ Application::Application(AppOptions options)
     glCullFace(GL_BACK);
 
     const std::filesystem::path shaderDir = m_options.assetDir / "shaders";
-    m_sky = std::make_unique<SkyGradient>(shaderDir);
+    m_sky = std::make_unique<Sky>(shaderDir);
     m_terrainShader =
         std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "terrain.frag");
     m_seaShader = std::make_unique<Shader>(shaderDir / "sea.vert", shaderDir / "sea.frag");

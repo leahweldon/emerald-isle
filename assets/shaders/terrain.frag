@@ -133,6 +133,15 @@ void sampleTriplanar(float layer, vec3 n, vec3 dPdx, vec3 dPdy, out vec3 colour,
 }
 
 // Lighting is linear; the default framebuffer expects sRGB.
+// Display transform shared by every pass that writes to the screen: linear below 0.8, then a
+// smooth shoulder to 1 so the bright sky around the sun compresses instead of clipping.
+vec3 toneMap(vec3 c)
+{
+    const float knee = 0.8;
+    vec3 over = max(c - knee, 0.0);
+    return min(c, vec3(knee)) + (1.0 - knee) * (1.0 - exp(-over / (1.0 - knee)));
+}
+
 vec3 linearToSrgb(vec3 c)
 {
     c = max(c, vec3(0.0));
@@ -280,5 +289,5 @@ void main()
 
     // Fog colour is the sky's horizon colour, so distant terrain meets the sky without a seam.
     colour = mix(colour, uHorizonColour, fogAmount(uCameraPos, vWorldPos));
-    fragColour = vec4(linearToSrgb(colour), 1.0);
+    fragColour = vec4(linearToSrgb(toneMap(colour)), 1.0);
 }

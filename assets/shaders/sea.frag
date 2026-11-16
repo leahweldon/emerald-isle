@@ -19,6 +19,15 @@ const vec3 kSea     = vec3(0.004, 0.055, 0.085);
 const vec3 kShallow = vec3(0.020, 0.160, 0.150); // matches terrain.frag
 
 // Lighting is linear; the default framebuffer expects sRGB.
+// Display transform shared by every pass that writes to the screen: linear below 0.8, then a
+// smooth shoulder to 1 so the bright sky around the sun compresses instead of clipping.
+vec3 toneMap(vec3 c)
+{
+    const float knee = 0.8;
+    vec3 over = max(c - knee, 0.0);
+    return min(c, vec3(knee)) + (1.0 - knee) * (1.0 - exp(-over / (1.0 - knee)));
+}
+
 vec3 linearToSrgb(vec3 c)
 {
     c = max(c, vec3(0.0));
@@ -61,5 +70,5 @@ void main()
     float edge = smoothstep(0.0, 1.0, clamp((1.0 / nearEdge - 1.0 / d) /
                                             (1.0 / nearEdge - 1.0 / uSeaRadius), 0.0, 1.0));
     colour = mix(colour, uHorizonColour, max(fogAmount(uCameraPos, vWorldPos), edge));
-    fragColour = vec4(linearToSrgb(colour), 1.0);
+    fragColour = vec4(linearToSrgb(toneMap(colour)), 1.0);
 }

@@ -11,7 +11,7 @@
 
 namespace emerald {
 
-class SkyGradient;
+class Sky;
 class TerrainMesh;
 class SeaPlane;
 class Shader;
@@ -49,7 +49,7 @@ private:
     AppOptions m_options;
     Window m_window;
     FrameTimer m_timer;
-    std::unique_ptr<SkyGradient> m_sky;
+    std::unique_ptr<Sky> m_sky;
     std::unique_ptr<TerrainMesh> m_terrain;
     std::unique_ptr<Shader> m_terrainShader;
     std::unique_ptr<TextureArray> m_materialColour;

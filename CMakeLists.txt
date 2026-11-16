@@ -71,7 +71,7 @@ add_executable(emerald-isle
     src/render/Camera.cpp
     src/render/SeaPlane.cpp
     src/render/Shader.cpp
-    src/render/SkyGradient.cpp
+    src/render/Sky.cpp
     src/render/TerrainMesh.cpp
     src/render/TextureArray.cpp
     src/render/ViewPresets.cpp)
