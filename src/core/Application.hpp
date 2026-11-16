@@ -20,6 +20,8 @@ struct AppOptions {
     int frameLimit = 0;
     // When set, the final frame is saved to this PNG path before exiting.
     std::string screenshotPath;
+    // Heightmap sampling step; higher is faster and coarser.
+    int terrainStep = 2;
     std::filesystem::path assetDir;
 };
 
@@ -37,6 +39,7 @@ private:
     void update(float deltaSeconds);
     void render();
     void updateTitle();
+    void setSceneUniforms(Shader& shader);
 
     AppOptions m_options;
     Window m_window;

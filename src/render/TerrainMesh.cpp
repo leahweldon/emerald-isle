@@ -24,7 +24,7 @@ struct Vertex {
 struct Heightmap {
     int width = 0;
     int height = 0;
-    std::vector<float> values; // normalised to [0, 1]
+    std::vector<float> values; // world-space Y
 
     float at(int x, int y) const
     {
@@ -35,13 +35,13 @@ struct Heightmap {
     }
 };
 
-Heightmap loadHeightmap(const std::filesystem::path& path)
+Heightmap loadHeightmap(const std::filesystem::path& path, const TerrainConfig& config)
 {
     int width = 0;
     int height = 0;
     int channels = 0;
-    const std::unique_ptr<stbi_uc, void (*)(void*)> pixels(
-        stbi_load(path.string().c_str(), &width, &height, &channels, 1), stbi_image_free);
+    const std::unique_ptr<stbi_us, void (*)(void*)> pixels(
+        stbi_load_16(path.string().c_str(), &width, &height, &channels, 1), stbi_image_free);
     if (!pixels) {
         throw std::runtime_error("Could not load heightmap " + path.string() + ": " +
                                  stbi_failure_reason());
@@ -52,7 +52,10 @@ Heightmap loadHeightmap(const std::filesystem::path& path)
     map.height = height;
     map.values.resize(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
     for (std::size_t i = 0; i < map.values.size(); ++i) {
-        map.values[i] = static_cast<float>(pixels.get()[i]) / 255.0f;
+        const stbi_us raw = pixels.get()[i];
+        const float metres = raw == 0 ? -config.seaFloorDepth
+                                      : static_cast<float>(raw) * config.metresPerUnit;
+        map.values[i] = metres * config.verticalExaggeration;
     }
     return map;
 }
@@ -60,13 +63,13 @@ Heightmap loadHeightmap(const std::filesystem::path& path)
 } // namespace
 
 TerrainMesh::TerrainMesh(const std::filesystem::path& heightmapPath, const TerrainConfig& config)
-    : m_heightScale(config.heightScale)
+    : m_exaggeration(config.verticalExaggeration)
 {
-    if (config.sampleStep < 1 || config.horizontalSpacing <= 0.0f) {
-        throw std::invalid_argument("TerrainConfig: sampleStep must be >= 1 and spacing > 0");
+    if (config.sampleStep < 1 || config.metresPerPixel <= 0.0f) {
+        throw std::invalid_argument("TerrainConfig: sampleStep must be >= 1 and metresPerPixel > 0");
     }
 
-    const Heightmap map = loadHeightmap(heightmapPath);
+    const Heightmap map = loadHeightmap(heightmapPath, config);
     const int step = config.sampleStep;
     const int cols = (map.width - 1) / step + 1;
     const int rows = (map.height - 1) / step + 1;
@@ -74,7 +77,7 @@ TerrainMesh::TerrainMesh(const std::filesystem::path& heightmapPath, const Terra
         throw std::runtime_error("Heightmap is too small: " + heightmapPath.string());
     }
 
-    const float spacing = config.horizontalSpacing;
+    const float spacing = config.metresPerPixel;
     m_width = static_cast<float>(map.width - 1) * spacing;
     m_depth = static_cast<float>(map.height - 1) * spacing;
     const float originX = -0.5f * m_width;
@@ -88,13 +91,13 @@ TerrainMesh::TerrainMesh(const std::filesystem::path& heightmapPath, const Terra
             const int x = std::min(c * step, map.width - 1);
 
             // Central differences over neighbouring samples, in world units.
-            const float dx = (map.at(x + step, y) - map.at(x - step, y)) * config.heightScale;
-            const float dz = (map.at(x, y + step) - map.at(x, y - step)) * config.heightScale;
+            const float dx = map.at(x + step, y) - map.at(x - step, y);
+            const float dz = map.at(x, y + step) - map.at(x, y - step);
             const float run = 2.0f * static_cast<float>(step) * spacing;
 
             Vertex v;
             v.position = glm::vec3(originX + static_cast<float>(x) * spacing,
-                                   map.at(x, y) * config.heightScale,
+                                   map.at(x, y),
                                    originZ + static_cast<float>(y) * spacing);
             v.normal = glm::normalize(glm::vec3(-dx, run, -dz));
             vertices.push_back(v);
@@ -114,18 +117,6 @@ TerrainMesh::TerrainMesh(const std::filesystem::path& heightmapPath, const Terra
                                            topRight, bottomLeft, bottomRight});
         }
     }
-
-    // Sea quad extending past the heightmap so the grid border is never visible.
-    // Slightly below y = 0 to avoid z-fighting with the grid's own sea cells.
-    const float seaHalf = m_width;
-    const glm::vec3 up(0.0f, 1.0f, 0.0f);
-    const auto seaBase = static_cast<GLuint>(vertices.size());
-    vertices.push_back({glm::vec3(-seaHalf, -0.5f, -seaHalf), up});
-    vertices.push_back({glm::vec3(seaHalf, -0.5f, -seaHalf), up});
-    vertices.push_back({glm::vec3(-seaHalf, -0.5f, seaHalf), up});
-    vertices.push_back({glm::vec3(seaHalf, -0.5f, seaHalf), up});
-    indices.insert(indices.end(), {seaBase, seaBase + 2, seaBase + 1,
-                                   seaBase + 1, seaBase + 2, seaBase + 3});
 
     m_indexCount = static_cast<GLsizei>(indices.size());
 
