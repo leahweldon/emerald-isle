@@ -15,11 +15,11 @@ SkyGradient::~SkyGradient()
     glDeleteVertexArrays(1, &m_vao);
 }
 
-void SkyGradient::draw(float timeSeconds, const glm::vec2& resolution)
+void SkyGradient::draw(const glm::mat4& invViewProjRotation, const Atmosphere& atmosphere)
 {
     m_shader.use();
-    m_shader.set("uTime", timeSeconds);
-    m_shader.set("uResolution", resolution);
+    m_shader.set("uInvViewProjRotation", invViewProjRotation);
+    atmosphere.apply(m_shader);
 
     glBindVertexArray(m_vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);

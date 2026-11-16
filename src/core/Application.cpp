@@ -5,6 +5,8 @@
 #include "render/SeaPlane.hpp"
 #include "render/SkyGradient.hpp"
 #include "render/TerrainMesh.hpp"
+#include "render/TextureArray.hpp"
+#include "render/ViewPresets.hpp"
 
 #include <glad/gl.h>
 
@@ -12,21 +14,36 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace emerald {
 
 namespace {
 
-// Towards the sun: from the north-west, the usual relief-shading direction.
-const glm::vec3 kSunDir = glm::normalize(glm::vec3(-0.5f, 0.7f, -0.5f));
 constexpr float kOrbitSpeed = 0.05f; // radians per second
 
-// Metres. Fog ends inside the sea plane so its edge is never visible.
-constexpr float kFogStart = 500e3f;
-constexpr float kFogEnd = 1500e3f;
-constexpr float kSeaHalfSize = 2500e3f;
+// Metres. The sea plane reaches the far plane (corners at ~0.99x far) so it meets the horizon.
+constexpr float kFarPlane = 15000e3f;
+constexpr float kSeaHalfSize = 0.7f * kFarPlane;
+// Material layers, in the order terrain.frag indexes them (kGrass, kSand, kHeath, kRock).
+constexpr const char* kMaterials[] = {"Grass004", "Ground054", "Ground037", "Rock058"};
+constexpr GLuint kColourUnit = 0;
+constexpr GLuint kNormalUnit = 1;
+constexpr GLuint kCoastUnit = 2;
+constexpr GLuint kHeightUnit = 3;
+
+std::vector<std::filesystem::path> materialFiles(const std::filesystem::path& dir, const char* map)
+{
+    std::vector<std::filesystem::path> files;
+    for (const char* name : kMaterials) {
+        files.push_back(dir / (std::string(name) + "_1K-JPG_" + map + ".jpg"));
+    }
+    return files;
+}
+
 // Caps per-frame motion so startup stalls do not jump the camera.
 constexpr float kMaxStepSeconds = 1.0f / 30.0f;
 
@@ -41,8 +58,9 @@ void printUsage(const char* program)
         "  --frames <n>          Exit after rendering n frames\n"
         "  --screenshot <file>   Save the last frame as a PNG, then exit\n"
         "  --terrain-step <n>    Use every nth heightmap pixel (default 2)\n"
+        "  --view <name>         Fixed camera preset: %s\n"
         "  --help                Show this message\n",
-        EMERALD_VERSION, program);
+        EMERALD_VERSION, program, viewPresetNames().c_str());
 }
 
 int parsePositive(const char* flag, const char* value)
@@ -93,6 +111,12 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.screenshotPath = argv[++i];
         } else if (std::strcmp(arg, "--terrain-step") == 0 && hasValue) {
             options.terrainStep = parsePositive(arg, argv[++i]);
+        } else if (std::strcmp(arg, "--view") == 0 && hasValue) {
+            options.view = argv[++i];
+            if (!findViewPreset(options.view)) {
+                throw std::invalid_argument("Unknown view '" + options.view +
+                                            "' (available: " + viewPresetNames() + ")");
+            }
         } else {
             throw std::invalid_argument(std::string("Unknown or incomplete option: ") + arg +
                                         " (run with --help for usage)");
@@ -127,13 +151,31 @@ Application::Application(AppOptions options)
         m_options.assetDir / "textures" / "ireland-heightmap.png", terrainConfig);
     m_sea = std::make_unique<SeaPlane>(kSeaHalfSize);
 
-    // Low enough that the horizon is in view.
-    m_camera.distance = 520e3f;
-    m_camera.elevation = 0.3f;
-    m_camera.azimuth = -0.35f;
-    // Near plane kept large for depth precision where the coast meets the sea.
-    m_camera.nearPlane = 5e3f;
-    m_camera.farPlane = 3500e3f;
+    const std::filesystem::path materialDir = m_options.assetDir / "textures" / "materials";
+    m_materialColour = std::make_unique<TextureArray>(materialFiles(materialDir, "Color"),
+                                                      TextureArray::Encoding::Srgb);
+    m_materialNormal = std::make_unique<TextureArray>(materialFiles(materialDir, "NormalGL"),
+                                                      TextureArray::Encoding::Linear);
+    std::printf("Materials: %zu layers, %d mip levels, %s, anisotropy %.0fx\n",
+                std::size(kMaterials), m_materialColour->mipLevels(),
+                m_materialColour->trilinear() ? "trilinear" : "NOT trilinear",
+                static_cast<double>(m_materialColour->anisotropy()));
+
+    m_terrainShader->use();
+    m_terrainShader->set("uMaterialColour", static_cast<int>(kColourUnit));
+    m_terrainShader->set("uMaterialNormal", static_cast<int>(kNormalUnit));
+    m_terrainShader->set("uHeightTexture", static_cast<int>(kHeightUnit));
+    m_terrainShader->set("uHeightTextureSize", m_terrain->heightTextureSize());
+    m_terrainShader->set("uTexelSpacing", m_terrain->metresPerPixel());
+    m_seaShader->use();
+    m_seaShader->set("uCoastMask", static_cast<int>(kCoastUnit));
+    m_seaShader->set("uTerrainSize", glm::vec2(m_terrain->width(), m_terrain->depth()));
+    m_seaShader->set("uSeaRadius", kSeaHalfSize);
+
+    // Default orbit starts from the overview preset.
+    const std::string view = m_options.view.empty() ? "overview" : m_options.view;
+    applyViewPreset(*findViewPreset(view), m_camera);
+    m_camera.farPlane = kFarPlane;
 }
 
 Application::~Application() = default;
@@ -174,7 +216,10 @@ int Application::run()
 
 void Application::update(float deltaSeconds)
 {
-    m_camera.orbit(kOrbitSpeed * std::min(deltaSeconds, kMaxStepSeconds));
+    // Presets stay fixed so screenshots are reproducible.
+    if (m_options.view.empty()) {
+        m_camera.orbit(kOrbitSpeed * std::min(deltaSeconds, kMaxStepSeconds));
+    }
 }
 
 void Application::render()
@@ -182,33 +227,32 @@ void Application::render()
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    const glm::vec2 resolution(static_cast<float>(m_window.framebufferWidth()),
-                               static_cast<float>(m_window.framebufferHeight()));
+    const glm::mat4 projection = m_camera.projection(m_window.aspectRatio());
+    const glm::mat4 rotationOnly(glm::mat3(m_camera.view()));
 
     // Sky is a background pass: no depth test or write.
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
-    m_sky->draw(static_cast<float>(m_timer.elapsedSeconds()), resolution);
+    m_sky->draw(glm::inverse(projection * rotationOnly), m_atmosphere);
     glDepthMask(GL_TRUE);
     glEnable(GL_DEPTH_TEST);
-
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     m_terrainShader->use();
     setSceneUniforms(*m_terrainShader);
     m_terrainShader->set("uExaggeration", m_terrain->verticalExaggeration());
+    m_materialColour->bind(kColourUnit);
+    m_materialNormal->bind(kNormalUnit);
+    m_terrain->bindHeightTexture(kHeightUnit);
     m_terrain->draw();
 
     // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.
     m_seaShader->use();
     setSceneUniforms(*m_seaShader);
+    m_terrain->bindCoastMask(kCoastUnit);
     glEnable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(1.0f, 1.0f);
     m_sea->draw();
     glDisable(GL_POLYGON_OFFSET_FILL);
-
-    glDisable(GL_BLEND);
 }
 
 void Application::setSceneUniforms(Shader& shader)
@@ -216,11 +260,7 @@ void Application::setSceneUniforms(Shader& shader)
     shader.set("uView", m_camera.view());
     shader.set("uProjection", m_camera.projection(m_window.aspectRatio()));
     shader.set("uCameraPos", m_camera.position());
-    shader.set("uSunDir", kSunDir);
-    shader.set("uSunColour", glm::vec3(1.0f, 0.95f, 0.85f));
-    shader.set("uAmbient", glm::vec3(0.30f, 0.33f, 0.38f));
-    shader.set("uFogStart", kFogStart);
-    shader.set("uFogEnd", kFogEnd);
+    m_atmosphere.apply(shader, m_camera.position().y);
 }
 
 void Application::updateTitle()

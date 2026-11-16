@@ -67,11 +67,14 @@ add_executable(emerald-isle
     src/core/Window.cpp
     src/core/FrameTimer.cpp
     src/core/Screenshot.cpp
+    src/render/Atmosphere.cpp
     src/render/Camera.cpp
     src/render/SeaPlane.cpp
     src/render/Shader.cpp
     src/render/SkyGradient.cpp
-    src/render/TerrainMesh.cpp)
+    src/render/TerrainMesh.cpp
+    src/render/TextureArray.cpp
+    src/render/ViewPresets.cpp)
 
 target_include_directories(emerald-isle PRIVATE src)
 target_link_libraries(emerald-isle PRIVATE glfw glad glm::glm stb OpenGL::GL)
@@ -91,9 +94,10 @@ else()
     endif()
 endif()
 
-# Copy runtime assets next to the executable after every build
-add_custom_command(TARGET emerald-isle POST_BUILD
+# Copy runtime assets next to the executable on every build, so shader-only edits are picked up
+add_custom_target(emerald-assets ALL
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:emerald-isle>/assets"
     COMMENT "Copying assets"
     VERBATIM)
+add_dependencies(emerald-isle emerald-assets)

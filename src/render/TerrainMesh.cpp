@@ -16,11 +16,6 @@ namespace emerald {
 
 namespace {
 
-struct Vertex {
-    glm::vec3 position;
-    glm::vec3 normal;
-};
-
 struct Heightmap {
     int width = 0;
     int height = 0;
@@ -60,6 +55,57 @@ Heightmap loadHeightmap(const std::filesystem::path& path, const TerrainConfig& 
     return map;
 }
 
+// Fraction of land per block of factor x factor pixels, then two box-blur passes.
+std::vector<unsigned char> buildCoastMask(const Heightmap& map, int factor, int radius,
+                                          int& outWidth, int& outHeight)
+{
+    const int w = (map.width + factor - 1) / factor;
+    const int h = (map.height + factor - 1) / factor;
+    const auto index = [w](int x, int y) {
+        return static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x);
+    };
+
+    std::vector<float> mask(static_cast<std::size_t>(w) * static_cast<std::size_t>(h), 0.0f);
+    for (int y = 0; y < map.height; ++y) {
+        for (int x = 0; x < map.width; ++x) {
+            if (map.at(x, y) > 0.0f) {
+                mask[index(x / factor, y / factor)] += 1.0f / static_cast<float>(factor * factor);
+            }
+        }
+    }
+
+    std::vector<float> temp(mask.size());
+    const float norm = 1.0f / static_cast<float>(2 * radius + 1);
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                float sum = 0.0f;
+                for (int k = -radius; k <= radius; ++k) {
+                    sum += mask[index(std::clamp(x + k, 0, w - 1), y)];
+                }
+                temp[index(x, y)] = sum * norm;
+            }
+        }
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                float sum = 0.0f;
+                for (int k = -radius; k <= radius; ++k) {
+                    sum += temp[index(x, std::clamp(y + k, 0, h - 1))];
+                }
+                mask[index(x, y)] = sum * norm;
+            }
+        }
+    }
+
+    std::vector<unsigned char> bytes(mask.size());
+    for (std::size_t i = 0; i < mask.size(); ++i) {
+        bytes[i] = static_cast<unsigned char>(std::clamp(mask[i], 0.0f, 1.0f) * 255.0f + 0.5f);
+    }
+    outWidth = w;
+    outHeight = h;
+    return bytes;
+}
+
 } // namespace
 
 TerrainMesh::TerrainMesh(const std::filesystem::path& heightmapPath, const TerrainConfig& config)
@@ -83,24 +129,14 @@ TerrainMesh::TerrainMesh(const std::filesystem::path& heightmapPath, const Terra
     const float originX = -0.5f * m_width;
     const float originZ = -0.5f * m_depth;
 
-    std::vector<Vertex> vertices;
+    std::vector<glm::vec3> vertices;
     vertices.reserve(static_cast<std::size_t>(cols) * static_cast<std::size_t>(rows));
     for (int r = 0; r < rows; ++r) {
         const int y = std::min(r * step, map.height - 1);
         for (int c = 0; c < cols; ++c) {
             const int x = std::min(c * step, map.width - 1);
-
-            // Central differences over neighbouring samples, in world units.
-            const float dx = map.at(x + step, y) - map.at(x - step, y);
-            const float dz = map.at(x, y + step) - map.at(x, y - step);
-            const float run = 2.0f * static_cast<float>(step) * spacing;
-
-            Vertex v;
-            v.position = glm::vec3(originX + static_cast<float>(x) * spacing,
-                                   map.at(x, y),
-                                   originZ + static_cast<float>(y) * spacing);
-            v.normal = glm::normalize(glm::vec3(-dx, run, -dz));
-            vertices.push_back(v);
+            vertices.emplace_back(originX + static_cast<float>(x) * spacing, map.at(x, y),
+                                  originZ + static_cast<float>(y) * spacing);
         }
     }
 
@@ -126,19 +162,45 @@ TerrainMesh::TerrainMesh(const std::filesystem::path& heightmapPath, const Terra
 
     glBindVertexArray(m_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertices.size() * sizeof(Vertex)),
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertices.size() * sizeof(glm::vec3)),
                  vertices.data(), GL_STATIC_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(indices.size() * sizeof(GLuint)),
                  indices.data(), GL_STATIC_DRAW);
 
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
-                          reinterpret_cast<const void*>(offsetof(Vertex, position)));
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
-                          reinterpret_cast<const void*>(offsetof(Vertex, normal)));
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), nullptr);
     glBindVertexArray(0);
+
+    glGenTextures(1, &m_heightTexture);
+    glBindTexture(GL_TEXTURE_2D, m_heightTexture);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, map.width, map.height, 0, GL_RED, GL_FLOAT,
+                 map.values.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    m_heightTextureSize = glm::vec2(static_cast<float>(map.width), static_cast<float>(map.height));
+    m_metresPerPixel = spacing;
+
+    // About 920 m per texel, blurred over roughly 4-5 km.
+    int maskWidth = 0;
+    int maskHeight = 0;
+    const std::vector<unsigned char> coast = buildCoastMask(map, 4, 2, maskWidth, maskHeight);
+    glGenTextures(1, &m_coastMask);
+    glBindTexture(GL_TEXTURE_2D, m_coastMask);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, maskWidth, maskHeight, 0, GL_RED, GL_UNSIGNED_BYTE,
+                 coast.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // Outside the heightmap is open sea: border value 0 rather than repeating edge texels.
+    const GLfloat border[] = {0.0f, 0.0f, 0.0f, 0.0f};
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
+    glBindTexture(GL_TEXTURE_2D, 0);
 
     std::printf("Terrain: %dx%d grid, %d triangles\n", cols, rows, m_indexCount / 3);
 }
@@ -148,6 +210,8 @@ TerrainMesh::~TerrainMesh()
     glDeleteBuffers(1, &m_ebo);
     glDeleteBuffers(1, &m_vbo);
     glDeleteVertexArrays(1, &m_vao);
+    glDeleteTextures(1, &m_coastMask);
+    glDeleteTextures(1, &m_heightTexture);
 }
 
 void TerrainMesh::draw() const
@@ -155,6 +219,18 @@ void TerrainMesh::draw() const
     glBindVertexArray(m_vao);
     glDrawElements(GL_TRIANGLES, m_indexCount, GL_UNSIGNED_INT, nullptr);
     glBindVertexArray(0);
+}
+
+void TerrainMesh::bindCoastMask(GLuint unit) const
+{
+    glActiveTexture(GL_TEXTURE0 + unit);
+    glBindTexture(GL_TEXTURE_2D, m_coastMask);
+}
+
+void TerrainMesh::bindHeightTexture(GLuint unit) const
+{
+    glActiveTexture(GL_TEXTURE0 + unit);
+    glBindTexture(GL_TEXTURE_2D, m_heightTexture);
 }
 
 } // namespace emerald

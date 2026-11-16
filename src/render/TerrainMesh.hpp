@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glad/gl.h>
+#include <glm/glm.hpp>
 
 #include <filesystem>
 
@@ -11,7 +12,7 @@ constexpr float kHeightmapMetresPerPixel = 230.0f;
 constexpr float kHeightmapMetresPerUnit = 0.02f;
 
 // Relief is hard to read at true scale from orbit.
-constexpr float kVerticalExaggeration = 1.5f;
+constexpr float kVerticalExaggeration = 2.5f;
 
 // World units are metres.
 struct TerrainConfig {
@@ -25,6 +26,8 @@ struct TerrainConfig {
 };
 
 // Indexed triangle grid built from a 16-bit heightmap, centred on the origin in XZ.
+// Positions only: normals are computed per pixel from the height texture, so lighting does not
+// depend on the mesh step.
 class TerrainMesh {
 public:
     TerrainMesh(const std::filesystem::path& heightmapPath, const TerrainConfig& config);
@@ -35,6 +38,16 @@ public:
 
     void draw() const;
 
+    // Blurred land mask over the heightmap extent (R8, 1 = land), for shallow-water shading.
+    // Row 0 is north (-Z); sample at uv = xz / (width, depth) + 0.5.
+    void bindCoastMask(GLuint unit) const;
+
+    // Full-resolution world-space heights (R32F, linear filtering), texel centres on the grid.
+    // Sample at uv = xz / (metresPerPixel * heightTextureSize) + 0.5.
+    void bindHeightTexture(GLuint unit) const;
+    glm::vec2 heightTextureSize() const { return m_heightTextureSize; }
+    float metresPerPixel() const { return m_metresPerPixel; }
+
     float verticalExaggeration() const { return m_exaggeration; }
     float width() const { return m_width; }
     float depth() const { return m_depth; }
@@ -43,6 +56,10 @@ private:
     GLuint m_vao = 0;
     GLuint m_vbo = 0;
     GLuint m_ebo = 0;
+    GLuint m_coastMask = 0;
+    GLuint m_heightTexture = 0;
+    glm::vec2 m_heightTextureSize{0.0f};
+    float m_metresPerPixel = 0.0f;
     GLsizei m_indexCount = 0;
     float m_exaggeration = 1.0f;
     float m_width = 0.0f;

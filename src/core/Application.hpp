@@ -2,6 +2,7 @@
 
 #include "core/FrameTimer.hpp"
 #include "core/Window.hpp"
+#include "render/Atmosphere.hpp"
 #include "render/Camera.hpp"
 
 #include <filesystem>
@@ -14,6 +15,7 @@ class SkyGradient;
 class TerrainMesh;
 class SeaPlane;
 class Shader;
+class TextureArray;
 
 struct AppOptions {
     WindowConfig window;
@@ -23,6 +25,8 @@ struct AppOptions {
     std::string screenshotPath;
     // Heightmap sampling step; higher is faster and coarser.
     int terrainStep = 2;
+    // Fixed camera preset name; empty means the default slow orbit.
+    std::string view;
     std::filesystem::path assetDir;
 };
 
@@ -48,9 +52,12 @@ private:
     std::unique_ptr<SkyGradient> m_sky;
     std::unique_ptr<TerrainMesh> m_terrain;
     std::unique_ptr<Shader> m_terrainShader;
+    std::unique_ptr<TextureArray> m_materialColour;
+    std::unique_ptr<TextureArray> m_materialNormal;
     std::unique_ptr<SeaPlane> m_sea;
     std::unique_ptr<Shader> m_seaShader;
     Camera m_camera;
+    Atmosphere m_atmosphere;
     int m_frameCount = 0;
 };
 
