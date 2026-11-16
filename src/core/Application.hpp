@@ -12,6 +12,7 @@ namespace emerald {
 
 class SkyGradient;
 class TerrainMesh;
+class SeaPlane;
 class Shader;
 
 struct AppOptions {
@@ -47,6 +48,8 @@ private:
     std::unique_ptr<SkyGradient> m_sky;
     std::unique_ptr<TerrainMesh> m_terrain;
     std::unique_ptr<Shader> m_terrainShader;
+    std::unique_ptr<SeaPlane> m_sea;
+    std::unique_ptr<Shader> m_seaShader;
     Camera m_camera;
     int m_frameCount = 0;
 };

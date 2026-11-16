@@ -27,6 +27,11 @@ vec3 heightColour(float metres)
 
 void main()
 {
+    // Below sea level is covered by the sea plane.
+    if (vWorldPos.y < 0.0) {
+        discard;
+    }
+
     vec3 n = normalize(vNormal);
     float metres = vWorldPos.y / uExaggeration;
 

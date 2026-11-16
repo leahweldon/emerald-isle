@@ -2,6 +2,7 @@
 
 #include "core/Screenshot.hpp"
 #include "render/Shader.hpp"
+#include "render/SeaPlane.hpp"
 #include "render/SkyGradient.hpp"
 #include "render/TerrainMesh.hpp"
 
@@ -22,9 +23,10 @@ namespace {
 const glm::vec3 kSunDir = glm::normalize(glm::vec3(-0.5f, 0.7f, -0.5f));
 constexpr float kOrbitSpeed = 0.05f; // radians per second
 
-// Metres.
+// Metres. Fog ends inside the sea plane so its edge is never visible.
 constexpr float kFogStart = 500e3f;
 constexpr float kFogEnd = 1500e3f;
+constexpr float kSeaHalfSize = 2500e3f;
 // Caps per-frame motion so startup stalls do not jump the camera.
 constexpr float kMaxStepSeconds = 1.0f / 30.0f;
 
@@ -117,10 +119,13 @@ Application::Application(AppOptions options)
     m_sky = std::make_unique<SkyGradient>(shaderDir);
     m_terrainShader =
         std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "terrain.frag");
+    m_seaShader = std::make_unique<Shader>(shaderDir / "sea.vert", shaderDir / "sea.frag");
+
     TerrainConfig terrainConfig;
     terrainConfig.sampleStep = m_options.terrainStep;
     m_terrain = std::make_unique<TerrainMesh>(
         m_options.assetDir / "textures" / "ireland-heightmap.png", terrainConfig);
+    m_sea = std::make_unique<SeaPlane>(kSeaHalfSize);
 
     // Low enough that the horizon is in view.
     m_camera.distance = 520e3f;
@@ -194,6 +199,14 @@ void Application::render()
     setSceneUniforms(*m_terrainShader);
     m_terrainShader->set("uExaggeration", m_terrain->verticalExaggeration());
     m_terrain->draw();
+
+    // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.
+    m_seaShader->use();
+    setSceneUniforms(*m_seaShader);
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(1.0f, 1.0f);
+    m_sea->draw();
+    glDisable(GL_POLYGON_OFFSET_FILL);
 
     glDisable(GL_BLEND);
 }
