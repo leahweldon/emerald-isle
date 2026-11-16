@@ -2,6 +2,7 @@
 
 #include "core/Screenshot.hpp"
 #include "render/Shader.hpp"
+#include "render/SeaPlane.hpp"
 #include "render/SkyGradient.hpp"
 #include "render/TerrainMesh.hpp"
 
@@ -21,6 +22,11 @@ namespace {
 // Towards the sun: from the north-west, the usual relief-shading direction.
 const glm::vec3 kSunDir = glm::normalize(glm::vec3(-0.5f, 0.7f, -0.5f));
 constexpr float kOrbitSpeed = 0.05f; // radians per second
+
+// Metres. Fog ends inside the sea plane so its edge is never visible.
+constexpr float kFogStart = 500e3f;
+constexpr float kFogEnd = 1500e3f;
+constexpr float kSeaHalfSize = 2500e3f;
 // Caps per-frame motion so startup stalls do not jump the camera.
 constexpr float kMaxStepSeconds = 1.0f / 30.0f;
 
@@ -34,6 +40,7 @@ void printUsage(const char* program)
         "  --no-vsync            Render as fast as possible, to measure frame rate\n"
         "  --frames <n>          Exit after rendering n frames\n"
         "  --screenshot <file>   Save the last frame as a PNG, then exit\n"
+        "  --terrain-step <n>    Use every nth heightmap pixel (default 2)\n"
         "  --help                Show this message\n",
         EMERALD_VERSION, program);
 }
@@ -84,6 +91,8 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.frameLimit = parsePositive(arg, argv[++i]);
         } else if (std::strcmp(arg, "--screenshot") == 0 && hasValue) {
             options.screenshotPath = argv[++i];
+        } else if (std::strcmp(arg, "--terrain-step") == 0 && hasValue) {
+            options.terrainStep = parsePositive(arg, argv[++i]);
         } else {
             throw std::invalid_argument(std::string("Unknown or incomplete option: ") + arg +
                                         " (run with --help for usage)");
@@ -110,12 +119,21 @@ Application::Application(AppOptions options)
     m_sky = std::make_unique<SkyGradient>(shaderDir);
     m_terrainShader =
         std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "terrain.frag");
-    m_terrain = std::make_unique<TerrainMesh>(
-        m_options.assetDir / "textures" / "ireland-heightmap.png", TerrainConfig{});
+    m_seaShader = std::make_unique<Shader>(shaderDir / "sea.vert", shaderDir / "sea.frag");
 
-    m_camera.distance = 1100.0f;
-    m_camera.elevation = 0.6f;
+    TerrainConfig terrainConfig;
+    terrainConfig.sampleStep = m_options.terrainStep;
+    m_terrain = std::make_unique<TerrainMesh>(
+        m_options.assetDir / "textures" / "ireland-heightmap.png", terrainConfig);
+    m_sea = std::make_unique<SeaPlane>(kSeaHalfSize);
+
+    // Low enough that the horizon is in view.
+    m_camera.distance = 520e3f;
+    m_camera.elevation = 0.3f;
     m_camera.azimuth = -0.35f;
+    // Near plane kept large for depth precision where the coast meets the sea.
+    m_camera.nearPlane = 5e3f;
+    m_camera.farPlane = 3500e3f;
 }
 
 Application::~Application() = default;
@@ -174,22 +192,35 @@ void Application::render()
     glDepthMask(GL_TRUE);
     glEnable(GL_DEPTH_TEST);
 
-    m_terrainShader->use();
-    m_terrainShader->set("uView", m_camera.view());
-    m_terrainShader->set("uProjection", m_camera.projection(m_window.aspectRatio()));
-    m_terrainShader->set("uCameraPos", m_camera.position());
-    m_terrainShader->set("uSunDir", kSunDir);
-    m_terrainShader->set("uSunColour", glm::vec3(1.0f, 0.95f, 0.85f));
-    m_terrainShader->set("uAmbient", glm::vec3(0.30f, 0.33f, 0.38f));
-    m_terrainShader->set("uFogStart", 1000.0f);
-    m_terrainShader->set("uFogEnd", 2300.0f);
-    m_terrainShader->set("uHeightScale", m_terrain->heightScale());
-    m_terrainShader->set("uEdgeFade", glm::vec2(0.45f, 0.95f) * m_terrain->width());
-
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    m_terrainShader->use();
+    setSceneUniforms(*m_terrainShader);
+    m_terrainShader->set("uExaggeration", m_terrain->verticalExaggeration());
     m_terrain->draw();
+
+    // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.
+    m_seaShader->use();
+    setSceneUniforms(*m_seaShader);
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(1.0f, 1.0f);
+    m_sea->draw();
+    glDisable(GL_POLYGON_OFFSET_FILL);
+
     glDisable(GL_BLEND);
+}
+
+void Application::setSceneUniforms(Shader& shader)
+{
+    shader.set("uView", m_camera.view());
+    shader.set("uProjection", m_camera.projection(m_window.aspectRatio()));
+    shader.set("uCameraPos", m_camera.position());
+    shader.set("uSunDir", kSunDir);
+    shader.set("uSunColour", glm::vec3(1.0f, 0.95f, 0.85f));
+    shader.set("uAmbient", glm::vec3(0.30f, 0.33f, 0.38f));
+    shader.set("uFogStart", kFogStart);
+    shader.set("uFogEnd", kFogEnd);
 }
 
 void Application::updateTitle()

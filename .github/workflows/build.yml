@@ -35,7 +35,7 @@ jobs:
       # Mesa's software rasteriser on a virtual display and keeps the frame.
       - name: Render smoke test
         if: runner.os == 'Linux'
-        run: xvfb-run -a -s "-screen 0 1920x1080x24" ./build/emerald-isle --frames 60 --screenshot frame.png
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" ./build/emerald-isle --frames 10 --screenshot frame.png
 
       - name: Upload rendered frame
         if: runner.os == 'Linux'

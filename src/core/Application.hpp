@@ -12,6 +12,7 @@ namespace emerald {
 
 class SkyGradient;
 class TerrainMesh;
+class SeaPlane;
 class Shader;
 
 struct AppOptions {
@@ -20,6 +21,8 @@ struct AppOptions {
     int frameLimit = 0;
     // When set, the final frame is saved to this PNG path before exiting.
     std::string screenshotPath;
+    // Heightmap sampling step; higher is faster and coarser.
+    int terrainStep = 2;
     std::filesystem::path assetDir;
 };
 
@@ -37,6 +40,7 @@ private:
     void update(float deltaSeconds);
     void render();
     void updateTitle();
+    void setSceneUniforms(Shader& shader);
 
     AppOptions m_options;
     Window m_window;
@@ -44,6 +48,8 @@ private:
     std::unique_ptr<SkyGradient> m_sky;
     std::unique_ptr<TerrainMesh> m_terrain;
     std::unique_ptr<Shader> m_terrainShader;
+    std::unique_ptr<SeaPlane> m_sea;
+    std::unique_ptr<Shader> m_seaShader;
     Camera m_camera;
     int m_frameCount = 0;
 };

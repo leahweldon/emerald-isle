@@ -6,7 +6,7 @@ A real-time terrain renderer of Ireland, written in C++17 and modern shader-base
 
 > **Work in progress.** This is a ground-up rebuild of my Year 4 Computer Graphics final project at Trinity College Dublin, *Toward a Futuristic Emerald Isle*. The original used legacy fixed-function OpenGL; this version is built on a programmable pipeline, runs on macOS, Windows and Linux, and implements the features the original only approximated.
 
-![Milestone 2: heightmap terrain of Ireland with directional lighting and fog](docs/images/milestone-02.png)
+![Milestone 2: Copernicus DEM terrain of Ireland with directional lighting, sea and fog](docs/images/milestone-02.png)
 
 ## Roadmap
 
@@ -51,6 +51,7 @@ build\Release\emerald-isle.exe       # Windows (Visual Studio generator)
 | `--no-vsync` | Render as fast as possible, to measure frame rate |
 | `--frames <n>` | Exit after rendering *n* frames |
 | `--screenshot <file>` | Save the final frame as a PNG, then exit |
+| `--terrain-step <n>` | Use every *n*th heightmap pixel (default 2); higher is faster |
 
 The window title shows the averaged frame rate and frame time. Press **Esc** to quit.
 
@@ -62,10 +63,17 @@ src/
   render/   shaders, camera, terrain mesh and render passes
 assets/
   shaders/  GLSL source
-  textures/ Ireland heightmap
+  textures/ Ireland heightmap (16-bit, built by tools/make_heightmap.py)
+tools/      data preparation scripts
 external/
   glad/     OpenGL 3.3 core loader (generated with glad2)
 ```
+
+## Data
+
+The terrain is built from Copernicus DEM GLO-90, reprojected to Irish Transverse Mercator. See [tools/README.md](tools/README.md) to regenerate it.
+
+Contains modified Copernicus DEM data, © DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018, provided under COPERNICUS by the European Union and ESA.
 
 ## Built with
 

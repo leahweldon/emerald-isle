@@ -17,7 +17,7 @@ void main()
     vec3 colour = mix(kHorizon, kZenith, pow(height, 0.7));
 
     // A soft sun that drifts slowly across the sky, corrected for aspect ratio.
-    vec2 sunPos = vec2(0.5 + 0.3 * sin(uTime * 0.1), 0.62);
+    vec2 sunPos = vec2(0.5 + 0.3 * sin(uTime * 0.1), 0.8);
     vec2 offset = (vUv - sunPos) * vec2(uResolution.x / uResolution.y, 1.0);
     float glow = exp(-dot(offset, offset) * 18.0);
     float disc = smoothstep(0.035, 0.03, length(offset));
