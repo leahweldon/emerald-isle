@@ -1,10 +1,13 @@
 #include "core/Application.hpp"
 
 #include "core/Screenshot.hpp"
+#include "render/Shader.hpp"
 #include "render/SkyGradient.hpp"
+#include "render/TerrainMesh.hpp"
 
 #include <glad/gl.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -14,6 +17,12 @@
 namespace emerald {
 
 namespace {
+
+// Towards the sun: from the north-west, the usual relief-shading direction.
+const glm::vec3 kSunDir = glm::normalize(glm::vec3(-0.5f, 0.7f, -0.5f));
+constexpr float kOrbitSpeed = 0.05f; // radians per second
+// Caps per-frame motion so startup stalls do not jump the camera.
+constexpr float kMaxStepSeconds = 1.0f / 30.0f;
 
 void printUsage(const char* program)
 {
@@ -94,8 +103,19 @@ Application::Application(AppOptions options)
 {
     glViewport(0, 0, m_window.framebufferWidth(), m_window.framebufferHeight());
     glEnable(GL_MULTISAMPLE);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
 
-    m_sky = std::make_unique<SkyGradient>(m_options.assetDir / "shaders");
+    const std::filesystem::path shaderDir = m_options.assetDir / "shaders";
+    m_sky = std::make_unique<SkyGradient>(shaderDir);
+    m_terrainShader =
+        std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "terrain.frag");
+    m_terrain = std::make_unique<TerrainMesh>(
+        m_options.assetDir / "textures" / "ireland-heightmap.png", TerrainConfig{});
+
+    m_camera.distance = 1100.0f;
+    m_camera.elevation = 0.6f;
+    m_camera.azimuth = -0.35f;
 }
 
 Application::~Application() = default;
@@ -134,9 +154,9 @@ int Application::run()
     return EXIT_SUCCESS;
 }
 
-void Application::update(float /*deltaSeconds*/)
+void Application::update(float deltaSeconds)
 {
-    // Scene updates (camera, terrain streaming, animation) arrive in later milestones.
+    m_camera.orbit(kOrbitSpeed * std::min(deltaSeconds, kMaxStepSeconds));
 }
 
 void Application::render()
@@ -146,7 +166,30 @@ void Application::render()
 
     const glm::vec2 resolution(static_cast<float>(m_window.framebufferWidth()),
                                static_cast<float>(m_window.framebufferHeight()));
+
+    // Sky is a background pass: no depth test or write.
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
     m_sky->draw(static_cast<float>(m_timer.elapsedSeconds()), resolution);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_DEPTH_TEST);
+
+    m_terrainShader->use();
+    m_terrainShader->set("uView", m_camera.view());
+    m_terrainShader->set("uProjection", m_camera.projection(m_window.aspectRatio()));
+    m_terrainShader->set("uCameraPos", m_camera.position());
+    m_terrainShader->set("uSunDir", kSunDir);
+    m_terrainShader->set("uSunColour", glm::vec3(1.0f, 0.95f, 0.85f));
+    m_terrainShader->set("uAmbient", glm::vec3(0.30f, 0.33f, 0.38f));
+    m_terrainShader->set("uFogStart", 1000.0f);
+    m_terrainShader->set("uFogEnd", 2300.0f);
+    m_terrainShader->set("uHeightScale", m_terrain->heightScale());
+    m_terrainShader->set("uEdgeFade", glm::vec2(0.45f, 0.95f) * m_terrain->width());
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    m_terrain->draw();
+    glDisable(GL_BLEND);
 }
 
 void Application::updateTitle()

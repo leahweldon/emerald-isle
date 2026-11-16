@@ -1,15 +1,17 @@
 # Emerald Isle
 
+[![Build](https://github.com/leahweldon/emerald-isle/actions/workflows/build.yml/badge.svg)](https://github.com/leahweldon/emerald-isle/actions/workflows/build.yml)
+
 A real-time terrain renderer of Ireland, written in C++17 and modern shader-based OpenGL.
 
 > **Work in progress.** This is a ground-up rebuild of my Year 4 Computer Graphics final project at Trinity College Dublin, *Toward a Futuristic Emerald Isle*. The original used legacy fixed-function OpenGL; this version is built on a programmable pipeline, runs on macOS, Windows and Linux, and implements the features the original only approximated.
 
-![Milestone 1: window, shader pipeline and procedural sky](docs/images/milestone-01.png)
+![Milestone 2: heightmap terrain of Ireland with directional lighting and fog](docs/images/milestone-02.png)
 
 ## Roadmap
 
 - [x] **1. Foundations:** cross-platform build, OpenGL 3.3 core context, shader loading, FPS display, CI
-- [ ] **2. Terrain:** mesh generated from an Ireland heightmap, with per-vertex normals and directional lighting
+- [x] **2. Terrain:** mesh generated from an Ireland heightmap, with per-vertex normals and directional lighting
 - [ ] **3. Surface materials:** grass, rock and sand blended by height and slope
 - [ ] **4. Sky and camera:** cubemap sky and a free-fly camera
 - [ ] **5. Infinite world:** terrain chunks streamed around the camera, with level of detail
@@ -57,9 +59,10 @@ The window title shows the averaged frame rate and frame time. Press **Esc** to 
 ```text
 src/
   core/     window and context, frame timing, application loop, screenshots
-  render/   shader programs and render passes
+  render/   shaders, camera, terrain mesh and render passes
 assets/
   shaders/  GLSL source
+  textures/ Ireland heightmap
 external/
   glad/     OpenGL 3.3 core loader (generated with glad2)
 ```
