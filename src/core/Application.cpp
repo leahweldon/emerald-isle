@@ -34,6 +34,7 @@ constexpr GLuint kColourUnit = 0;
 constexpr GLuint kNormalUnit = 1;
 constexpr GLuint kCoastUnit = 2;
 constexpr GLuint kHeightUnit = 3;
+constexpr GLuint kSkyUnit = 4;
 
 std::vector<std::filesystem::path> materialFiles(const std::filesystem::path& dir, const char* map)
 {
@@ -239,12 +240,14 @@ void Application::render()
     m_materialColour->bind(kColourUnit);
     m_materialNormal->bind(kNormalUnit);
     m_terrain->bindHeightTexture(kHeightUnit);
+    m_sky->applyEnvironment(*m_terrainShader, kSkyUnit);
     m_terrain->draw();
 
     // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.
     m_seaShader->use();
     setSceneUniforms(*m_seaShader);
     m_terrain->bindCoastMask(kCoastUnit);
+    m_sky->applyEnvironment(*m_seaShader, kSkyUnit);
     glEnable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(1.0f, 1.0f);
     m_sea->draw();

@@ -15,13 +15,11 @@ glm::vec3 sunDirection(float bearingDegrees, float elevationDegrees);
 glm::vec3 sunTransmittance(const glm::vec3& sunDir);
 
 // Sun and sky parameters shared by every pass, so the visible sun matches the lighting.
-// Authored colours are sRGB and converted to linear in apply(); shaders light in linear space.
+// Ambient light and fog colour come from the sky cubemap (see Sky).
 struct Atmosphere {
     glm::vec3 sunDir = sunDirection(225.0f, 22.0f); // south-west, low afternoon sun
     float sunStrength = 1.0f;   // direct light on terrain = sunStrength * sunTransmittance
     float exposure = 1.3f;      // sky radiance scale into display range
-    glm::vec3 ambient{0.42f, 0.47f, 0.55f};
-    glm::vec3 horizonColour{0.80f, 0.86f, 0.91f};
 
     // Height fog: density at sea level (per metre), falling off exponentially with altitude.
     float fogDensity = 1.5e-5f;
@@ -31,7 +29,7 @@ struct Atmosphere {
     float highAltitudeStart = 5000.0f;
     float highAltitudeEnd = 100000.0f;
 
-    // Sets uSunDir, uSunColour, uAmbient, uHorizonColour, uFogDensity and uFogFalloff.
+    // Sets uSunDir, uSunColour, uFogDensity and uFogFalloff.
     void apply(Shader& shader, float cameraHeight = 0.0f) const;
 };
 

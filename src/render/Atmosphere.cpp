@@ -2,8 +2,6 @@
 
 #include "render/Shader.hpp"
 
-#include <glm/gtc/color_space.hpp>
-
 #include <algorithm>
 #include <cmath>
 
@@ -60,8 +58,6 @@ void Atmosphere::apply(Shader& shader, float cameraHeight) const
 {
     shader.set("uSunDir", sunDir);
     shader.set("uSunColour", sunStrength * sunTransmittance(sunDir));
-    shader.set("uAmbient", glm::convertSRGBToLinear(ambient));
-    shader.set("uHorizonColour", glm::convertSRGBToLinear(horizonColour));
     const float t = glm::smoothstep(highAltitudeStart, highAltitudeEnd, cameraHeight);
     shader.set("uFogDensity", fogDensity * glm::mix(1.0f, highAltitudeFogScale, t));
     shader.set("uFogFalloff", 1.0f / fogScaleHeight);

@@ -3,8 +3,11 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace emerald {
 
@@ -27,6 +30,32 @@ const std::array<Face, 6> kFaces = {{
 
 // Matches kSunIntensity in sky.frag.
 constexpr float kSunDiscIntensity = 20.0f;
+
+// Below the horizon the cubemap repeats the horizon colour; as light from the ground it is scaled
+// down to stand in for terrain bounce.
+constexpr float kGroundBounce = 0.25f;
+
+// Direction through texel (u, v) in [-1, 1] of a GL cubemap face, before normalisation.
+glm::vec3 faceDirection(std::size_t face, float u, float v)
+{
+    switch (face) {
+    case 0: return {1.0f, -v, -u};
+    case 1: return {-1.0f, -v, u};
+    case 2: return {u, 1.0f, v};
+    case 3: return {u, -1.0f, -v};
+    case 4: return {u, -v, 1.0f};
+    default: return {-u, -v, -1.0f};
+    }
+}
+
+// Real SH basis up to order 2 (9 terms).
+std::array<float, 9> shBasis(const glm::vec3& d)
+{
+    return {0.282095f,
+            0.488603f * d.y, 0.488603f * d.z, 0.488603f * d.x,
+            1.092548f * d.x * d.y, 1.092548f * d.y * d.z, 0.315392f * (3.0f * d.z * d.z - 1.0f),
+            1.092548f * d.x * d.z, 0.546274f * (d.x * d.x - d.y * d.y)};
+}
 
 } // namespace
 
@@ -106,8 +135,65 @@ bool Sky::update(const Atmosphere& atmosphere)
     m_valid = true;
     m_sunDir = atmosphere.sunDir;
     m_exposure = atmosphere.exposure;
-    std::printf("Sky: cubemap rendered (%d px faces)\n", m_faceSize);
+    computeIrradiance();
+    std::printf("Sky: cubemap rendered (%d px faces), ambient SH updated\n", m_faceSize);
     return true;
+}
+
+// Projects the cubemap onto 9 SH coefficients (texels weighted by solid angle), then applies the
+// cosine-lobe convolution (Ramamoorthi and Hanrahan) and divides by pi for diffuse radiance.
+void Sky::computeIrradiance()
+{
+    const auto size = static_cast<std::size_t>(m_faceSize);
+    std::vector<float> texels(size * size * 3);
+    std::array<glm::vec3, 9> sh{};
+    float totalWeight = 0.0f;
+
+    glBindTexture(GL_TEXTURE_CUBE_MAP, m_cubemap);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    for (std::size_t face = 0; face < kFaces.size(); ++face) {
+        glGetTexImage(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face), 0, GL_RGB, GL_FLOAT,
+                      texels.data());
+        for (std::size_t y = 0; y < size; ++y) {
+            for (std::size_t x = 0; x < size; ++x) {
+                const float u = 2.0f * (static_cast<float>(x) + 0.5f) / static_cast<float>(size) - 1.0f;
+                const float v = 2.0f * (static_cast<float>(y) + 0.5f) / static_cast<float>(size) - 1.0f;
+                const float r2 = 1.0f + u * u + v * v;
+                const float weight = 4.0f / (static_cast<float>(size * size) * r2 * std::sqrt(r2));
+                const glm::vec3 dir = glm::normalize(faceDirection(face, u, v));
+
+                const std::size_t i = (y * size + x) * 3;
+                glm::vec3 radiance(texels[i], texels[i + 1], texels[i + 2]);
+                if (dir.y < 0.0f) {
+                    radiance *= kGroundBounce;
+                }
+                const std::array<float, 9> basis = shBasis(dir);
+                for (std::size_t k = 0; k < 9; ++k) {
+                    sh[k] += radiance * basis[k] * weight;
+                }
+                totalWeight += weight;
+            }
+        }
+    }
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+
+    // Normalise the discrete sum to exactly 4 pi, then convolve with the clamped cosine.
+    const float norm = 4.0f * glm::pi<float>() / totalWeight;
+    const std::array<float, 9> band = {1.0f,
+                                       2.0f / 3.0f, 2.0f / 3.0f, 2.0f / 3.0f,
+                                       0.25f, 0.25f, 0.25f, 0.25f, 0.25f};
+    for (std::size_t k = 0; k < 9; ++k) {
+        m_irradianceSH[k] = sh[k] * norm * band[k];
+    }
+}
+
+void Sky::applyEnvironment(Shader& shader, GLuint unit) const
+{
+    bindCubemap(unit);
+    shader.set("uSkyCube", static_cast<int>(unit));
+    for (std::size_t k = 0; k < m_irradianceSH.size(); ++k) {
+        shader.set("uIrradianceSH[" + std::to_string(k) + "]", m_irradianceSH[k]);
+    }
 }
 
 void Sky::drawBackground(const glm::mat4& invViewProjRotation, const Atmosphere& atmosphere)
