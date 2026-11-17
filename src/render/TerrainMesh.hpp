@@ -3,17 +3,12 @@
 #include <glad/gl.h>
 #include <glm/glm.hpp>
 
+#include "world/HeightField.hpp"
+
 #include <filesystem>
 #include <vector>
 
 namespace emerald {
-
-// Heightmap encoding written by tools/make_heightmap.py.
-constexpr float kHeightmapMetresPerPixel = 230.0f;
-constexpr float kHeightmapMetresPerUnit = 0.02f;
-
-// Relief is hard to read at true scale from orbit.
-constexpr float kVerticalExaggeration = 2.5f;
 
 // World units are metres.
 struct TerrainConfig {

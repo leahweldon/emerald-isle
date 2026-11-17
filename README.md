@@ -63,6 +63,7 @@ build\Release\emerald-isle.exe       # Windows (Visual Studio generator)
 | `--view <name>` | Start in free-fly at a preset pose instead of the orbit: `overview`, `kerry`, `wicklow`, `glenbeigh` |
 | `--sun-bearing <deg>` | Sun compass bearing, 0 = north (default 225, south-west) |
 | `--sun-elevation <deg>` | Sun elevation above the horizon (default 22) |
+| `--seed <n>` | Procedural world seed (default 1); the same seed always gives the same islands |
 
 The window title shows the averaged frame rate and frame time.
 

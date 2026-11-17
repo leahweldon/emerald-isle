@@ -7,6 +7,7 @@
 #include "render/TerrainMesh.hpp"
 #include "render/TextureArray.hpp"
 #include "render/ViewPresets.hpp"
+#include "world/HeightField.hpp"
 
 #include <glad/gl.h>
 
@@ -59,6 +60,7 @@ void printUsage(const char* program)
         "  --view <name>         Start from a camera preset: %s\n"
         "  --sun-bearing <deg>   Sun compass bearing, 0 = north (default 225)\n"
         "  --sun-elevation <deg> Sun elevation above the horizon (default 22)\n"
+        "  --seed <n>            Procedural world seed (default 1)\n"
         "  --help                Show this message\n",
         EMERALD_VERSION, program, viewPresetNames().c_str());
 }
@@ -131,6 +133,14 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.sunBearing = parseFloat(arg, argv[++i], -360.0f, 360.0f);
         } else if (std::strcmp(arg, "--sun-elevation") == 0 && hasValue) {
             options.sunElevation = parseFloat(arg, argv[++i], -10.0f, 90.0f);
+        } else if (std::strcmp(arg, "--seed") == 0 && hasValue) {
+            char* end = nullptr;
+            const char* value = argv[++i];
+            const unsigned long long seed = std::strtoull(value, &end, 10);
+            if (end == value || *end != '\0' || seed > 0xFFFFFFFFull) {
+                throw std::invalid_argument(std::string("Invalid value for --seed: ") + value);
+            }
+            options.seed = static_cast<std::uint32_t>(seed);
         } else {
             throw std::invalid_argument(std::string("Unknown or incomplete option: ") + arg +
                                         " (run with --help for usage)");
@@ -158,6 +168,12 @@ Application::Application(AppOptions options)
     m_terrainShader =
         std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "terrain.frag");
     m_seaShader = std::make_unique<Shader>(shaderDir / "sea.vert", shaderDir / "sea.frag");
+
+    HeightFieldConfig heightConfig;
+    heightConfig.seed = m_options.seed;
+    m_heightField = std::make_unique<HeightField>(
+        m_options.assetDir / "textures" / "ireland-heightmap.png", heightConfig);
+    std::printf("World: seed %u\n", m_options.seed);
 
     TerrainConfig terrainConfig;
     terrainConfig.sampleStep = m_options.terrainStep;
@@ -189,10 +205,7 @@ Application::Application(AppOptions options)
     m_atmosphere.sunDir = sunDirection(m_options.sunBearing, m_options.sunElevation);
     m_camera.farPlane = kFarPlane;
     m_controller = std::make_unique<CameraController>(
-        m_camera, [this](double x, double z) {
-            return static_cast<double>(
-                m_terrain->groundHeight(static_cast<float>(x), static_cast<float>(z)));
-        });
+        m_camera, [this](double x, double z) { return m_heightField->groundHeight(x, z); });
 
     // No --view: slow orbit from the overview. With --view: free-fly from that pose, still
     // until there is input, so screenshots are reproducible.

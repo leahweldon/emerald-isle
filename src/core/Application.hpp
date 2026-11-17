@@ -7,6 +7,7 @@
 #include "render/Camera.hpp"
 
 #include <filesystem>
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -14,6 +15,7 @@ namespace emerald {
 
 class Sky;
 class TerrainMesh;
+class HeightField;
 class SeaPlane;
 class Shader;
 class TextureArray;
@@ -31,6 +33,8 @@ struct AppOptions {
     // Sun position in degrees (compass bearing, elevation); defaults to the Atmosphere default.
     float sunBearing = 225.0f;
     float sunElevation = 22.0f;
+    // Procedural world seed; the same seed always gives the same islands.
+    std::uint32_t seed = 1;
     std::filesystem::path assetDir;
 };
 
@@ -54,6 +58,7 @@ private:
     Window m_window;
     FrameTimer m_timer;
     std::unique_ptr<Sky> m_sky;
+    std::unique_ptr<HeightField> m_heightField;
     std::unique_ptr<TerrainMesh> m_terrain;
     std::unique_ptr<Shader> m_terrainShader;
     std::unique_ptr<TextureArray> m_materialColour;

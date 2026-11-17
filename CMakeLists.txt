@@ -76,7 +76,9 @@ add_executable(emerald-isle
     src/render/Sky.cpp
     src/render/TerrainMesh.cpp
     src/render/TextureArray.cpp
-    src/render/ViewPresets.cpp)
+    src/render/ViewPresets.cpp
+    src/world/HeightField.cpp
+    src/world/Noise.cpp)
 
 target_include_directories(emerald-isle PRIVATE src)
 target_link_libraries(emerald-isle PRIVATE glfw glad glm::glm stb OpenGL::GL)
