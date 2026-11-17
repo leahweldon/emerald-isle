@@ -20,10 +20,10 @@ public:
     enum class Mode { Orbit, FreeFly };
 
     // groundHeight returns the world-space surface height at (x, z), never below sea level.
-    CameraController(Camera& camera, std::function<float(float, float)> groundHeight);
+    CameraController(Camera& camera, std::function<double(double, double)> groundHeight);
 
     // Orbit around target from the preset-style pose; rotates slowly when animate is set.
-    void startOrbit(const glm::vec3& target, float azimuth, float elevation, float distance,
+    void startOrbit(const glm::dvec3& target, float azimuth, float elevation, float distance,
                     bool animate);
     // Free-fly from the camera's current pose.
     void startFreeFly();
@@ -43,10 +43,10 @@ private:
     void keepAboveGround();
     void updateNearPlane();
     // First point where the view ray meets the ground or sea, or a fixed distance ahead.
-    glm::vec3 lookTarget() const;
+    glm::dvec3 lookTarget() const;
 
     Camera& m_camera;
-    std::function<float(float, float)> m_groundHeight;
+    std::function<double(double, double)> m_groundHeight;
     Mode m_mode = Mode::Orbit;
 
     // Free-fly state.
@@ -55,7 +55,7 @@ private:
     glm::vec2 m_scrollTurn{0.0f}; // smoothed scroll look rate, radians per second
 
     // Orbit state.
-    glm::vec3 m_orbitTarget{0.0f};
+    glm::dvec3 m_orbitTarget{0.0};
     float m_orbitAzimuth = 0.0f;
     float m_orbitElevation = 0.0f;
     float m_orbitDistance = 1.0f;

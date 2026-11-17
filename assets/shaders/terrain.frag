@@ -1,9 +1,10 @@
 #version 330 core
 
 in vec3 vWorldPos;
+in vec3 vRelPos;   // relative to the camera
 out vec4 fragColour;
 
-uniform vec3 uCameraPos;
+uniform float uCameraHeight;
 uniform vec3 uSunDir;     // towards the sun, normalised
 uniform vec3 uSunColour;
 uniform samplerCube uSkyCube;
@@ -179,21 +180,20 @@ vec3 skyAmbient(vec3 n)
 }
 
 // Fog colour is the sky behind the fragment, so distant terrain and sea meet the skybox exactly.
-vec3 fogColour(vec3 cameraPos, vec3 worldPos)
+vec3 fogColour(vec3 relPos)
 {
-    return texture(uSkyCube, normalize(worldPos - cameraPos)).rgb;
+    return texture(uSkyCube, normalize(relPos)).rgb;
 }
 
-// Height fog: optical depth of exponentially thinning air along the view ray.
-float fogAmount(vec3 cameraPos, vec3 worldPos)
+// Height fog: optical depth of exponentially thinning air along the view ray from the camera.
+float fogAmount(vec3 relPos)
 {
-    vec3 ray = worldPos - cameraPos;
-    float dist = length(ray);
+    float dist = length(relPos);
     float k = uFogFalloff;
-    float base = exp(-k * cameraPos.y);
-    float rise = k * ray.y;
+    float base = exp(-k * uCameraHeight);
+    float rise = k * relPos.y;
     // Integral of exp(-k * height) over the ray, divided by its length.
-    float avg = abs(rise) > 1e-4 ? (base - exp(-k * worldPos.y)) / rise : base;
+    float avg = abs(rise) > 1e-4 ? (base - exp(-k * (uCameraHeight + relPos.y))) / rise : base;
     return 1.0 - exp(-uFogDensity * dist * avg);
 }
 
@@ -238,7 +238,7 @@ void main()
     // Only sample materials that contribute; most pixels need one or two. Past the fade range
     // only the average colour is fetched.
     const float kMinWeight = 0.002;
-    float detail = 1.0 - smoothstep(kDetailFadeStart, kDetailFadeEnd, length(vWorldPos - uCameraPos));
+    float detail = 1.0 - smoothstep(kDetailFadeStart, kDetailFadeEnd, length(vRelPos));
     vec3 albedo = vec3(0.0);
     vec3 normalSum = vec3(0.0);
     vec3 c, nm;
@@ -305,6 +305,6 @@ void main()
     float diffuse = max(dot(shadingNormal, uSunDir), 0.0);
     vec3 colour = albedo * (skyAmbient(shadingNormal) + uSunColour * diffuse);
 
-    colour = mix(colour, fogColour(uCameraPos, vWorldPos), fogAmount(uCameraPos, vWorldPos));
+    colour = mix(colour, fogColour(vRelPos), fogAmount(vRelPos));
     fragColour = vec4(linearToSrgb(toneMap(colour)), 1.0);
 }

@@ -1,16 +1,19 @@
 #version 330 core
 
-layout(location = 0) in vec3 aPosition;
+layout(location = 0) in vec3 aPosition; // plane centred on the camera in XZ
 
-uniform mat4 uView;
+uniform mat4 uView;          // rotation only
 uniform mat4 uProjection;
-uniform vec3 uCameraPos;
+uniform float uCameraHeight;
+uniform vec2 uCameraXZ;
 
-out vec3 vWorldPos;
+out vec3 vRelPos;    // relative to the camera
+out vec2 vWorldXZ;
 
 void main()
 {
-    // Follow the camera in XZ so the plane always reaches the horizon.
-    vWorldPos = aPosition + vec3(uCameraPos.x, 0.0, uCameraPos.z);
-    gl_Position = uProjection * uView * vec4(vWorldPos, 1.0);
+    // Already camera-centred in XZ, so the plane always reaches the horizon; sea level is y = 0.
+    vRelPos = vec3(aPosition.x, -uCameraHeight, aPosition.z);
+    vWorldXZ = aPosition.xz + uCameraXZ;
+    gl_Position = uProjection * uView * vec4(vRelPos, 1.0);
 }

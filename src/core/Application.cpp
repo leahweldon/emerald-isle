@@ -189,7 +189,10 @@ Application::Application(AppOptions options)
     m_atmosphere.sunDir = sunDirection(m_options.sunBearing, m_options.sunElevation);
     m_camera.farPlane = kFarPlane;
     m_controller = std::make_unique<CameraController>(
-        m_camera, [this](float x, float z) { return m_terrain->groundHeight(x, z); });
+        m_camera, [this](double x, double z) {
+            return static_cast<double>(
+                m_terrain->groundHeight(static_cast<float>(x), static_cast<float>(z)));
+        });
 
     // No --view: slow orbit from the overview. With --view: free-fly from that pose, still
     // until there is input, so screenshots are reproducible.
@@ -281,10 +284,14 @@ void Application::render()
 
 void Application::setSceneUniforms(Shader& shader)
 {
+    // Camera-relative rendering: the view has no translation and geometry arrives relative to the
+    // camera, so precision does not degrade far from the origin.
     shader.set("uView", m_camera.view());
     shader.set("uProjection", m_camera.projection(m_window.aspectRatio()));
-    shader.set("uCameraPos", m_camera.position);
-    m_atmosphere.apply(shader, m_camera.position.y);
+    shader.set("uCameraOffset", glm::vec3(m_camera.position));
+    shader.set("uCameraXZ", glm::vec2(m_camera.position.x, m_camera.position.z));
+    shader.set("uCameraHeight", static_cast<float>(m_camera.position.y));
+    m_atmosphere.apply(shader, static_cast<float>(m_camera.position.y));
 }
 
 void Application::updateTitle()

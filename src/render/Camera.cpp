@@ -18,12 +18,14 @@ glm::vec3 Camera::right() const
     return glm::vec3(std::cos(yaw), 0.0f, std::sin(yaw));
 }
 
-void Camera::lookFrom(const glm::vec3& target, float azimuth, float elevation, float distance)
+void Camera::lookFrom(const glm::dvec3& target, float azimuth, float elevation, float distance)
 {
-    const float horizontal = distance * std::cos(elevation);
-    position = target + glm::vec3(horizontal * std::sin(azimuth), distance * std::sin(elevation),
-                                  horizontal * std::cos(azimuth));
-    const glm::vec3 dir = glm::normalize(target - position);
+    const double horizontal = static_cast<double>(distance) * std::cos(static_cast<double>(elevation));
+    const glm::dvec3 offset(horizontal * std::sin(static_cast<double>(azimuth)),
+                            static_cast<double>(distance) * std::sin(static_cast<double>(elevation)),
+                            horizontal * std::cos(static_cast<double>(azimuth)));
+    position = target + offset;
+    const glm::vec3 dir = glm::normalize(glm::vec3(-offset));
     yaw = std::atan2(dir.x, -dir.z);
     pitch = std::asin(std::clamp(dir.y, -1.0f, 1.0f));
     clampPitch();
@@ -36,10 +38,8 @@ void Camera::clampPitch()
 
 glm::mat4 Camera::view() const
 {
-    // Rotation from the direction alone, then translation: position + forward() would lose the
-    // direction to float rounding when the camera is hundreds of kilometres from the origin.
-    const glm::mat4 rotation = glm::lookAt(glm::vec3(0.0f), forward(), glm::vec3(0.0f, 1.0f, 0.0f));
-    return glm::translate(rotation, -position);
+    // Camera at the origin; callers pass camera-relative positions.
+    return glm::lookAt(glm::vec3(0.0f), forward(), glm::vec3(0.0f, 1.0f, 0.0f));
 }
 
 glm::mat4 Camera::projection(float aspect) const
