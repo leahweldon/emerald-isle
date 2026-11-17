@@ -219,16 +219,19 @@ void main()
 
     float patches = vNoise.z;
 
-    float sand = 1.0 - smoothstep(2.0, 6.0 + 8.0 * local, metres);
+    // Beach width varies along the coast: wide in places, a thin strip or none elsewhere.
+    float beach = smoothstep(0.35, 0.7, 0.6 * local + 0.4 * patches);
+    float sandTop = mix(0.3, 14.0, beach);
+    float sand = 1.0 - smoothstep(0.4 * sandTop, sandTop, metres);
     sand *= 1.0 - smoothstep(0.05, 0.15, slope);
 
     // Heath follows slope and patch noise; height only nudges it, so summits get heath/grass mixes.
     float heathScore = 2.2 * slope + 0.8 * (patches - 0.5) + 0.3 * (broad - 0.5) +
-                       0.5 * smoothstep(100.0, 500.0, metres);
+                       0.7 * smoothstep(150.0, 450.0, metres);
     float heath = smoothstep(0.35, 0.65, heathScore);
 
-    // Rock only on genuinely steep faces: roughly the steepest 0.8% of land.
-    float rock = smoothstep(0.25, 0.40, slope + 0.05 * (local - 0.5));
+    // Rock only on steep faces.
+    float rock = smoothstep(0.20, 0.34, slope + 0.06 * (local - 0.5));
 
     // Rock overrides everything; sand overrides grass and heath.
     float wRock = rock;

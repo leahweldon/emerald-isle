@@ -17,9 +17,9 @@ const std::array<ViewPreset, 5> kPresets = {{
     // Low over the Glenbeigh hills (~400 m above them), looking west-north-west across Dingle Bay
     // and the Dingle peninsula to the Atlantic; the south-west sun rakes in from the left.
     {"glenbeigh", glm::vec3(-154956.0f, 0.0f, 137293.0f), 1.047f, 0.045f, 30030.0f},
-    // Procedural archipelago ~1160 km north-west of Ireland (default seed), looking north-west
-    // across the islands with the south-west sun to the left.
-    {"archipelago", glm::vec3(-994e3f, 0.0f, -235e3f), 0.785f, 0.07f, 50e3f},
+    // Procedural archipelago ~1040 km west-north-west of Ireland (default seed): low over a bay,
+    // looking north-west at a ridged massif with the south-west sun to the left.
+    {"archipelago", glm::vec3(-1005e3f, 900.0f, -265e3f), 0.5f, 0.03f, 60e3f},
 }};
 
 } // namespace
