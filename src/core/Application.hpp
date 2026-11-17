@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <cstdint>
 #include <cstdio>
+#include <deque>
 #include <memory>
 #include <vector>
 #include <string>
@@ -20,6 +21,7 @@ class Terrain;
 class HeightField;
 class SeaPlane;
 class Shader;
+class GpuTimer;
 class TextureArray;
 
 struct AppOptions {
@@ -39,6 +41,12 @@ struct AppOptions {
     float autoflySeconds = 0.0f;
     // When set, a CSV row of per-phase timings is written for every frame.
     std::string frameLogPath;
+    // Measure GPU time per frame with timer queries (adds overhead on macOS).
+    bool gpuTiming = false;
+    // When greater than zero, check correctness during the run (GL errors, holes in the terrain,
+    // tiles streamed) and exit with failure if any check fails. The value is the minimum number
+    // of tiles that must be generated and resident.
+    int validateMinTiles = 0;
     std::filesystem::path assetDir;
 };
 
@@ -57,8 +65,11 @@ private:
     void update(float deltaSeconds);
     void render();
     void updateTitle();
-    void recordFrameStats(float frameMs);
+    void recordFrameStats(float frameMs, float cpuMs);
     void printRunStats() const;
+    void flushFrameLog(bool all);
+    void validateFrame();
+    bool reportValidation() const;
     void setSceneUniforms(Shader& shader);
 
     AppOptions m_options;
@@ -72,6 +83,7 @@ private:
     std::unique_ptr<TextureArray> m_materialNormal;
     std::unique_ptr<SeaPlane> m_sea;
     std::unique_ptr<Shader> m_seaShader;
+    std::unique_ptr<GpuTimer> m_gpuTimer;
     Camera m_camera;
     std::unique_ptr<CameraController> m_controller;
     Atmosphere m_atmosphere;
@@ -81,10 +93,23 @@ private:
     // Run statistics, printed on exit.
     std::vector<float> m_frameMs;   // whole loop iteration, per frame
     std::vector<float> m_terrainMs; // terrain update on the main thread, per frame
+    std::vector<float> m_cpuMs;     // loop iteration minus the swap wait
+    std::vector<float> m_gpuMs;     // GPU time from timer queries; negative until known
     std::FILE* m_frameLog = nullptr;
+    std::deque<std::pair<int, std::string>> m_pendingLogRows; // waiting for their GPU time
     double m_triangleSum = 0.0;
     double m_drawCallSum = 0.0;
     int m_peakResidentTiles = 0;
+
+    // --validate counters. Hole checks start once the initial load has covered the view, which
+    // does not need streaming to catch up completely (it may never, on a software renderer).
+    bool m_finished = false; // the run reached its frame limit or autofly duration
+    bool m_terrainReady = false;
+    int m_validatedFrames = 0;
+    int m_glErrorCount = 0;
+    unsigned m_firstGlError = 0;
+    int m_holeFrames = 0;
+    int m_uncoveredFrames = 0;
 };
 
 } // namespace emerald

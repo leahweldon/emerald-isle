@@ -58,9 +58,10 @@ Window::Window(const WindowConfig& config)
     glfwSetScrollCallback(m_handle, onScroll);
 
     const GLFWvidmode* mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+    m_refreshRate = mode ? mode->refreshRate : 0;
     std::printf("OpenGL %s | %s | display %d Hz\n",
                 reinterpret_cast<const char*>(glGetString(GL_VERSION)),
-                reinterpret_cast<const char*>(glGetString(GL_RENDERER)), mode ? mode->refreshRate : 0);
+                reinterpret_cast<const char*>(glGetString(GL_RENDERER)), m_refreshRate);
 }
 
 Window::~Window()
@@ -74,6 +75,11 @@ Window::~Window()
 bool Window::shouldClose() const
 {
     return glfwWindowShouldClose(m_handle) != 0;
+}
+
+bool Window::focused() const
+{
+    return glfwGetWindowAttrib(m_handle, GLFW_FOCUSED) != 0;
 }
 
 void Window::requestClose()

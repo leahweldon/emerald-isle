@@ -53,13 +53,17 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a -s "-screen 0 1920x1080x24" ./build/emerald-isle --frames 10 --screenshot frame.png
 
-      # Flies with tiles streaming continuously and prints frame stats: over the procedural
-      # archipelago, and west over Kerry across the DEM border into procedural sea.
-      - name: Streaming smoke test
+      # Flies with tiles streaming continuously over the procedural archipelago, and west over
+      # Kerry across the DEM border. Checks correctness, not timing: a runner without a GPU is too
+      # noisy for frame times. Fails on GL errors, holes in the terrain, ground missing under the
+      # camera, fewer than 100 tiles streamed, or a flight that does not complete.
+      - name: Streaming test
         if: runner.os == 'Linux'
         run: |
-          xvfb-run -a -s "-screen 0 1920x1080x24" ./build/emerald-isle --view archipelago --autofly 5 --no-vsync
-          xvfb-run -a -s "-screen 0 1920x1080x24" ./build/emerald-isle --view kerry --autofly 5 --no-vsync
+          for view in archipelago kerry; do
+            xvfb-run -a -s "-screen 0 640x360x24" ./build/emerald-isle --view "$view" \
+              --autofly 10 --no-vsync --width 640 --height 360 --validate 100
+          done
 
       - name: Upload rendered frame
         if: runner.os == 'Linux'

@@ -27,6 +27,8 @@ public:
     Window& operator=(const Window&) = delete;
 
     bool shouldClose() const;
+    // macOS throttles presentation for windows in the background, so frame logs record this.
+    bool focused() const;
     void requestClose();
     void swapBuffers();
     void pollEvents();
@@ -36,6 +38,7 @@ public:
     // Size of the drawable area in pixels (differs from window size on HiDPI displays).
     int framebufferWidth() const { return m_framebufferWidth; }
     int framebufferHeight() const { return m_framebufferHeight; }
+    int refreshRate() const { return m_refreshRate; } // primary display, 0 if unknown
     float aspectRatio() const;
 
     GLFWwindow* native() const { return m_handle; }
@@ -59,6 +62,7 @@ private:
     int m_framebufferHeight = 0;
     Input m_input;
     bool m_cursorCaptured = false;
+    int m_refreshRate = 0;
 };
 
 } // namespace emerald

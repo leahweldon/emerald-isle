@@ -311,6 +311,8 @@ void Terrain::update(const glm::dvec3& cameraPos, const glm::mat4& viewProjectio
         }
     }
     m_streamer->setRequests(wanted);
+    // A loaded root means the ground under the camera can be drawn at some level.
+    m_stats.cameraCovered = m_lookup.count(TileKey{kMaxLevel, cx, cz}) != 0;
 
     // Nearest first, so early depth testing rejects hidden fragments before the material shader.
     std::sort(m_drawList.begin(), m_drawList.end(),
@@ -359,6 +361,8 @@ void Terrain::selectNode(const TileKey& key, const glm::dvec3& cameraPos, const 
     }
     const double distance = distanceToBox(cameraPos, lo, hi);
     if (slot < 0) {
+        // Children are only selected once all four are loaded, so this is a visible root: a hole.
+        ++m_stats.missingNodes;
         // Coarser levels first, then nearest.
         wanted.push_back({key, static_cast<float>((kMaxLevel - key.level) * 1e8 + distance)});
         return;

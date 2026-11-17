@@ -30,6 +30,8 @@ public:
         int uploadsThisFrame = 0;
         std::uint64_t tilesGenerated = 0; // since startup
         double updateMs = 0.0;            // main-thread cost of update(): uploads and selection
+        int missingNodes = 0;             // visible nodes with no tile at any level: holes
+        bool cameraCovered = false;       // a tile is loaded for the ground under the camera
     };
 
     explicit Terrain(const HeightField& heightField);
