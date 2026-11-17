@@ -60,6 +60,12 @@ void CameraController::startFreeFly()
     updateNearPlane();
 }
 
+void CameraController::startAutofly(float speed)
+{
+    startFreeFly();
+    m_autoflySpeed = speed;
+}
+
 void CameraController::update(Window& window, float deltaSeconds)
 {
     const Input& input = window.input();
@@ -85,7 +91,13 @@ void CameraController::update(Window& window, float deltaSeconds)
         std::fflush(stdout);
     }
 
-    if (m_mode == Mode::FreeFly) {
+    if (m_autoflySpeed > 0.0f) {
+        // Level flight along the heading; ground clearance still lifts the camera over hills.
+        const glm::vec3 heading(std::sin(m_camera.yaw), 0.0f, -std::cos(m_camera.yaw));
+        m_camera.position += glm::dvec3(heading * (m_autoflySpeed * dt));
+        keepAboveGround();
+        updateNearPlane();
+    } else if (m_mode == Mode::FreeFly) {
         updateFreeFly(window, dt);
     } else {
         updateOrbit(dt);

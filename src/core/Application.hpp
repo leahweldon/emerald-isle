@@ -34,6 +34,8 @@ struct AppOptions {
     float sunElevation = 22.0f;
     // Procedural world seed; the same seed always gives the same islands.
     std::uint32_t seed = 1;
+    // When greater than zero, fly straight ahead for this many seconds, then exit.
+    float autoflySeconds = 0.0f;
     std::filesystem::path assetDir;
 };
 

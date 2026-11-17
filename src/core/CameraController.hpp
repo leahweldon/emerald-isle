@@ -27,6 +27,9 @@ public:
                     bool animate);
     // Free-fly from the camera's current pose.
     void startFreeFly();
+    // Free-fly straight and level along the current heading at speed (m/s), for demos and tests.
+    void startAutofly(float speed);
+    bool autoflying() const { return m_autoflySpeed > 0.0f; }
 
     void update(Window& window, float deltaSeconds);
 
@@ -53,6 +56,7 @@ private:
     glm::vec3 m_velocity{0.0f};
     float m_baseSpeed = 300.0f; // metres per second
     glm::vec2 m_scrollTurn{0.0f}; // smoothed scroll look rate, radians per second
+    float m_autoflySpeed = 0.0f;  // > 0 while autoflying
 
     // Orbit state.
     glm::dvec3 m_orbitTarget{0.0};

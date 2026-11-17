@@ -28,6 +28,8 @@ namespace {
 // Metres. The sea plane reaches the far plane (corners at ~0.99x far) so it meets the horizon.
 constexpr float kFarPlane = 15000e3f;
 constexpr float kSeaHalfSize = 0.7f * kFarPlane;
+constexpr float kAutoflySpeed = 2500.0f; // metres per second, ~150 km a minute
+
 // Material layers, in the order terrain.frag indexes them (kGrass, kSand, kHeath, kRock).
 constexpr const char* kMaterials[] = {"Grass004", "Ground054", "Ground037", "Rock058"};
 constexpr GLuint kColourUnit = 0;
@@ -60,6 +62,7 @@ void printUsage(const char* program)
         "  --sun-bearing <deg>   Sun compass bearing, 0 = north (default 225)\n"
         "  --sun-elevation <deg> Sun elevation above the horizon (default 22)\n"
         "  --seed <n>            Procedural world seed (default 1)\n"
+        "  --autofly <s>         Fly straight ahead for s seconds, print stats, exit\n"
         "  --help                Show this message\n",
         EMERALD_VERSION, program, viewPresetNames().c_str());
 }
@@ -130,6 +133,8 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.sunBearing = parseFloat(arg, argv[++i], -360.0f, 360.0f);
         } else if (std::strcmp(arg, "--sun-elevation") == 0 && hasValue) {
             options.sunElevation = parseFloat(arg, argv[++i], -10.0f, 90.0f);
+        } else if (std::strcmp(arg, "--autofly") == 0 && hasValue) {
+            options.autoflySeconds = parseFloat(arg, argv[++i], 0.1f, 3600.0f);
         } else if (std::strcmp(arg, "--seed") == 0 && hasValue) {
             char* end = nullptr;
             const char* value = argv[++i];
@@ -208,6 +213,14 @@ Application::Application(AppOptions options)
         applyViewPreset(*findViewPreset(m_options.view), m_camera);
         m_controller->startFreeFly();
     }
+    if (m_options.autoflySeconds > 0.0f) {
+        if (m_options.view.empty()) {
+            applyViewPreset(*findViewPreset("overview"), m_camera);
+        }
+        m_controller->startAutofly(kAutoflySpeed);
+        std::printf("Autofly: %.0f s at %.0f m/s\n", static_cast<double>(m_options.autoflySeconds),
+                    static_cast<double>(kAutoflySpeed));
+    }
 }
 
 Application::~Application() = default;
@@ -235,8 +248,10 @@ int Application::run()
             std::fprintf(stderr, "Terrain still streaming after 60 s; capturing anyway\n");
         }
         const int counted = screenshot ? m_settledFrames : m_frameCount;
-        const bool lastFrame =
-            m_options.frameLimit > 0 && (counted >= m_options.frameLimit || timedOut);
+        const bool autoflyDone = m_options.autoflySeconds > 0.0f &&
+                                 m_timer.elapsedSeconds() >= static_cast<double>(m_options.autoflySeconds);
+        const bool lastFrame = autoflyDone ||
+                               (m_options.frameLimit > 0 && (counted >= m_options.frameLimit || timedOut));
         if (lastFrame && !m_options.screenshotPath.empty()) {
             // Read the back buffer before it is presented, so the capture matches this frame.
             if (!saveFramebufferPng(m_window.framebufferWidth(), m_window.framebufferHeight(),
@@ -356,7 +371,9 @@ void Application::printRunStats() const
 void Application::updateTitle()
 {
     char speed[32];
-    if (m_controller->mode() == CameraController::Mode::FreeFly) {
+    if (m_controller->autoflying()) {
+        std::snprintf(speed, sizeof(speed), "autofly");
+    } else if (m_controller->mode() == CameraController::Mode::FreeFly) {
         std::snprintf(speed, sizeof(speed), "%.0f m/s", static_cast<double>(m_controller->baseSpeed()));
     } else {
         std::snprintf(speed, sizeof(speed), "orbit");
