@@ -306,6 +306,10 @@ void Terrain::update(const glm::dvec3& cameraPos, const glm::mat4& viewProjectio
     }
     m_streamer->setRequests(wanted);
 
+    // Nearest first, so early depth testing rejects hidden fragments before the material shader.
+    std::sort(m_drawList.begin(), m_drawList.end(),
+              [](const DrawNode& a, const DrawNode& b) { return a.distance < b.distance; });
+
     m_stats.outstandingTiles = m_streamer->outstanding();
     m_stats.residentTiles = static_cast<int>(m_lookup.size());
     m_stats.tilesGenerated = m_streamer->generatedCount();
@@ -355,7 +359,7 @@ void Terrain::selectNode(const TileKey& key, const glm::dvec3& cameraPos, const 
         }
         // Children still streaming: draw this coarser node meanwhile.
     }
-    m_drawList.push_back(DrawNode{key, m_slots[static_cast<std::size_t>(slot)].texture});
+    m_drawList.push_back(DrawNode{key, m_slots[static_cast<std::size_t>(slot)].texture, distance});
 }
 
 void Terrain::draw(Shader& shader, GLuint heightTileUnit)

@@ -64,6 +64,7 @@ private:
     struct DrawNode {
         TileKey key;
         GLuint texture;
+        double distance; // camera to node bounds, for front-to-back order
     };
 
     void selectNode(const TileKey& key, const glm::dvec3& cameraPos, const glm::vec4 planes[6],

@@ -5,6 +5,7 @@ in vec2 vWorldXZ;  // world XZ wrapped per node to within kMaterialPeriod
 in float vWorldY;
 in vec2 vTileUV;
 in float vMorph;
+in vec4 vNoise; // broad, local, patches, macro: low-frequency material noise from terrain.vert
 out vec4 fragColour;
 
 // World position for material lookups, set at the top of main().
@@ -19,7 +20,7 @@ uniform float uFogDensity;
 uniform float uFogFalloff;
 uniform float uExaggeration;
 
-uniform sampler2D uHeightTile; // this node's streamed tile, see Terrain
+uniform sampler2D uHeightTile; // streamed node tiles, see Terrain
 uniform float uTileSamples;
 uniform float uTileQuads;
 uniform float uNodeSize;
@@ -33,9 +34,8 @@ const float kSand  = 1.0;
 const float kHeath = 2.0;
 const float kRock  = 3.0;
 
-// Every material pattern repeats exactly every kMaterialPeriod metres (texture tiles and noise
-// scales divide it), so world coordinates can be wrapped per node and stay precise anywhere.
-const float kMaterialPeriod = 360000.0;
+// Every material pattern repeats exactly every 360 km (texture tiles divide it; the noise in
+// terrain.vert does too), so world coordinates can be wrapped per node and stay precise anywhere.
 
 // Texture repeat sizes in metres. Two non-multiple scales hide tiling on flat materials.
 const float kTileNear = 2000.0;
@@ -51,42 +51,6 @@ const vec3 kHeathTint = vec3(0.22, 0.18, 0.11); // darkens Ground037 towards pea
 const vec3 kGrassTint = vec3(0.70, 1.00, 0.61); // lusher green
 const vec3 kRockTint  = vec3(1.80, 1.35, 0.95); // Rock058 is blue-grey; shift to warm grey-brown
 const vec3 kShallow   = vec3(0.020, 0.160, 0.150); // linear, matches sea.frag
-
-float hash(vec2 p)
-{
-    p = fract(p * vec2(123.34, 456.21));
-    p += dot(p, p + 45.32);
-    return fract(p.x * p.y);
-}
-
-// Value noise whose lattice repeats every `period` cells.
-float valueNoise(vec2 p, float period)
-{
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    vec2 i0 = mod(i, period);
-    vec2 i1 = mod(i + 1.0, period);
-    return mix(mix(hash(i0), hash(vec2(i1.x, i0.y)), u.x),
-               mix(hash(vec2(i0.x, i1.y)), hash(i1), u.x), u.y);
-}
-
-// Four octaves, roughly in [0, 1], repeating every kMaterialPeriod metres for any scale that
-// divides it.
-float fbm(vec2 worldXZ, float scale, vec2 offset)
-{
-    vec2 p = worldXZ / scale + offset;
-    float period = kMaterialPeriod / scale;
-    float sum = 0.0;
-    float amplitude = 0.5;
-    for (int i = 0; i < 4; ++i) {
-        sum += amplitude * valueNoise(p, period);
-        p = p * 2.0 + vec2(1.7, 9.2);
-        period *= 2.0;
-        amplitude *= 0.5;
-    }
-    return sum / 0.9375;
-}
 
 vec3 unpackNormal(vec3 rgb)
 {
@@ -181,6 +145,9 @@ vec3 terrainNormal()
     vec3 fine = vec3(tileHeight(vTileUV - vec2(texel, 0.0)) - tileHeight(vTileUV + vec2(texel, 0.0)),
                      2.0 * spacing,
                      tileHeight(vTileUV - vec2(0.0, texel)) - tileHeight(vTileUV + vec2(0.0, texel)));
+    if (vMorph <= 0.0) {
+        return normalize(fine); // most fragments: no morphing, skip the coarse lookups
+    }
     vec3 coarse = vec3(tileHeight(vTileUV - vec2(2.0 * texel, 0.0)) - tileHeight(vTileUV + vec2(2.0 * texel, 0.0)),
                        4.0 * spacing,
                        tileHeight(vTileUV - vec2(0.0, 2.0 * texel)) - tileHeight(vTileUV + vec2(0.0, 2.0 * texel)));
@@ -235,15 +202,22 @@ void main()
         discard;
     }
 
+    // Fully fogged (distant islands at the horizon): the fog colour is all that shows.
+    float fog = fogAmount(vRelPos);
+    if (fog > 0.995) {
+        fragColour = vec4(linearToSrgb(toneMap(fogColour(vRelPos))), 1.0);
+        return;
+    }
+
     vec3 n = terrainNormal();
     float metres = gWorldPos.y / uExaggeration;
     float slope = 1.0 - n.y;
 
     // Low-frequency noise shifts every threshold so bands do not follow contours.
-    float broad = fbm(gWorldPos.xz, 24000.0, vec2(0.0));
-    float local = fbm(gWorldPos.xz, 6000.0, vec2(17.0));
+    float broad = vNoise.x;
+    float local = vNoise.y;
 
-    float patches = fbm(gWorldPos.xz, 2500.0, vec2(5.0));
+    float patches = vNoise.z;
 
     float sand = 1.0 - smoothstep(2.0, 6.0 + 8.0 * local, metres);
     sand *= 1.0 - smoothstep(0.05, 0.15, slope);
@@ -323,7 +297,7 @@ void main()
     vec3 shadingNormal = normalize(normalSum + n * 1e-4);
 
     // Large-scale colour variation hides repetition across the island.
-    float macro = fbm(gWorldPos.xz, 40000.0, vec2(3.0));
+    float macro = vNoise.w;
     albedo *= mix(vec3(0.70, 0.75, 0.65), vec3(1.23, 1.14, 0.89), macro);
 
     // Fade the last metres above sea level into shallow water to soften the pixel coastline.
@@ -332,6 +306,6 @@ void main()
     float diffuse = max(dot(shadingNormal, uSunDir), 0.0);
     vec3 colour = albedo * (skyAmbient(shadingNormal) + uSunColour * diffuse);
 
-    colour = mix(colour, fogColour(vRelPos), fogAmount(vRelPos));
+    colour = mix(colour, fogColour(vRelPos), fog);
     fragColour = vec4(linearToSrgb(toneMap(colour)), 1.0);
 }
