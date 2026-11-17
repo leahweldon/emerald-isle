@@ -4,7 +4,7 @@
 #include "render/Shader.hpp"
 #include "render/SeaPlane.hpp"
 #include "render/Sky.hpp"
-#include "render/TerrainMesh.hpp"
+#include "render/Terrain.hpp"
 #include "render/TextureArray.hpp"
 #include "render/ViewPresets.hpp"
 #include "world/HeightField.hpp"
@@ -56,7 +56,6 @@ void printUsage(const char* program)
         "  --no-vsync            Render as fast as possible, to measure frame rate\n"
         "  --frames <n>          Exit after rendering n frames\n"
         "  --screenshot <file>   Save the last frame as a PNG, then exit\n"
-        "  --terrain-step <n>    Use every nth heightmap pixel (default 2)\n"
         "  --view <name>         Start from a camera preset: %s\n"
         "  --sun-bearing <deg>   Sun compass bearing, 0 = north (default 225)\n"
         "  --sun-elevation <deg> Sun elevation above the horizon (default 22)\n"
@@ -121,8 +120,6 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.frameLimit = parsePositive(arg, argv[++i]);
         } else if (std::strcmp(arg, "--screenshot") == 0 && hasValue) {
             options.screenshotPath = argv[++i];
-        } else if (std::strcmp(arg, "--terrain-step") == 0 && hasValue) {
-            options.terrainStep = parsePositive(arg, argv[++i]);
         } else if (std::strcmp(arg, "--view") == 0 && hasValue) {
             options.view = argv[++i];
             if (!findViewPreset(options.view)) {
@@ -175,10 +172,7 @@ Application::Application(AppOptions options)
         m_options.assetDir / "textures" / "ireland-heightmap.png", heightConfig);
     std::printf("World: seed %u\n", m_options.seed);
 
-    TerrainConfig terrainConfig;
-    terrainConfig.sampleStep = m_options.terrainStep;
-    m_terrain = std::make_unique<TerrainMesh>(
-        m_options.assetDir / "textures" / "ireland-heightmap.png", terrainConfig);
+    m_terrain = std::make_unique<Terrain>(*m_heightField);
     m_sea = std::make_unique<SeaPlane>(kSeaHalfSize);
 
     const std::filesystem::path materialDir = m_options.assetDir / "textures" / "materials";
@@ -194,12 +188,9 @@ Application::Application(AppOptions options)
     m_terrainShader->use();
     m_terrainShader->set("uMaterialColour", static_cast<int>(kColourUnit));
     m_terrainShader->set("uMaterialNormal", static_cast<int>(kNormalUnit));
-    m_terrainShader->set("uHeightTexture", static_cast<int>(kHeightUnit));
-    m_terrainShader->set("uHeightTextureSize", m_terrain->heightTextureSize());
-    m_terrainShader->set("uTexelSpacing", m_terrain->metresPerPixel());
     m_seaShader->use();
     m_seaShader->set("uCoastMask", static_cast<int>(kCoastUnit));
-    m_seaShader->set("uTerrainSize", glm::vec2(m_terrain->width(), m_terrain->depth()));
+    m_seaShader->set("uTerrainSize", m_terrain->demSize());
     m_seaShader->set("uSeaRadius", kSeaHalfSize);
 
     m_atmosphere.sunDir = sunDirection(m_options.sunBearing, m_options.sunElevation);
@@ -232,7 +223,19 @@ int Application::run()
         render();
         ++m_frameCount;
 
-        const bool lastFrame = m_options.frameLimit > 0 && m_frameCount >= m_options.frameLimit;
+        // Screenshots count only frames with the terrain fully streamed in (or give up after 60 s),
+        // so they never capture half-loaded tiles. Plain --frames runs count every frame.
+        if (m_terrain->settled()) {
+            ++m_settledFrames;
+        }
+        const bool screenshot = !m_options.screenshotPath.empty();
+        const bool timedOut = screenshot && m_timer.elapsedSeconds() > 60.0;
+        if (timedOut && m_settledFrames < m_options.frameLimit) {
+            std::fprintf(stderr, "Terrain still streaming after 60 s; capturing anyway\n");
+        }
+        const int counted = screenshot ? m_settledFrames : m_frameCount;
+        const bool lastFrame =
+            m_options.frameLimit > 0 && (counted >= m_options.frameLimit || timedOut);
         if (lastFrame && !m_options.screenshotPath.empty()) {
             // Read the back buffer before it is presented, so the capture matches this frame.
             if (!saveFramebufferPng(m_window.framebufferWidth(), m_window.framebufferHeight(),
@@ -271,15 +274,15 @@ void Application::render()
 
     const glm::mat4 projection = m_camera.projection(m_window.aspectRatio());
     const glm::mat4 rotationOnly(glm::mat3(m_camera.view()));
+    m_terrain->update(m_camera.position, projection * m_camera.view());
 
     m_terrainShader->use();
     setSceneUniforms(*m_terrainShader);
-    m_terrainShader->set("uExaggeration", m_terrain->verticalExaggeration());
+    m_terrainShader->set("uExaggeration", m_heightField->verticalExaggeration());
     m_materialColour->bind(kColourUnit);
     m_materialNormal->bind(kNormalUnit);
-    m_terrain->bindHeightTexture(kHeightUnit);
     m_sky->applyEnvironment(*m_terrainShader, kSkyUnit);
-    m_terrain->draw();
+    m_terrain->draw(*m_terrainShader, kHeightUnit);
 
     // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.
     m_seaShader->use();

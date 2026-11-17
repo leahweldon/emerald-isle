@@ -14,7 +14,7 @@
 namespace emerald {
 
 class Sky;
-class TerrainMesh;
+class Terrain;
 class HeightField;
 class SeaPlane;
 class Shader;
@@ -26,8 +26,6 @@ struct AppOptions {
     int frameLimit = 0;
     // When set, the final frame is saved to this PNG path before exiting.
     std::string screenshotPath;
-    // Heightmap sampling step; higher is faster and coarser.
-    int terrainStep = 2;
     // Fixed camera preset name; empty means the default slow orbit.
     std::string view;
     // Sun position in degrees (compass bearing, elevation); defaults to the Atmosphere default.
@@ -59,7 +57,7 @@ private:
     FrameTimer m_timer;
     std::unique_ptr<Sky> m_sky;
     std::unique_ptr<HeightField> m_heightField;
-    std::unique_ptr<TerrainMesh> m_terrain;
+    std::unique_ptr<Terrain> m_terrain;
     std::unique_ptr<Shader> m_terrainShader;
     std::unique_ptr<TextureArray> m_materialColour;
     std::unique_ptr<TextureArray> m_materialNormal;
@@ -69,6 +67,7 @@ private:
     std::unique_ptr<CameraController> m_controller;
     Atmosphere m_atmosphere;
     int m_frameCount = 0;
+    int m_settledFrames = 0; // frames rendered with all wanted terrain tiles loaded
 };
 
 } // namespace emerald

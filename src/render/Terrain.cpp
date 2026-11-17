@@ -1,0 +1,396 @@
+#include "render/Terrain.hpp"
+
+#include "render/Shader.hpp"
+#include "world/HeightField.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <limits>
+
+namespace emerald {
+
+namespace {
+
+// A node splits when the camera is within kRangeFactor * child size of it; vertices morph to the
+// coarser grid over the last part of that range so neighbouring levels meet smoothly.
+constexpr double kRangeFactor = 2.5;
+constexpr float kMorphStart = 0.75f; // fraction of the range where morphing begins
+constexpr int kRootRadius = 2;       // roots drawn around the camera's root cell (5 x 5)
+constexpr int kUploadsPerFrame = 16;
+constexpr int kMaxCapacity = 1024;
+// Bounds for nodes whose tile is not loaded yet, so they are not culled by mistake.
+constexpr float kUnknownMinY = -200.0f;
+constexpr float kUnknownMaxY = 5000.0f;
+
+double lodRange(int level)
+{
+    return kRangeFactor * nodeSize(level);
+}
+
+// Frustum planes (a, b, c, d) with inward normals, from a camera-relative view-projection.
+void extractPlanes(const glm::mat4& m, glm::vec4 planes[6])
+{
+    const glm::vec4 row0(m[0][0], m[1][0], m[2][0], m[3][0]);
+    const glm::vec4 row1(m[0][1], m[1][1], m[2][1], m[3][1]);
+    const glm::vec4 row2(m[0][2], m[1][2], m[2][2], m[3][2]);
+    const glm::vec4 row3(m[0][3], m[1][3], m[2][3], m[3][3]);
+    planes[0] = row3 + row0;
+    planes[1] = row3 - row0;
+    planes[2] = row3 + row1;
+    planes[3] = row3 - row1;
+    planes[4] = row3 + row2;
+    planes[5] = row3 - row2;
+}
+
+bool boxVisible(const glm::vec4 planes[6], const glm::vec3& lo, const glm::vec3& hi)
+{
+    for (int i = 0; i < 6; ++i) {
+        const glm::vec4& p = planes[i];
+        // The corner furthest along the plane normal.
+        const glm::vec3 v(p.x >= 0.0f ? hi.x : lo.x, p.y >= 0.0f ? hi.y : lo.y,
+                          p.z >= 0.0f ? hi.z : lo.z);
+        if (p.x * v.x + p.y * v.y + p.z * v.z + p.w < 0.0f) {
+            return false;
+        }
+    }
+    return true;
+}
+
+double distanceToBox(const glm::dvec3& p, const glm::dvec3& lo, const glm::dvec3& hi)
+{
+    const glm::dvec3 d = glm::max(glm::max(lo - p, p - hi), glm::dvec3(0.0));
+    return glm::length(d);
+}
+
+std::int64_t floorDiv(double value, double size)
+{
+    return static_cast<std::int64_t>(std::floor(value / size));
+}
+
+} // namespace
+
+Terrain::Terrain(const HeightField& heightField)
+{
+    GLint maxLayers = 256;
+    glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &maxLayers);
+    m_capacity = std::min(kMaxCapacity, static_cast<int>(maxLayers));
+    m_slots.resize(static_cast<std::size_t>(m_capacity));
+
+    glGenTextures(1, &m_tiles);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_tiles);
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_R32F, kTileSamples, kTileSamples, m_capacity, 0, GL_RED,
+                 GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+
+    buildGridMesh();
+    buildCoastMask(heightField);
+    m_streamer = std::make_unique<TileStreamer>(heightField);
+    std::printf("Terrain: CDLOD, %d levels, %d x %d grid per node, %d tile slots\n", kMaxLevel + 1,
+                kTileQuads, kTileQuads, m_capacity);
+}
+
+Terrain::~Terrain()
+{
+    m_streamer.reset(); // join the worker before GL objects go
+    glDeleteTextures(1, &m_tiles);
+    glDeleteTextures(1, &m_coastMask);
+    glDeleteBuffers(1, &m_ebo);
+    glDeleteBuffers(1, &m_vbo);
+    glDeleteVertexArrays(1, &m_vao);
+}
+
+void Terrain::buildGridMesh()
+{
+    // Vertex: grid x, grid z, skirt flag. Skirt vertices duplicate the perimeter and are lowered in
+    // the shader to hide any gap where a node is drawn coarser than its neighbour.
+    constexpr int n = kTileQuads + 1;
+    std::vector<float> vertices;
+    for (int z = 0; z < n; ++z) {
+        for (int x = 0; x < n; ++x) {
+            vertices.insert(vertices.end(), {static_cast<float>(x), static_cast<float>(z), 0.0f});
+        }
+    }
+    const auto gridIndex = [](int x, int z) { return static_cast<GLushort>(z * n + x); };
+
+    std::vector<GLushort> indices;
+    for (int z = 0; z < kTileQuads; ++z) {
+        for (int x = 0; x < kTileQuads; ++x) {
+            const GLushort tl = gridIndex(x, z);
+            const GLushort tr = gridIndex(x + 1, z);
+            const GLushort bl = gridIndex(x, z + 1);
+            const GLushort br = gridIndex(x + 1, z + 1);
+            indices.insert(indices.end(), {tl, bl, tr, tr, bl, br}); // CCW seen from +Y
+        }
+    }
+    m_gridIndexCount = static_cast<GLsizei>(indices.size());
+
+    // Perimeter in order, then a lowered copy; both windings so culling never removes a skirt.
+    std::vector<GLushort> ring;
+    for (int x = 0; x < kTileQuads; ++x) ring.push_back(gridIndex(x, 0));
+    for (int z = 0; z < kTileQuads; ++z) ring.push_back(gridIndex(kTileQuads, z));
+    for (int x = kTileQuads; x > 0; --x) ring.push_back(gridIndex(x, kTileQuads));
+    for (int z = kTileQuads; z > 0; --z) ring.push_back(gridIndex(0, z));
+    const auto skirtBase = static_cast<GLushort>(vertices.size() / 3);
+    for (GLushort i : ring) {
+        vertices.insert(vertices.end(), {vertices[i * 3u], vertices[i * 3u + 1u], 1.0f});
+    }
+    const std::size_t count = ring.size();
+    for (std::size_t i = 0; i < count; ++i) {
+        const GLushort a = ring[i];
+        const GLushort b = ring[(i + 1) % count];
+        const auto sa = static_cast<GLushort>(skirtBase + i);
+        const auto sb = static_cast<GLushort>(skirtBase + (i + 1) % count);
+        indices.insert(indices.end(), {a, sa, b, b, sa, sb, a, b, sa, b, sb, sa});
+    }
+    m_totalIndexCount = static_cast<GLsizei>(indices.size());
+
+    glGenVertexArrays(1, &m_vao);
+    glGenBuffers(1, &m_vbo);
+    glGenBuffers(1, &m_ebo);
+    glBindVertexArray(m_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertices.size() * sizeof(float)),
+                 vertices.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(indices.size() * sizeof(GLushort)),
+                 indices.data(), GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
+    glBindVertexArray(0);
+}
+
+void Terrain::buildCoastMask(const HeightField& heightField)
+{
+    // Fraction of land per 4 x 4 DEM block, then two box-blur passes: ~920 m texels, ~4-5 km blur.
+    constexpr int factor = 4;
+    constexpr int radius = 2;
+    const int demW = heightField.demWidth();
+    const int demH = heightField.demHeight();
+    const std::vector<float>& dem = heightField.demHeights();
+    const int w = (demW + factor - 1) / factor;
+    const int h = (demH + factor - 1) / factor;
+    const auto index = [w](int x, int y) {
+        return static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x);
+    };
+    std::vector<float> mask(static_cast<std::size_t>(w) * static_cast<std::size_t>(h), 0.0f);
+    for (int y = 0; y < demH; ++y) {
+        for (int x = 0; x < demW; ++x) {
+            if (dem[static_cast<std::size_t>(y) * static_cast<std::size_t>(demW) + static_cast<std::size_t>(x)] > 0.0f) {
+                mask[index(x / factor, y / factor)] += 1.0f / static_cast<float>(factor * factor);
+            }
+        }
+    }
+    std::vector<float> temp(mask.size());
+    const float norm = 1.0f / static_cast<float>(2 * radius + 1);
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                float sum = 0.0f;
+                for (int k = -radius; k <= radius; ++k) sum += mask[index(std::clamp(x + k, 0, w - 1), y)];
+                temp[index(x, y)] = sum * norm;
+            }
+        }
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                float sum = 0.0f;
+                for (int k = -radius; k <= radius; ++k) sum += temp[index(x, std::clamp(y + k, 0, h - 1))];
+                mask[index(x, y)] = sum * norm;
+            }
+        }
+    }
+    std::vector<unsigned char> bytes(mask.size());
+    for (std::size_t i = 0; i < mask.size(); ++i) {
+        bytes[i] = static_cast<unsigned char>(std::clamp(mask[i], 0.0f, 1.0f) * 255.0f + 0.5f);
+    }
+
+    glGenTextures(1, &m_coastMask);
+    glBindTexture(GL_TEXTURE_2D, m_coastMask);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, bytes.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // Outside the DEM is open sea as far as the mask is concerned: border 0, not repeated edges.
+    const GLfloat border[] = {0.0f, 0.0f, 0.0f, 0.0f};
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    m_demSize = glm::vec2(2.0 * heightField.demHalfWidth(), 2.0 * heightField.demHalfDepth());
+}
+
+void Terrain::bindCoastMask(GLuint unit) const
+{
+    glActiveTexture(GL_TEXTURE0 + unit);
+    glBindTexture(GL_TEXTURE_2D, m_coastMask);
+}
+
+int Terrain::residentLayer(const TileKey& key)
+{
+    const auto it = m_lookup.find(key);
+    if (it == m_lookup.end()) {
+        return -1;
+    }
+    m_slots[static_cast<std::size_t>(it->second)].lastUsed = m_frame;
+    return it->second;
+}
+
+void Terrain::uploadTile(const TileData& tile)
+{
+    if (m_lookup.count(tile.key) != 0) {
+        return;
+    }
+    // A free slot, or the least recently used one not needed this frame.
+    int chosen = -1;
+    std::uint64_t oldest = std::numeric_limits<std::uint64_t>::max();
+    for (int i = 0; i < m_capacity; ++i) {
+        const Slot& slot = m_slots[static_cast<std::size_t>(i)];
+        if (!slot.used) {
+            chosen = i;
+            break;
+        }
+        if (slot.lastUsed < m_frame && slot.lastUsed < oldest) {
+            oldest = slot.lastUsed;
+            chosen = i;
+        }
+    }
+    if (chosen < 0) {
+        return; // every slot is in use this frame; the tile will be requested again
+    }
+    Slot& slot = m_slots[static_cast<std::size_t>(chosen)];
+    if (slot.used) {
+        m_lookup.erase(slot.key);
+    }
+    slot = Slot{tile.key, tile.minY, tile.maxY, m_frame, true};
+    m_lookup[tile.key] = chosen;
+
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_tiles);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, chosen, kTileSamples, kTileSamples, 1, GL_RED,
+                    GL_FLOAT, tile.heights.data());
+}
+
+void Terrain::update(const glm::dvec3& cameraPos, const glm::mat4& viewProjection)
+{
+    ++m_frame;
+    m_cameraPos = cameraPos;
+    m_stats = Stats{};
+
+    // Upload a bounded number of finished tiles so a burst never stalls the frame.
+    const std::vector<TileData> done = m_streamer->takeCompleted(kUploadsPerFrame);
+    for (const TileData& tile : done) {
+        uploadTile(tile);
+    }
+    glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+    m_stats.uploadsThisFrame = static_cast<int>(done.size());
+
+    glm::vec4 planes[6];
+    extractPlanes(viewProjection, planes);
+
+    m_drawList.clear();
+    std::vector<TileStreamer::Request> wanted;
+    const double rootSize = nodeSize(kMaxLevel);
+    const std::int64_t cx = floorDiv(cameraPos.x, rootSize);
+    const std::int64_t cz = floorDiv(cameraPos.z, rootSize);
+    for (std::int64_t dz = -kRootRadius; dz <= kRootRadius; ++dz) {
+        for (std::int64_t dx = -kRootRadius; dx <= kRootRadius; ++dx) {
+            selectNode(TileKey{kMaxLevel, cx + dx, cz + dz}, cameraPos, planes, wanted);
+        }
+    }
+    m_streamer->setRequests(wanted);
+
+    m_stats.outstandingTiles = m_streamer->outstanding();
+    m_stats.residentTiles = static_cast<int>(m_lookup.size());
+    m_settled = wanted.empty() && m_stats.outstandingTiles == 0;
+}
+
+void Terrain::selectNode(const TileKey& key, const glm::dvec3& cameraPos, const glm::vec4 planes[6],
+                         std::vector<TileStreamer::Request>& wanted)
+{
+    const double size = nodeSize(key.level);
+    const int layer = residentLayer(key);
+    const float minY = layer >= 0 ? m_slots[static_cast<std::size_t>(layer)].minY : kUnknownMinY;
+    const float maxY = layer >= 0 ? m_slots[static_cast<std::size_t>(layer)].maxY : kUnknownMaxY;
+    const glm::dvec3 lo(static_cast<double>(key.x) * size, minY, static_cast<double>(key.z) * size);
+    const glm::dvec3 hi = lo + glm::dvec3(size, static_cast<double>(maxY - minY), size);
+
+    if (!boxVisible(planes, glm::vec3(lo - cameraPos), glm::vec3(hi - cameraPos))) {
+        return;
+    }
+    const double distance = distanceToBox(cameraPos, lo, hi);
+    if (layer < 0) {
+        // Coarser levels first, then nearest.
+        wanted.push_back({key, static_cast<float>((kMaxLevel - key.level) * 1e8 + distance)});
+        return;
+    }
+
+    if (key.level > 0 && distance < lodRange(key.level - 1)) {
+        TileKey children[4];
+        bool ready = true;
+        for (int i = 0; i < 4; ++i) {
+            children[i] = TileKey{key.level - 1, key.x * 2 + (i & 1), key.z * 2 + (i >> 1)};
+            if (residentLayer(children[i]) < 0) {
+                ready = false;
+                const double childSize = nodeSize(key.level - 1);
+                const glm::dvec3 clo(static_cast<double>(children[i].x) * childSize, kUnknownMinY,
+                                     static_cast<double>(children[i].z) * childSize);
+                const glm::dvec3 chi = clo + glm::dvec3(childSize, kUnknownMaxY - kUnknownMinY, childSize);
+                wanted.push_back({children[i], static_cast<float>((kMaxLevel - children[i].level) * 1e8 +
+                                                                  distanceToBox(cameraPos, clo, chi))});
+            }
+        }
+        if (ready) {
+            for (const TileKey& child : children) {
+                selectNode(child, cameraPos, planes, wanted);
+            }
+            return;
+        }
+        // Children still streaming: draw this coarser node meanwhile.
+    }
+    m_drawList.push_back(DrawNode{key, layer});
+}
+
+void Terrain::draw(Shader& shader, GLuint heightTileUnit)
+{
+    glActiveTexture(GL_TEXTURE0 + heightTileUnit);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_tiles);
+    shader.set("uHeightTiles", static_cast<int>(heightTileUnit));
+    shader.set("uTileSamples", static_cast<float>(kTileSamples));
+    shader.set("uTileBorder", static_cast<float>(kTileBorder));
+    shader.set("uTileQuads", static_cast<float>(kTileQuads));
+
+    const GLint originLoc = shader.uniformLocation("uNodeOrigin");
+    const GLint worldLoc = shader.uniformLocation("uNodeWorldOrigin");
+    const GLint sizeLoc = shader.uniformLocation("uNodeSize");
+    const GLint layerLoc = shader.uniformLocation("uTileLayer");
+    const GLint morphLoc = shader.uniformLocation("uMorphRange");
+
+    glBindVertexArray(m_vao);
+    for (const DrawNode& node : m_drawList) {
+        const double size = nodeSize(node.key.level);
+        const double ox = static_cast<double>(node.key.x) * size;
+        const double oz = static_cast<double>(node.key.z) * size;
+        // Origin relative to the camera, computed in double: the floating origin.
+        glUniform2f(originLoc, static_cast<float>(ox - m_cameraPos.x), static_cast<float>(oz - m_cameraPos.z));
+        glUniform2f(worldLoc, static_cast<float>(ox), static_cast<float>(oz));
+        glUniform1f(sizeLoc, static_cast<float>(size));
+        glUniform1f(layerLoc, static_cast<float>(node.layer));
+        if (node.key.level < kMaxLevel) {
+            const auto range = static_cast<float>(lodRange(node.key.level));
+            glUniform2f(morphLoc, kMorphStart * range, range);
+        } else {
+            glUniform2f(morphLoc, 1e30f, 2e30f); // no coarser level to morph to
+        }
+        glDrawElements(GL_TRIANGLES, m_totalIndexCount, GL_UNSIGNED_SHORT, nullptr);
+    }
+    glBindVertexArray(0);
+
+    m_stats.drawCalls = static_cast<int>(m_drawList.size());
+    m_stats.triangles = m_drawList.size() * static_cast<std::size_t>(m_totalIndexCount / 3);
+}
+
+} // namespace emerald

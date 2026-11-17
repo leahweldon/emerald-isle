@@ -59,7 +59,6 @@ build\Release\emerald-isle.exe       # Windows (Visual Studio generator)
 | `--no-vsync` | Render as fast as possible, to measure frame rate |
 | `--frames <n>` | Exit after rendering *n* frames |
 | `--screenshot <file>` | Save the final frame as a PNG, then exit |
-| `--terrain-step <n>` | Use every *n*th heightmap pixel (default 2); higher is faster |
 | `--view <name>` | Start in free-fly at a preset pose instead of the orbit: `overview`, `kerry`, `wicklow`, `glenbeigh` |
 | `--sun-bearing <deg>` | Sun compass bearing, 0 = north (default 225, south-west) |
 | `--sun-elevation <deg>` | Sun elevation above the horizon (default 22) |

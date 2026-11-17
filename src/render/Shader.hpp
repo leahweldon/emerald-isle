@@ -31,6 +31,9 @@ public:
 
     GLuint id() const { return m_program; }
 
+    // Cached location, for callers that set the same uniform many times per frame.
+    GLint uniformLocation(const std::string& name) { return location(name); }
+
 private:
     GLint location(const std::string& name);
 

@@ -1,8 +1,14 @@
 #version 330 core
 
-in vec3 vWorldPos;
 in vec3 vRelPos;   // relative to the camera
+in vec2 vWorldXZ;
+in float vWorldY;
+in vec2 vTileUV;
+in float vMorph;
 out vec4 fragColour;
+
+// World position for material lookups, set at the top of main().
+vec3 gWorldPos;
 
 uniform float uCameraHeight;
 uniform vec3 uSunDir;     // towards the sun, normalised
@@ -13,9 +19,11 @@ uniform float uFogDensity;
 uniform float uFogFalloff;
 uniform float uExaggeration;
 
-uniform sampler2D uHeightTexture;  // world-space heights, see TerrainMesh::bindHeightTexture
-uniform vec2 uHeightTextureSize;   // texels
-uniform float uTexelSpacing;       // metres between texels
+uniform sampler2DArray uHeightTiles; // streamed node tiles, see Terrain
+uniform float uTileSamples;
+uniform float uTileQuads;
+uniform float uNodeSize;
+uniform float uTileLayer;
 
 uniform sampler2DArray uMaterialColour;
 uniform sampler2DArray uMaterialNormal;
@@ -82,7 +90,7 @@ vec3 unpackNormal(vec3 rgb)
 void sampleTop(float layer, float tile, vec3 n, vec3 dPdx, vec3 dPdy, out vec3 colour,
                out vec3 normal)
 {
-    vec3 uv = vec3(vWorldPos.xz / tile, layer);
+    vec3 uv = vec3(gWorldPos.xz / tile, layer);
     vec2 gx = dPdx.xz / tile;
     vec2 gy = dPdy.xz / tile;
     colour = textureGrad(uMaterialColour, uv, gx, gy).rgb;
@@ -107,9 +115,9 @@ void sampleTriplanar(float layer, vec3 n, vec3 dPdx, vec3 dPdy, out vec3 colour,
     w /= (w.x + w.y + w.z);
     vec3 s = sign(n);
 
-    vec3 uvX = vec3(vWorldPos.zy / kTileRock * vec2(s.x, 1.0), layer);
-    vec3 uvY = vec3(vWorldPos.xz / kTileRock * vec2(s.y, 1.0), layer);
-    vec3 uvZ = vec3(vWorldPos.xy / kTileRock * vec2(-s.z, 1.0), layer);
+    vec3 uvX = vec3(gWorldPos.zy / kTileRock * vec2(s.x, 1.0), layer);
+    vec3 uvY = vec3(gWorldPos.xz / kTileRock * vec2(s.y, 1.0), layer);
+    vec3 uvZ = vec3(gWorldPos.xy / kTileRock * vec2(-s.z, 1.0), layer);
     vec2 gxX = dPdx.zy / kTileRock * vec2(s.x, 1.0);
     vec2 gyX = dPdy.zy / kTileRock * vec2(s.x, 1.0);
     vec2 gxY = dPdx.xz / kTileRock * vec2(s.y, 1.0);
@@ -149,16 +157,24 @@ vec3 linearToSrgb(vec3 c)
     return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 
-// Per-pixel normal from central differences one texel apart; heights are already exaggerated.
+float tileHeight(vec2 uv)
+{
+    return textureLod(uHeightTiles, vec3(uv, uTileLayer), 0.0).r;
+}
+
+// Per-pixel normal from the node's tile (heights already exaggerated). Blends from one-texel to
+// two-texel differences as the vertices morph, so lighting matches the coarser neighbour.
 vec3 terrainNormal()
 {
-    vec2 uv = vWorldPos.xz / (uTexelSpacing * uHeightTextureSize) + 0.5;
-    vec2 texel = 1.0 / uHeightTextureSize;
-    float west  = textureLod(uHeightTexture, uv - vec2(texel.x, 0.0), 0.0).r;
-    float east  = textureLod(uHeightTexture, uv + vec2(texel.x, 0.0), 0.0).r;
-    float north = textureLod(uHeightTexture, uv - vec2(0.0, texel.y), 0.0).r;
-    float south = textureLod(uHeightTexture, uv + vec2(0.0, texel.y), 0.0).r;
-    return normalize(vec3(west - east, 2.0 * uTexelSpacing, north - south));
+    float texel = 1.0 / uTileSamples;
+    float spacing = uNodeSize / uTileQuads;
+    vec3 fine = vec3(tileHeight(vTileUV - vec2(texel, 0.0)) - tileHeight(vTileUV + vec2(texel, 0.0)),
+                     2.0 * spacing,
+                     tileHeight(vTileUV - vec2(0.0, texel)) - tileHeight(vTileUV + vec2(0.0, texel)));
+    vec3 coarse = vec3(tileHeight(vTileUV - vec2(2.0 * texel, 0.0)) - tileHeight(vTileUV + vec2(2.0 * texel, 0.0)),
+                       4.0 * spacing,
+                       tileHeight(vTileUV - vec2(0.0, 2.0 * texel)) - tileHeight(vTileUV + vec2(0.0, 2.0 * texel)));
+    return normalize(mix(normalize(fine), normalize(coarse), vMorph));
 }
 
 // Average colour of a layer: its 1x1 mip.
@@ -199,24 +215,25 @@ float fogAmount(vec3 relPos)
 
 void main()
 {
+    gWorldPos = vec3(vWorldXZ.x, vWorldY, vWorldXZ.y);
     // Taken before any branch or discard.
-    vec3 dPdx = dFdx(vWorldPos);
-    vec3 dPdy = dFdy(vWorldPos);
+    vec3 dPdx = dFdx(gWorldPos);
+    vec3 dPdy = dFdy(gWorldPos);
 
     // Below sea level is covered by the sea plane.
-    if (vWorldPos.y < 0.0) {
+    if (gWorldPos.y < 0.0) {
         discard;
     }
 
     vec3 n = terrainNormal();
-    float metres = vWorldPos.y / uExaggeration;
+    float metres = gWorldPos.y / uExaggeration;
     float slope = 1.0 - n.y;
 
     // Low-frequency noise shifts every threshold so bands do not follow contours.
-    float broad = fbm(vWorldPos.xz / 25000.0);
-    float local = fbm(vWorldPos.xz / 6000.0 + 17.0);
+    float broad = fbm(gWorldPos.xz / 25000.0);
+    float local = fbm(gWorldPos.xz / 6000.0 + 17.0);
 
-    float patches = fbm(vWorldPos.xz / 2500.0 + 5.0);
+    float patches = fbm(gWorldPos.xz / 2500.0 + 5.0);
 
     float sand = 1.0 - smoothstep(2.0, 6.0 + 8.0 * local, metres);
     sand *= 1.0 - smoothstep(0.05, 0.15, slope);
@@ -296,7 +313,7 @@ void main()
     vec3 shadingNormal = normalize(normalSum + n * 1e-4);
 
     // Large-scale colour variation hides repetition across the island.
-    float macro = fbm(vWorldPos.xz / 40000.0 + 3.0);
+    float macro = fbm(gWorldPos.xz / 40000.0 + 3.0);
     albedo *= mix(vec3(0.70, 0.75, 0.65), vec3(1.23, 1.14, 0.89), macro);
 
     // Fade the last metres above sea level into shallow water to soften the pixel coastline.
