@@ -7,7 +7,7 @@ uniform mat4 uView;          // rotation only
 uniform mat4 uProjection;
 uniform float uCameraHeight;
 
-uniform sampler2DArray uHeightTiles;
+uniform sampler2D uHeightTile;
 uniform float uTileSamples;  // texels per tile side, including the border
 uniform float uTileBorder;
 uniform float uTileQuads;
@@ -15,7 +15,6 @@ uniform float uTileQuads;
 uniform vec2 uNodeOrigin;      // node's -X/-Z corner relative to the camera
 uniform vec2 uNodeMaterialOrigin; // same corner in world space modulo the material period
 uniform float uNodeSize;
-uniform float uTileLayer;
 uniform vec2 uMorphRange;      // distance where morphing to the coarser grid starts and ends
 
 out vec3 vRelPos;    // relative to the camera
@@ -31,7 +30,7 @@ vec2 tileUV(vec2 grid)
 
 float heightAt(vec2 grid)
 {
-    return textureLod(uHeightTiles, vec3(tileUV(grid), uTileLayer), 0.0).r;
+    return textureLod(uHeightTile, tileUV(grid), 0.0).r;
 }
 
 void main()

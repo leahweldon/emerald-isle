@@ -40,11 +40,16 @@ void TileStreamer::setRequests(std::vector<Request> requests)
 {
     {
         const std::lock_guard<std::mutex> lock(m_mutex);
-        if (m_busy) {
-            requests.erase(std::remove_if(requests.begin(), requests.end(),
-                                          [this](const Request& r) { return r.key == m_inProgress; }),
-                           requests.end());
-        }
+        // Skip tiles already being made or finished but not yet collected, so none is built twice.
+        requests.erase(std::remove_if(requests.begin(), requests.end(),
+                                      [this](const Request& r) {
+                                          if (m_busy && r.key == m_inProgress) {
+                                              return true;
+                                          }
+                                          return std::any_of(m_completed.begin(), m_completed.end(),
+                                                             [&r](const TileData& t) { return t.key == r.key; });
+                                      }),
+                       requests.end());
         m_requests = std::move(requests);
     }
     m_wake.notify_one();

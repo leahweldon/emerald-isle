@@ -18,7 +18,7 @@ constexpr double kRangeFactor = 2.5;
 constexpr float kMorphStart = 0.75f; // fraction of the range where morphing begins
 constexpr int kRootRadius = 2;       // roots drawn around the camera's root cell (5 x 5)
 constexpr int kUploadsPerFrame = 16;
-constexpr int kMaxCapacity = 1024;
+constexpr int kCapacity = 1024; // resident tiles
 // Bounds for nodes whose tile is not loaded yet, so they are not culled by mistake.
 constexpr float kUnknownMinY = -200.0f;
 constexpr float kUnknownMaxY = 5000.0f;
@@ -74,20 +74,8 @@ std::int64_t floorDiv(double value, double size)
 
 Terrain::Terrain(const HeightField& heightField)
 {
-    GLint maxLayers = 256;
-    glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &maxLayers);
-    m_capacity = std::min(kMaxCapacity, static_cast<int>(maxLayers));
+    m_capacity = kCapacity;
     m_slots.resize(static_cast<std::size_t>(m_capacity));
-
-    glGenTextures(1, &m_tiles);
-    glBindTexture(GL_TEXTURE_2D_ARRAY, m_tiles);
-    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_R32F, kTileSamples, kTileSamples, m_capacity, 0, GL_RED,
-                 GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
 
     buildGridMesh();
     buildCoastMask(heightField);
@@ -99,7 +87,11 @@ Terrain::Terrain(const HeightField& heightField)
 Terrain::~Terrain()
 {
     m_streamer.reset(); // join the worker before GL objects go
-    glDeleteTextures(1, &m_tiles);
+    for (const Slot& slot : m_slots) {
+        if (slot.texture != 0) {
+            glDeleteTextures(1, &slot.texture);
+        }
+    }
     glDeleteTextures(1, &m_coastMask);
     glDeleteBuffers(1, &m_ebo);
     glDeleteBuffers(1, &m_vbo);
@@ -231,7 +223,7 @@ void Terrain::bindCoastMask(GLuint unit) const
     glBindTexture(GL_TEXTURE_2D, m_coastMask);
 }
 
-int Terrain::residentLayer(const TileKey& key)
+int Terrain::residentSlot(const TileKey& key)
 {
     const auto it = m_lookup.find(key);
     if (it == m_lookup.end()) {
@@ -251,7 +243,7 @@ void Terrain::uploadTile(const TileData& tile)
     std::uint64_t oldest = std::numeric_limits<std::uint64_t>::max();
     for (int i = 0; i < m_capacity; ++i) {
         const Slot& slot = m_slots[static_cast<std::size_t>(i)];
-        if (!slot.used) {
+        if (slot.texture == 0) {
             chosen = i;
             break;
         }
@@ -264,16 +256,25 @@ void Terrain::uploadTile(const TileData& tile)
         return; // every slot is in use this frame; the tile will be requested again
     }
     Slot& slot = m_slots[static_cast<std::size_t>(chosen)];
-    if (slot.used) {
+    if (slot.texture != 0) {
         m_lookup.erase(slot.key);
+        glDeleteTextures(1, &slot.texture); // the driver frees it once in-flight frames finish
     }
-    slot = Slot{tile.key, tile.minY, tile.maxY, m_frame, true};
-    m_lookup[tile.key] = chosen;
 
-    glBindTexture(GL_TEXTURE_2D_ARRAY, m_tiles);
+    // A new texture rather than updating one the GPU may still be reading: no pipeline stall.
+    GLuint texture = 0;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, chosen, kTileSamples, kTileSamples, 1, GL_RED,
-                    GL_FLOAT, tile.heights.data());
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, kTileSamples, kTileSamples, 0, GL_RED, GL_FLOAT,
+                 tile.heights.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    slot = Slot{tile.key, tile.minY, tile.maxY, m_frame, texture};
+    m_lookup[tile.key] = chosen;
 }
 
 void Terrain::update(const glm::dvec3& cameraPos, const glm::mat4& viewProjection)
@@ -287,7 +288,7 @@ void Terrain::update(const glm::dvec3& cameraPos, const glm::mat4& viewProjectio
     for (const TileData& tile : done) {
         uploadTile(tile);
     }
-    glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
     m_stats.uploadsThisFrame = static_cast<int>(done.size());
 
     glm::vec4 planes[6];
@@ -315,9 +316,9 @@ void Terrain::selectNode(const TileKey& key, const glm::dvec3& cameraPos, const 
                          std::vector<TileStreamer::Request>& wanted)
 {
     const double size = nodeSize(key.level);
-    const int layer = residentLayer(key);
-    const float minY = layer >= 0 ? m_slots[static_cast<std::size_t>(layer)].minY : kUnknownMinY;
-    const float maxY = layer >= 0 ? m_slots[static_cast<std::size_t>(layer)].maxY : kUnknownMaxY;
+    const int slot = residentSlot(key);
+    const float minY = slot >= 0 ? m_slots[static_cast<std::size_t>(slot)].minY : kUnknownMinY;
+    const float maxY = slot >= 0 ? m_slots[static_cast<std::size_t>(slot)].maxY : kUnknownMaxY;
     const glm::dvec3 lo(static_cast<double>(key.x) * size, minY, static_cast<double>(key.z) * size);
     const glm::dvec3 hi = lo + glm::dvec3(size, static_cast<double>(maxY - minY), size);
 
@@ -325,7 +326,7 @@ void Terrain::selectNode(const TileKey& key, const glm::dvec3& cameraPos, const 
         return;
     }
     const double distance = distanceToBox(cameraPos, lo, hi);
-    if (layer < 0) {
+    if (slot < 0) {
         // Coarser levels first, then nearest.
         wanted.push_back({key, static_cast<float>((kMaxLevel - key.level) * 1e8 + distance)});
         return;
@@ -336,7 +337,7 @@ void Terrain::selectNode(const TileKey& key, const glm::dvec3& cameraPos, const 
         bool ready = true;
         for (int i = 0; i < 4; ++i) {
             children[i] = TileKey{key.level - 1, key.x * 2 + (i & 1), key.z * 2 + (i >> 1)};
-            if (residentLayer(children[i]) < 0) {
+            if (residentSlot(children[i]) < 0) {
                 ready = false;
                 const double childSize = nodeSize(key.level - 1);
                 const glm::dvec3 clo(static_cast<double>(children[i].x) * childSize, kUnknownMinY,
@@ -354,14 +355,13 @@ void Terrain::selectNode(const TileKey& key, const glm::dvec3& cameraPos, const 
         }
         // Children still streaming: draw this coarser node meanwhile.
     }
-    m_drawList.push_back(DrawNode{key, layer});
+    m_drawList.push_back(DrawNode{key, m_slots[static_cast<std::size_t>(slot)].texture});
 }
 
 void Terrain::draw(Shader& shader, GLuint heightTileUnit)
 {
     glActiveTexture(GL_TEXTURE0 + heightTileUnit);
-    glBindTexture(GL_TEXTURE_2D_ARRAY, m_tiles);
-    shader.set("uHeightTiles", static_cast<int>(heightTileUnit));
+    shader.set("uHeightTile", static_cast<int>(heightTileUnit));
     shader.set("uTileSamples", static_cast<float>(kTileSamples));
     shader.set("uTileBorder", static_cast<float>(kTileBorder));
     shader.set("uTileQuads", static_cast<float>(kTileQuads));
@@ -369,7 +369,6 @@ void Terrain::draw(Shader& shader, GLuint heightTileUnit)
     const GLint originLoc = shader.uniformLocation("uNodeOrigin");
     const GLint materialLoc = shader.uniformLocation("uNodeMaterialOrigin");
     const GLint sizeLoc = shader.uniformLocation("uNodeSize");
-    const GLint layerLoc = shader.uniformLocation("uTileLayer");
     const GLint morphLoc = shader.uniformLocation("uMorphRange");
 
     glBindVertexArray(m_vao);
@@ -383,7 +382,7 @@ void Terrain::draw(Shader& shader, GLuint heightTileUnit)
         glUniform2f(materialLoc, static_cast<float>(ox - kMaterialPeriod * std::floor(ox / kMaterialPeriod)),
                     static_cast<float>(oz - kMaterialPeriod * std::floor(oz / kMaterialPeriod)));
         glUniform1f(sizeLoc, static_cast<float>(size));
-        glUniform1f(layerLoc, static_cast<float>(node.layer));
+        glBindTexture(GL_TEXTURE_2D, node.texture);
         if (node.key.level < kMaxLevel) {
             const auto range = static_cast<float>(lodRange(node.key.level));
             glUniform2f(morphLoc, kMorphStart * range, range);

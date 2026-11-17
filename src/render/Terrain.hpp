@@ -17,7 +17,7 @@ class HeightField;
 class Shader;
 
 // Endless terrain as a CDLOD quadtree. Every node is drawn with one shared grid mesh; heights come
-// from streamed per-node tiles in a texture array, sampled in the vertex shader, and vertices
+// from streamed per-node tile textures, sampled in the vertex shader, and vertices
 // geomorph towards the next coarser grid as distance approaches the node's range so levels meet
 // without popping or cracks. Rendering is camera-relative (floating origin).
 class Terrain {
@@ -59,22 +59,24 @@ private:
         float minY = 0.0f;
         float maxY = 0.0f;
         std::uint64_t lastUsed = 0;
-        bool used = false;
+        GLuint texture = 0; // 0 when the slot is free
     };
     struct DrawNode {
         TileKey key;
-        int layer;
+        GLuint texture;
     };
 
     void selectNode(const TileKey& key, const glm::dvec3& cameraPos, const glm::vec4 planes[6],
                     std::vector<TileStreamer::Request>& wanted);
-    int residentLayer(const TileKey& key);
+    // Slot index of a loaded tile (marking it used this frame), or -1.
+    int residentSlot(const TileKey& key);
     void uploadTile(const TileData& tile);
     void buildGridMesh();
     void buildCoastMask(const HeightField& heightField);
 
     std::unique_ptr<TileStreamer> m_streamer;
-    GLuint m_tiles = 0; // GL_TEXTURE_2D_ARRAY, R32F, kTileSamples^2 per layer
+    // One small R32F texture per resident tile. Each upload creates a fresh texture, so the driver
+    // never has to wait for frames in flight that still read an older tile.
     int m_capacity = 0;
     std::vector<Slot> m_slots;
     std::unordered_map<TileKey, int, TileKeyHash> m_lookup;

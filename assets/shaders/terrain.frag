@@ -19,11 +19,10 @@ uniform float uFogDensity;
 uniform float uFogFalloff;
 uniform float uExaggeration;
 
-uniform sampler2DArray uHeightTiles; // streamed node tiles, see Terrain
+uniform sampler2D uHeightTile; // this node's streamed tile, see Terrain
 uniform float uTileSamples;
 uniform float uTileQuads;
 uniform float uNodeSize;
-uniform float uTileLayer;
 
 uniform sampler2DArray uMaterialColour;
 uniform sampler2DArray uMaterialNormal;
@@ -170,7 +169,7 @@ vec3 linearToSrgb(vec3 c)
 
 float tileHeight(vec2 uv)
 {
-    return textureLod(uHeightTiles, vec3(uv, uTileLayer), 0.0).r;
+    return textureLod(uHeightTile, uv, 0.0).r;
 }
 
 // Per-pixel normal from the node's tile (heights already exaggerated). Blends from one-texel to
