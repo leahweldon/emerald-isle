@@ -69,6 +69,9 @@ private:
 
     void selectNode(const TileKey& key, const glm::dvec3& cameraPos, const glm::vec4 planes[6],
                     std::vector<TileStreamer::Request>& wanted);
+    // Keeps coarse tiles loaded outside the view, so turning reveals terrain rather than holes.
+    void prefetchNode(const TileKey& key, const glm::dvec3& cameraPos,
+                      std::vector<TileStreamer::Request>& wanted);
     // Slot index of a loaded tile (marking it used this frame), or -1.
     int residentSlot(const TileKey& key);
     void uploadTile(const TileData& tile);

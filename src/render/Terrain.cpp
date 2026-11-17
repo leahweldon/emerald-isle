@@ -17,6 +17,10 @@ namespace {
 constexpr double kRangeFactor = 2.5;
 constexpr float kMorphStart = 0.75f; // fraction of the range where morphing begins
 constexpr int kRootRadius = 2;       // roots drawn around the camera's root cell (5 x 5)
+// Levels this coarse (131 km nodes and up) are kept loaded even outside the view.
+constexpr int kPrefetchLevel = kMaxLevel - 2;
+// Requests for tiles outside the view come after every visible one.
+constexpr double kPrefetchPriority = 1e9;
 constexpr int kUploadsPerFrame = 16;
 constexpr int kCapacity = 1024; // resident tiles
 // Bounds for nodes whose tile is not loaded yet, so they are not culled by mistake.
@@ -316,6 +320,24 @@ void Terrain::update(const glm::dvec3& cameraPos, const glm::mat4& viewProjectio
     m_settled = wanted.empty() && m_stats.outstandingTiles == 0;
 }
 
+void Terrain::prefetchNode(const TileKey& key, const glm::dvec3& cameraPos,
+                           std::vector<TileStreamer::Request>& wanted)
+{
+    const double size = nodeSize(key.level);
+    const glm::dvec3 lo(static_cast<double>(key.x) * size, kUnknownMinY, static_cast<double>(key.z) * size);
+    const glm::dvec3 hi = lo + glm::dvec3(size, kUnknownMaxY - kUnknownMinY, size);
+    const double distance = distanceToBox(cameraPos, lo, hi);
+    if (residentSlot(key) < 0) {
+        wanted.push_back({key, static_cast<float>(kPrefetchPriority + (kMaxLevel - key.level) * 1e8 + distance)});
+        return;
+    }
+    if (key.level > kPrefetchLevel && distance < lodRange(key.level - 1)) {
+        for (int i = 0; i < 4; ++i) {
+            prefetchNode(TileKey{key.level - 1, key.x * 2 + (i & 1), key.z * 2 + (i >> 1)}, cameraPos, wanted);
+        }
+    }
+}
+
 void Terrain::selectNode(const TileKey& key, const glm::dvec3& cameraPos, const glm::vec4 planes[6],
                          std::vector<TileStreamer::Request>& wanted)
 {
@@ -327,6 +349,9 @@ void Terrain::selectNode(const TileKey& key, const glm::dvec3& cameraPos, const 
     const glm::dvec3 hi = lo + glm::dvec3(size, static_cast<double>(maxY - minY), size);
 
     if (!boxVisible(planes, glm::vec3(lo - cameraPos), glm::vec3(hi - cameraPos))) {
+        if (key.level >= kPrefetchLevel) {
+            prefetchNode(key, cameraPos, wanted);
+        }
         return;
     }
     const double distance = distanceToBox(cameraPos, lo, hi);
