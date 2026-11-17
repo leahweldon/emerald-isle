@@ -19,11 +19,20 @@ constexpr double kContinentScale = 110e3; // island size
 constexpr double kSeaThreshold = 0.12;    // continent value where land starts
 constexpr double kRegionScale = 600e3;    // dense archipelagos versus open ocean
 constexpr double kRegionStrength = 0.35;  // how far regions shift the land threshold
-constexpr double kBaseRelief = 1100.0;    // height per unit of continent above the threshold
-constexpr double kHillScale = 6e3;
-constexpr double kHillRelief = 120.0;
-constexpr double kRidgeScale = 12e3;
-constexpr double kRidgeRelief = 550.0;
+constexpr double kIsletScale = 35e3;      // smaller islands and peninsulas around the large ones
+constexpr double kIsletStrength = 0.3;
+constexpr double kRuggedScale = 250e3;    // some islands gentle, some mountainous
+constexpr double kBaseRelief = 450.0;     // height per unit of continent above the threshold
+constexpr double kRidgeScale = 9e3;
+constexpr double kRidgeRelief = 800.0;    // ridged crests, scaled by ruggedness
+constexpr double kErosionScale = 5e3;
+constexpr double kErosionRelief = 200.0;  // slope-damped detail: gullies on slopes, smooth valleys
+constexpr double kCliffScale = 70e3;      // which coasts get cliffs
+constexpr double kCliffHeight = 160.0;
+constexpr double kCliffWidth = 0.004;     // continent units over which the cliff rises
+// Peaks above the knee are eased towards the ceiling, keeping summits near Ireland's scale.
+constexpr double kPeakKnee = 1000.0;
+constexpr double kPeakCeiling = 1300.0;
 
 // Near the DEM: blend band inside its border, and a ring outside kept clear of procedural land.
 constexpr double kBlendMargin = 20e3;
@@ -97,20 +106,42 @@ double HeightField::proceduralAt(double x, double z) const
     const double qz = z + kWarpAmplitude * wz;
 
     const double region = m_noise.fbm(x / kRegionScale + 3.3, z / kRegionScale - 8.1, 2);
-    double land = m_noise.fbm(qx / kContinentScale, qz / kContinentScale, 5) - kSeaThreshold -
-                  kRegionStrength * region;
+    double land = m_noise.fbm(qx / kContinentScale, qz / kContinentScale, 5) +
+                  kIsletStrength * m_noise.fbm(qx / kIsletScale - 21.4, qz / kIsletScale + 4.6, 3) -
+                  kSeaThreshold - kRegionStrength * region;
 
     // Keep a ring of open sea around Ireland so the DEM border never meets procedural land.
     const double outX = std::max(std::abs(x) - m_halfWidth, 0.0);
     const double outZ = std::max(std::abs(z) - m_halfDepth, 0.0);
     const double distanceOutside = std::sqrt(outX * outX + outZ * outZ);
     land = -0.2 + (land + 0.2) * smoothstep(kClearStart, kClearEnd, distanceOutside);
+    if (land < -0.05) {
+        return land * kBaseRelief; // open sea: skip the detail terms
+    }
 
-    const double hills = m_noise.fbm(qx / kHillScale, qz / kHillScale, 6) * kHillRelief *
-                         smoothstep(-0.03, 0.06, land);
-    const double ridgeNoise = 1.0 - std::abs(m_noise.fbm(qx / kRidgeScale + 101.0, qz / kRidgeScale, 4));
-    const double ridges = ridgeNoise * ridgeNoise * kRidgeRelief * smoothstep(0.03, 0.2, land);
-    return land * kBaseRelief + hills + ridges;
+    const double rugged =
+        smoothstep(-0.25, 0.35, m_noise.fbm(x / kRuggedScale - 7.7, z / kRuggedScale + 2.2, 2));
+    const double inland = smoothstep(0.02, 0.18, land);
+
+    // Ruggedness only scales land, so the sea floor matches the early return above.
+    const double base = land * kBaseRelief * (land > 0.0 ? 0.5 + rugged : 1.0);
+    const double ridges = m_noise.ridged(qx / kRidgeScale + 101.0, qz / kRidgeScale, 6) * kRidgeRelief *
+                          (0.25 + 1.25 * rugged) * inland;
+    // Faded to zero at the shoreline so gullies never cut pits below sea level on coastal lowland.
+    const double erosion = m_noise.erodedFbm(qx / kErosionScale, qz / kErosionScale, 6) * kErosionRelief *
+                           smoothstep(0.0, 0.2, land);
+
+    // Cliffs on some coasts: the ground rises steeply just inland of the shoreline.
+    const double cliffy =
+        smoothstep(0.1, 0.45, m_noise.fbm(x / kCliffScale + 63.0, z / kCliffScale - 5.0, 2));
+    const double cliff = cliffy * kCliffHeight * smoothstep(0.0, kCliffWidth, land);
+
+    const double h = base + ridges + erosion + cliff;
+    if (h <= kPeakKnee) {
+        return h;
+    }
+    const double range = kPeakCeiling - kPeakKnee;
+    return kPeakKnee + range * std::tanh((h - kPeakKnee) / range);
 }
 
 double HeightField::heightAt(double x, double z) const
