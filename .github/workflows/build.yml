@@ -6,10 +6,16 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A new push to a branch or PR cancels its run still in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -24,6 +30,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build xvfb mesa-utils \
             libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl-dev
+
+      # Only dependency sources and download stamps are cached, not compiled objects, so
+      # configure skips the git clones while every build still compiles from scratch.
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/_deps/*-src
+            build/_deps/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DEMERALD_WARNINGS_AS_ERRORS=ON
