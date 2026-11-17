@@ -22,6 +22,8 @@ constexpr int kMaxCapacity = 1024;
 // Bounds for nodes whose tile is not loaded yet, so they are not culled by mistake.
 constexpr float kUnknownMinY = -200.0f;
 constexpr float kUnknownMaxY = 5000.0f;
+// Matches kMaterialPeriod in terrain.frag: material patterns repeat exactly every this many metres.
+constexpr double kMaterialPeriod = 360000.0;
 
 double lodRange(int level)
 {
@@ -364,7 +366,7 @@ void Terrain::draw(Shader& shader, GLuint heightTileUnit)
     shader.set("uTileQuads", static_cast<float>(kTileQuads));
 
     const GLint originLoc = shader.uniformLocation("uNodeOrigin");
-    const GLint worldLoc = shader.uniformLocation("uNodeWorldOrigin");
+    const GLint materialLoc = shader.uniformLocation("uNodeMaterialOrigin");
     const GLint sizeLoc = shader.uniformLocation("uNodeSize");
     const GLint layerLoc = shader.uniformLocation("uTileLayer");
     const GLint morphLoc = shader.uniformLocation("uMorphRange");
@@ -376,7 +378,9 @@ void Terrain::draw(Shader& shader, GLuint heightTileUnit)
         const double oz = static_cast<double>(node.key.z) * size;
         // Origin relative to the camera, computed in double: the floating origin.
         glUniform2f(originLoc, static_cast<float>(ox - m_cameraPos.x), static_cast<float>(oz - m_cameraPos.z));
-        glUniform2f(worldLoc, static_cast<float>(ox), static_cast<float>(oz));
+        // Wrapped in double so material coordinates stay small however far out the node is.
+        glUniform2f(materialLoc, static_cast<float>(ox - kMaterialPeriod * std::floor(ox / kMaterialPeriod)),
+                    static_cast<float>(oz - kMaterialPeriod * std::floor(oz / kMaterialPeriod)));
         glUniform1f(sizeLoc, static_cast<float>(size));
         glUniform1f(layerLoc, static_cast<float>(node.layer));
         if (node.key.level < kMaxLevel) {

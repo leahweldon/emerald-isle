@@ -1,7 +1,7 @@
 #version 330 core
 
 in vec3 vRelPos;   // relative to the camera
-in vec2 vWorldXZ;
+in vec2 vWorldXZ;  // world XZ wrapped per node to within kMaterialPeriod
 in float vWorldY;
 in vec2 vTileUV;
 in float vMorph;
@@ -34,6 +34,10 @@ const float kSand  = 1.0;
 const float kHeath = 2.0;
 const float kRock  = 3.0;
 
+// Every material pattern repeats exactly every kMaterialPeriod metres (texture tiles and noise
+// scales divide it), so world coordinates can be wrapped per node and stay precise anywhere.
+const float kMaterialPeriod = 360000.0;
+
 // Texture repeat sizes in metres. Two non-multiple scales hide tiling on flat materials.
 const float kTileNear = 2000.0;
 const float kTileFar  = 9000.0;
@@ -56,23 +60,30 @@ float hash(vec2 p)
     return fract(p.x * p.y);
 }
 
-float valueNoise(vec2 p)
+// Value noise whose lattice repeats every `period` cells.
+float valueNoise(vec2 p, float period)
 {
     vec2 i = floor(p);
     vec2 f = fract(p);
     vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
-               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+    vec2 i0 = mod(i, period);
+    vec2 i1 = mod(i + 1.0, period);
+    return mix(mix(hash(i0), hash(vec2(i1.x, i0.y)), u.x),
+               mix(hash(vec2(i0.x, i1.y)), hash(i1), u.x), u.y);
 }
 
-// Four octaves, roughly in [0, 1].
-float fbm(vec2 p)
+// Four octaves, roughly in [0, 1], repeating every kMaterialPeriod metres for any scale that
+// divides it.
+float fbm(vec2 worldXZ, float scale, vec2 offset)
 {
+    vec2 p = worldXZ / scale + offset;
+    float period = kMaterialPeriod / scale;
     float sum = 0.0;
     float amplitude = 0.5;
     for (int i = 0; i < 4; ++i) {
-        sum += amplitude * valueNoise(p);
-        p = p * 2.03 + vec2(1.7, 9.2);
+        sum += amplitude * valueNoise(p, period);
+        p = p * 2.0 + vec2(1.7, 9.2);
+        period *= 2.0;
         amplitude *= 0.5;
     }
     return sum / 0.9375;
@@ -230,10 +241,10 @@ void main()
     float slope = 1.0 - n.y;
 
     // Low-frequency noise shifts every threshold so bands do not follow contours.
-    float broad = fbm(gWorldPos.xz / 25000.0);
-    float local = fbm(gWorldPos.xz / 6000.0 + 17.0);
+    float broad = fbm(gWorldPos.xz, 24000.0, vec2(0.0));
+    float local = fbm(gWorldPos.xz, 6000.0, vec2(17.0));
 
-    float patches = fbm(gWorldPos.xz / 2500.0 + 5.0);
+    float patches = fbm(gWorldPos.xz, 2500.0, vec2(5.0));
 
     float sand = 1.0 - smoothstep(2.0, 6.0 + 8.0 * local, metres);
     sand *= 1.0 - smoothstep(0.05, 0.15, slope);
@@ -313,7 +324,7 @@ void main()
     vec3 shadingNormal = normalize(normalSum + n * 1e-4);
 
     // Large-scale colour variation hides repetition across the island.
-    float macro = fbm(gWorldPos.xz / 40000.0 + 3.0);
+    float macro = fbm(gWorldPos.xz, 40000.0, vec2(3.0));
     albedo *= mix(vec3(0.70, 0.75, 0.65), vec3(1.23, 1.14, 0.89), macro);
 
     // Fade the last metres above sea level into shallow water to soften the pixel coastline.

@@ -13,7 +13,7 @@ uniform float uTileBorder;
 uniform float uTileQuads;
 
 uniform vec2 uNodeOrigin;      // node's -X/-Z corner relative to the camera
-uniform vec2 uNodeWorldOrigin; // same corner in world space, for material coordinates
+uniform vec2 uNodeMaterialOrigin; // same corner in world space modulo the material period
 uniform float uNodeSize;
 uniform float uTileLayer;
 uniform vec2 uMorphRange;      // distance where morphing to the coarser grid starts and ends
@@ -51,7 +51,7 @@ void main()
     height -= aGrid.z * max(2.0 * spacing, 20.0);
 
     vRelPos = vec3(xz.x, height - uCameraHeight, xz.y);
-    vWorldXZ = uNodeWorldOrigin + grid * spacing;
+    vWorldXZ = uNodeMaterialOrigin + grid * spacing;
     vWorldY = height;
     vTileUV = tileUV(grid);
     vMorph = morph;
