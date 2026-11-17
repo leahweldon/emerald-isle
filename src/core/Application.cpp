@@ -454,6 +454,10 @@ void Application::printRunStats() const
     };
     const long over120Hz = over(8.3f);
     const long over60Hz = over(16.7f);
+    double totalMs = 0.0;
+    for (float t : times) {
+        totalMs += static_cast<double>(t);
+    }
 
     std::sort(times.begin(), times.end());
     const auto percentile = [&times](double p) {
@@ -463,6 +467,12 @@ void Application::printRunStats() const
                 "max %.2f ms; %ld over 8.3 ms, %ld over 16.7 ms\n",
                 times.size(), static_cast<double>(percentile(0.5)), static_cast<double>(percentile(0.99)),
                 static_cast<double>(times.back()), over120Hz, over60Hz);
+    // With vsync, swaps can return early and then block for two refreshes, so single frames look
+    // slow while every refresh still gets a new frame. The average rate shows dropped refreshes.
+    if (m_options.window.vsync) {
+        std::printf("Presentation: %.1f frames per second on average (display %d Hz)\n",
+                    static_cast<double>(times.size()) * 1000.0 / totalMs, m_window.refreshRate());
+    }
 
     // Time before the swap (CPU work plus any driver back-pressure) and, if timed, GPU work; the
     // rest of a slow frame is the swap waiting to present.
