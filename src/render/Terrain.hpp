@@ -28,6 +28,7 @@ public:
         int residentTiles = 0;
         std::size_t outstandingTiles = 0;
         int uploadsThisFrame = 0;
+        std::uint64_t tilesGenerated = 0; // since startup
     };
 
     explicit Terrain(const HeightField& heightField);

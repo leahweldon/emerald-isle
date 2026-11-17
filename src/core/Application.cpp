@@ -222,6 +222,7 @@ int Application::run()
         update(delta);
         render();
         ++m_frameCount;
+        recordFrameStats(delta);
 
         // Screenshots count only frames with the terrain fully streamed in (or give up after 60 s),
         // so they never capture half-loaded tiles. Plain --frames runs count every frame.
@@ -256,6 +257,7 @@ int Application::run()
 
     std::printf("Rendered %d frames, last average %.1f FPS (%.2f ms/frame)\n",
                 m_frameCount, m_timer.framesPerSecond(), m_timer.frameTimeMs());
+    printRunStats();
     return EXIT_SUCCESS;
 }
 
@@ -310,6 +312,47 @@ void Application::setSceneUniforms(Shader& shader)
     m_atmosphere.apply(shader, static_cast<float>(m_camera.position.y));
 }
 
+void Application::recordFrameStats(float deltaSeconds)
+{
+    const Terrain::Stats& stats = m_terrain->stats();
+    if (m_frameCount > 1) { // the first delta is zero
+        m_frameMs.push_back(deltaSeconds * 1000.0f);
+    }
+    m_triangleSum += static_cast<double>(stats.triangles);
+    m_drawCallSum += stats.drawCalls;
+    m_peakResidentTiles = std::max(m_peakResidentTiles, stats.residentTiles);
+}
+
+void Application::printRunStats() const
+{
+    const Terrain::Stats& stats = m_terrain->stats();
+    std::printf("Terrain: avg %.2fM triangles, %.0f draw calls; peak %d resident tiles, %llu generated\n",
+                m_triangleSum / std::max(m_frameCount, 1) / 1e6, m_drawCallSum / std::max(m_frameCount, 1),
+                m_peakResidentTiles, static_cast<unsigned long long>(stats.tilesGenerated));
+    // Skip the first second (startup tile flood, sky cubemap, shader warm-up) so the numbers
+    // reflect steady state, including streaming while moving.
+    std::size_t skip = 0;
+    for (float elapsed = 0.0f; skip < m_frameMs.size() && elapsed < 1000.0f; ++skip) {
+        elapsed += m_frameMs[skip];
+    }
+    std::vector<float> times(m_frameMs.begin() + static_cast<std::ptrdiff_t>(skip), m_frameMs.end());
+    if (times.size() < 10) {
+        return;
+    }
+    std::sort(times.begin(), times.end());
+    const auto percentile = [&times](double p) {
+        return times[std::min(times.size() - 1, static_cast<std::size_t>(p * static_cast<double>(times.size())))];
+    };
+    const float median = percentile(0.5);
+    const auto spikes = std::count_if(times.begin(), times.end(), [median](float t) { return t > 2.0f * median; });
+    const auto missed = std::count_if(times.begin(), times.end(), [](float t) { return t > 1000.0f / 60.0f; });
+    std::printf("Frame times after the first second: median %.2f ms, p99 %.2f ms, max %.2f ms; "
+                "%ld of %zu over 2x median, %ld over 16.7 ms\n",
+                static_cast<double>(median), static_cast<double>(percentile(0.99)),
+                static_cast<double>(times.back()), static_cast<long>(spikes), times.size(),
+                static_cast<long>(missed));
+}
+
 void Application::updateTitle()
 {
     char speed[32];
@@ -318,10 +361,16 @@ void Application::updateTitle()
     } else {
         std::snprintf(speed, sizeof(speed), "orbit");
     }
-    char title[160];
-    std::snprintf(title, sizeof(title), "%s  |  %.0f FPS  |  %.2f ms  |  %s",
-                  m_options.window.title.c_str(),
-                  m_timer.framesPerSecond(), m_timer.frameTimeMs(), speed);
+    const Terrain::Stats& stats = m_terrain->stats();
+    char streaming[32] = "";
+    if (stats.outstandingTiles > 0) {
+        std::snprintf(streaming, sizeof(streaming), " (+%zu streaming)", stats.outstandingTiles);
+    }
+    char title[256];
+    std::snprintf(title, sizeof(title), "%s  |  %.0f FPS  |  %.2f ms  |  %.2fM tris  |  %d draws  |  %d tiles%s  |  %s",
+                  m_options.window.title.c_str(), m_timer.framesPerSecond(), m_timer.frameTimeMs(),
+                  static_cast<double>(stats.triangles) / 1e6, stats.drawCalls, stats.residentTiles,
+                  streaming, speed);
     m_window.setTitle(title);
 }
 

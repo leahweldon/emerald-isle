@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <cstdint>
 #include <memory>
+#include <vector>
 #include <string>
 
 namespace emerald {
@@ -50,6 +51,8 @@ private:
     void update(float deltaSeconds);
     void render();
     void updateTitle();
+    void recordFrameStats(float deltaSeconds);
+    void printRunStats() const;
     void setSceneUniforms(Shader& shader);
 
     AppOptions m_options;
@@ -68,6 +71,12 @@ private:
     Atmosphere m_atmosphere;
     int m_frameCount = 0;
     int m_settledFrames = 0; // frames rendered with all wanted terrain tiles loaded
+
+    // Run statistics, printed on exit.
+    std::vector<float> m_frameMs;
+    double m_triangleSum = 0.0;
+    double m_drawCallSum = 0.0;
+    int m_peakResidentTiles = 0;
 };
 
 } // namespace emerald

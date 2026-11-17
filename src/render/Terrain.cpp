@@ -307,6 +307,7 @@ void Terrain::update(const glm::dvec3& cameraPos, const glm::mat4& viewProjectio
 
     m_stats.outstandingTiles = m_streamer->outstanding();
     m_stats.residentTiles = static_cast<int>(m_lookup.size());
+    m_stats.tilesGenerated = m_streamer->generatedCount();
     m_settled = wanted.empty() && m_stats.outstandingTiles == 0;
 }
 
