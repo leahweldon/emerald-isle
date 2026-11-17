@@ -12,6 +12,7 @@
 #include <glad/gl.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -63,6 +64,7 @@ void printUsage(const char* program)
         "  --sun-elevation <deg> Sun elevation above the horizon (default 22)\n"
         "  --seed <n>            Procedural world seed (default 1)\n"
         "  --autofly <s>         Fly straight ahead for s seconds, print stats, exit\n"
+        "  --frame-log <file>    Write per-frame phase timings (CSV)\n"
         "  --help                Show this message\n",
         EMERALD_VERSION, program, viewPresetNames().c_str());
 }
@@ -133,6 +135,8 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.sunBearing = parseFloat(arg, argv[++i], -360.0f, 360.0f);
         } else if (std::strcmp(arg, "--sun-elevation") == 0 && hasValue) {
             options.sunElevation = parseFloat(arg, argv[++i], -10.0f, 90.0f);
+        } else if (std::strcmp(arg, "--frame-log") == 0 && hasValue) {
+            options.frameLogPath = argv[++i];
         } else if (std::strcmp(arg, "--autofly") == 0 && hasValue) {
             options.autoflySeconds = parseFloat(arg, argv[++i], 0.1f, 3600.0f);
         } else if (std::strcmp(arg, "--seed") == 0 && hasValue) {
@@ -198,6 +202,14 @@ Application::Application(AppOptions options)
     m_seaShader->set("uTerrainSize", m_terrain->demSize());
     m_seaShader->set("uSeaRadius", kSeaHalfSize);
 
+    if (!m_options.frameLogPath.empty()) {
+        m_frameLog = std::fopen(m_options.frameLogPath.c_str(), "w");
+        if (!m_frameLog) {
+            throw std::runtime_error("Could not open frame log " + m_options.frameLogPath);
+        }
+        std::fprintf(m_frameLog, "frame,total_ms,events_ms,update_ms,terrain_ms,render_ms,swap_ms,"
+                                 "uploads,outstanding,resident,triangles,draws,x,y,z\n");
+    }
     m_atmosphere.sunDir = sunDirection(m_options.sunBearing, m_options.sunElevation);
     m_camera.farPlane = kFarPlane;
     m_controller = std::make_unique<CameraController>(
@@ -223,19 +235,31 @@ Application::Application(AppOptions options)
     }
 }
 
-Application::~Application() = default;
+Application::~Application()
+{
+    if (m_frameLog) {
+        std::fclose(m_frameLog);
+    }
+}
 
 int Application::run()
 {
+    using Clock = std::chrono::steady_clock;
+    const auto ms = [](Clock::time_point a, Clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    };
     while (!m_window.shouldClose()) {
+        const auto frameStart = Clock::now();
         const float delta = m_timer.tick();
 
         m_window.input().beginFrame();
         m_window.pollEvents();
+        const auto afterEvents = Clock::now();
         update(delta);
+        const auto afterUpdate = Clock::now();
         render();
+        const auto afterRender = Clock::now();
         ++m_frameCount;
-        recordFrameStats(delta);
 
         // Screenshots count only frames with the terrain fully streamed in (or give up after 60 s),
         // so they never capture half-loaded tiles. Plain --frames runs count every frame.
@@ -261,9 +285,22 @@ int Application::run()
         }
 
         m_window.swapBuffers();
+        const auto afterSwap = Clock::now();
 
         if (m_timer.hasNewSample()) {
             updateTitle();
+        }
+
+        // Timed per loop iteration, so every phase belongs to the frame it is reported with.
+        const double totalMs = ms(frameStart, Clock::now());
+        recordFrameStats(static_cast<float>(totalMs));
+        if (m_frameLog) {
+            const Terrain::Stats& st = m_terrain->stats();
+            std::fprintf(m_frameLog, "%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%zu,%d,%zu,%d,%.1f,%.1f,%.1f\n",
+                         m_frameCount, totalMs, ms(frameStart, afterEvents), ms(afterEvents, afterUpdate),
+                         st.updateMs, ms(afterUpdate, afterRender) - st.updateMs, ms(afterRender, afterSwap),
+                         st.uploadsThisFrame, st.outstandingTiles, st.residentTiles, st.triangles, st.drawCalls,
+                         m_camera.position.x, m_camera.position.y, m_camera.position.z);
         }
         if (lastFrame) {
             m_window.requestClose();
@@ -327,12 +364,11 @@ void Application::setSceneUniforms(Shader& shader)
     m_atmosphere.apply(shader, static_cast<float>(m_camera.position.y));
 }
 
-void Application::recordFrameStats(float deltaSeconds)
+void Application::recordFrameStats(float frameMs)
 {
     const Terrain::Stats& stats = m_terrain->stats();
-    if (m_frameCount > 1) { // the first delta is zero
-        m_frameMs.push_back(deltaSeconds * 1000.0f);
-    }
+    m_frameMs.push_back(frameMs);
+    m_terrainMs.push_back(static_cast<float>(stats.updateMs));
     m_triangleSum += static_cast<double>(stats.triangles);
     m_drawCallSum += stats.drawCalls;
     m_peakResidentTiles = std::max(m_peakResidentTiles, stats.residentTiles);
@@ -350,22 +386,43 @@ void Application::printRunStats() const
     for (float elapsed = 0.0f; skip < m_frameMs.size() && elapsed < 1000.0f; ++skip) {
         elapsed += m_frameMs[skip];
     }
-    std::vector<float> times(m_frameMs.begin() + static_cast<std::ptrdiff_t>(skip), m_frameMs.end());
-    if (times.size() < 10) {
+    if (m_frameMs.size() < skip + 70) {
         return;
     }
+    std::vector<float> times(m_frameMs.begin() + static_cast<std::ptrdiff_t>(skip), m_frameMs.end());
+
+    // A spike is a frame over twice the median of the 60 frames before it, so a flight that moves
+    // between cheap sea and costlier land is judged against what was normal at the time.
+    constexpr std::size_t kWindow = 60;
+    std::size_t spikes = 0;
+    std::vector<float> window;
+    for (std::size_t i = skip + kWindow; i < m_frameMs.size(); ++i) {
+        window.assign(m_frameMs.begin() + static_cast<std::ptrdiff_t>(i - kWindow),
+                      m_frameMs.begin() + static_cast<std::ptrdiff_t>(i));
+        std::nth_element(window.begin(), window.begin() + kWindow / 2, window.end());
+        if (m_frameMs[i] > 2.0f * window[kWindow / 2]) {
+            ++spikes;
+        }
+    }
+    const auto missed = std::count_if(times.begin(), times.end(), [](float t) { return t > 25.0f; });
+
     std::sort(times.begin(), times.end());
     const auto percentile = [&times](double p) {
         return times[std::min(times.size() - 1, static_cast<std::size_t>(p * static_cast<double>(times.size())))];
     };
-    const float median = percentile(0.5);
-    const auto spikes = std::count_if(times.begin(), times.end(), [median](float t) { return t > 2.0f * median; });
-    const auto missed = std::count_if(times.begin(), times.end(), [](float t) { return t > 1000.0f / 60.0f; });
     std::printf("Frame times after the first second: median %.2f ms, p99 %.2f ms, max %.2f ms; "
-                "%ld of %zu over 2x median, %ld over 16.7 ms\n",
-                static_cast<double>(median), static_cast<double>(percentile(0.99)),
-                static_cast<double>(times.back()), static_cast<long>(spikes), times.size(),
-                static_cast<long>(missed));
+                "%zu of %zu over 2x the recent median, %ld over 25 ms\n",
+                static_cast<double>(percentile(0.5)), static_cast<double>(percentile(0.99)),
+                static_cast<double>(times.back()), spikes, times.size(), static_cast<long>(missed));
+
+    std::vector<float> terrain(m_terrainMs.begin() + static_cast<std::ptrdiff_t>(skip), m_terrainMs.end());
+    double terrainSum = 0.0;
+    for (float t : terrain) {
+        terrainSum += static_cast<double>(t);
+    }
+    std::printf("Terrain main-thread work (uploads and selection): avg %.3f ms, max %.3f ms\n",
+                terrainSum / static_cast<double>(terrain.size()),
+                static_cast<double>(*std::max_element(terrain.begin(), terrain.end())));
 }
 
 void Application::updateTitle()

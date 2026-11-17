@@ -4,6 +4,7 @@
 #include "world/HeightField.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <limits>
@@ -283,6 +284,7 @@ void Terrain::uploadTile(const TileData& tile)
 
 void Terrain::update(const glm::dvec3& cameraPos, const glm::mat4& viewProjection)
 {
+    const auto start = std::chrono::steady_clock::now();
     ++m_frame;
     m_cameraPos = cameraPos;
     m_stats = Stats{};
@@ -318,6 +320,7 @@ void Terrain::update(const glm::dvec3& cameraPos, const glm::mat4& viewProjectio
     m_stats.residentTiles = static_cast<int>(m_lookup.size());
     m_stats.tilesGenerated = m_streamer->generatedCount();
     m_settled = wanted.empty() && m_stats.outstandingTiles == 0;
+    m_stats.updateMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 }
 
 void Terrain::prefetchNode(const TileKey& key, const glm::dvec3& cameraPos,

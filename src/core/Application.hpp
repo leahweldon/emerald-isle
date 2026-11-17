@@ -8,6 +8,7 @@
 
 #include <filesystem>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 #include <vector>
 #include <string>
@@ -36,6 +37,8 @@ struct AppOptions {
     std::uint32_t seed = 1;
     // When greater than zero, fly straight ahead for this many seconds, then exit.
     float autoflySeconds = 0.0f;
+    // When set, a CSV row of per-phase timings is written for every frame.
+    std::string frameLogPath;
     std::filesystem::path assetDir;
 };
 
@@ -53,7 +56,7 @@ private:
     void update(float deltaSeconds);
     void render();
     void updateTitle();
-    void recordFrameStats(float deltaSeconds);
+    void recordFrameStats(float frameMs);
     void printRunStats() const;
     void setSceneUniforms(Shader& shader);
 
@@ -75,7 +78,9 @@ private:
     int m_settledFrames = 0; // frames rendered with all wanted terrain tiles loaded
 
     // Run statistics, printed on exit.
-    std::vector<float> m_frameMs;
+    std::vector<float> m_frameMs;   // whole loop iteration, per frame
+    std::vector<float> m_terrainMs; // terrain update on the main thread, per frame
+    std::FILE* m_frameLog = nullptr;
     double m_triangleSum = 0.0;
     double m_drawCallSum = 0.0;
     int m_peakResidentTiles = 0;
