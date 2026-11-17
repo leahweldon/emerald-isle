@@ -414,34 +414,28 @@ void Application::printRunStats() const
     for (float elapsed = 0.0f; skip < m_frameMs.size() && elapsed < 1000.0f; ++skip) {
         elapsed += m_frameMs[skip];
     }
-    if (m_frameMs.size() < skip + 70) {
+    if (m_frameMs.size() <= skip) {
         return;
     }
     std::vector<float> times(m_frameMs.begin() + static_cast<std::ptrdiff_t>(skip), m_frameMs.end());
 
-    // A spike is a frame over twice the median of the 60 frames before it, so a flight that moves
-    // between cheap sea and costlier land is judged against what was normal at the time.
-    constexpr std::size_t kWindow = 60;
-    std::size_t spikes = 0;
-    std::vector<float> window;
-    for (std::size_t i = skip + kWindow; i < m_frameMs.size(); ++i) {
-        window.assign(m_frameMs.begin() + static_cast<std::ptrdiff_t>(i - kWindow),
-                      m_frameMs.begin() + static_cast<std::ptrdiff_t>(i));
-        std::nth_element(window.begin(), window.begin() + kWindow / 2, window.end());
-        if (m_frameMs[i] > 2.0f * window[kWindow / 2]) {
-            ++spikes;
-        }
-    }
-    const auto missed = std::count_if(times.begin(), times.end(), [](float t) { return t > 25.0f; });
+    // Spikes are counted against fixed 120 Hz and 60 Hz budgets: a ratio to the recent median
+    // means little when the median over open sea is ~2 ms.
+    const auto over = [&times](float budgetMs) {
+        return static_cast<long>(
+            std::count_if(times.begin(), times.end(), [budgetMs](float t) { return t > budgetMs; }));
+    };
+    const long over120Hz = over(8.3f);
+    const long over60Hz = over(16.7f);
 
     std::sort(times.begin(), times.end());
     const auto percentile = [&times](double p) {
         return times[std::min(times.size() - 1, static_cast<std::size_t>(p * static_cast<double>(times.size())))];
     };
-    std::printf("Frame times after the first second: median %.2f ms, p99 %.2f ms, max %.2f ms; "
-                "%zu of %zu over 2x the recent median, %ld over 25 ms\n",
-                static_cast<double>(percentile(0.5)), static_cast<double>(percentile(0.99)),
-                static_cast<double>(times.back()), spikes, times.size(), static_cast<long>(missed));
+    std::printf("Frame times after the first second (%zu frames): median %.2f ms, p99 %.2f ms, "
+                "max %.2f ms; %ld over 8.3 ms, %ld over 16.7 ms\n",
+                times.size(), static_cast<double>(percentile(0.5)), static_cast<double>(percentile(0.99)),
+                static_cast<double>(times.back()), over120Hz, over60Hz);
 
     std::vector<float> terrain(m_terrainMs.begin() + static_cast<std::ptrdiff_t>(skip), m_terrainMs.end());
     double terrainSum = 0.0;
