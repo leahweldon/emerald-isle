@@ -76,6 +76,11 @@ bool Window::shouldClose() const
     return glfwWindowShouldClose(m_handle) != 0;
 }
 
+bool Window::focused() const
+{
+    return glfwGetWindowAttrib(m_handle, GLFW_FOCUSED) != 0;
+}
+
 void Window::requestClose()
 {
     glfwSetWindowShouldClose(m_handle, GLFW_TRUE);

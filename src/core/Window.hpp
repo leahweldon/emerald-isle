@@ -27,6 +27,8 @@ public:
     Window& operator=(const Window&) = delete;
 
     bool shouldClose() const;
+    // macOS throttles presentation for windows in the background, so frame logs record this.
+    bool focused() const;
     void requestClose();
     void swapBuffers();
     void pollEvents();

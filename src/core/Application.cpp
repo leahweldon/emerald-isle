@@ -1,6 +1,7 @@
 #include "core/Application.hpp"
 
 #include "core/Screenshot.hpp"
+#include "render/GpuTimer.hpp"
 #include "render/Shader.hpp"
 #include "render/SeaPlane.hpp"
 #include "render/Sky.hpp"
@@ -76,6 +77,7 @@ void printUsage(const char* program)
         "  --seed <n>            Procedural world seed (default 1)\n"
         "  --autofly <s>         Fly straight ahead for s seconds, print stats, exit\n"
         "  --frame-log <file>    Write per-frame phase timings (CSV)\n"
+        "  --gpu-timing          Also measure GPU time per frame (adds ~0.4 ms on macOS)\n"
         "  --help                Show this message\n",
         EMERALD_VERSION, program, viewPresetNames().c_str());
 }
@@ -146,6 +148,8 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.sunBearing = parseFloat(arg, argv[++i], -360.0f, 360.0f);
         } else if (std::strcmp(arg, "--sun-elevation") == 0 && hasValue) {
             options.sunElevation = parseFloat(arg, argv[++i], -10.0f, 90.0f);
+        } else if (std::strcmp(arg, "--gpu-timing") == 0) {
+            options.gpuTiming = true;
         } else if (std::strcmp(arg, "--frame-log") == 0 && hasValue) {
             options.frameLogPath = argv[++i];
         } else if (std::strcmp(arg, "--autofly") == 0 && hasValue) {
@@ -185,6 +189,9 @@ Application::Application(AppOptions options)
     m_terrainShader =
         std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "terrain.frag");
     m_seaShader = std::make_unique<Shader>(shaderDir / "sea.vert", shaderDir / "sea.frag");
+    if (m_options.gpuTiming) {
+        m_gpuTimer = std::make_unique<GpuTimer>();
+    }
 
     HeightFieldConfig heightConfig;
     heightConfig.seed = m_options.seed;
@@ -219,7 +226,7 @@ Application::Application(AppOptions options)
             throw std::runtime_error("Could not open frame log " + m_options.frameLogPath);
         }
         std::fprintf(m_frameLog, "frame,total_ms,events_ms,update_ms,terrain_ms,render_ms,swap_ms,"
-                                 "uploads,outstanding,resident,triangles,draws,x,y,z\n");
+                                 "uploads,outstanding,resident,triangles,draws,x,y,z,focused,gpu_ms\n");
     }
     m_atmosphere.sunDir = sunDirection(m_options.sunBearing, m_options.sunElevation);
     m_camera.farPlane = kFarPlane;
@@ -265,6 +272,7 @@ void Application::warmUp()
 
 Application::~Application()
 {
+    flushFrameLog(true);
     if (m_frameLog) {
         std::fclose(m_frameLog);
     }
@@ -285,9 +293,15 @@ int Application::run()
         const auto afterEvents = Clock::now();
         update(delta);
         const auto afterUpdate = Clock::now();
-        render();
-        const auto afterRender = Clock::now();
         ++m_frameCount;
+        if (m_gpuTimer) {
+            m_gpuTimer->begin(m_frameCount);
+        }
+        render();
+        if (m_gpuTimer) {
+            m_gpuTimer->end();
+        }
+        const auto afterRender = Clock::now();
 
         // Screenshots count only frames with the terrain fully streamed in (or give up after 60 s),
         // so they never capture half-loaded tiles. Plain --frames runs count every frame.
@@ -321,14 +335,25 @@ int Application::run()
 
         // Timed per loop iteration, so every phase belongs to the frame it is reported with.
         const double totalMs = ms(frameStart, Clock::now());
-        recordFrameStats(static_cast<float>(totalMs));
+        const double swapMs = ms(afterRender, afterSwap);
+        recordFrameStats(static_cast<float>(totalMs), static_cast<float>(totalMs - swapMs));
+        if (m_gpuTimer) {
+            for (const GpuTimer::Result& r : m_gpuTimer->collect()) {
+                m_gpuMs[static_cast<std::size_t>(r.frame - 1)] = static_cast<float>(r.ms);
+            }
+        }
         if (m_frameLog) {
             const Terrain::Stats& st = m_terrain->stats();
-            std::fprintf(m_frameLog, "%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%zu,%d,%zu,%d,%.1f,%.1f,%.1f\n",
-                         m_frameCount, totalMs, ms(frameStart, afterEvents), ms(afterEvents, afterUpdate),
-                         st.updateMs, ms(afterUpdate, afterRender) - st.updateMs, ms(afterRender, afterSwap),
-                         st.uploadsThisFrame, st.outstandingTiles, st.residentTiles, st.triangles, st.drawCalls,
-                         m_camera.position.x, m_camera.position.y, m_camera.position.z);
+            char row[256];
+            std::snprintf(row, sizeof(row),
+                          "%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%zu,%d,%zu,%d,%.1f,%.1f,%.1f,%d,",
+                          m_frameCount, totalMs, ms(frameStart, afterEvents), ms(afterEvents, afterUpdate),
+                          st.updateMs, ms(afterUpdate, afterRender) - st.updateMs, swapMs,
+                          st.uploadsThisFrame, st.outstandingTiles, st.residentTiles, st.triangles,
+                          st.drawCalls, m_camera.position.x, m_camera.position.y, m_camera.position.z,
+                          m_window.focused() ? 1 : 0);
+            m_pendingLogRows.emplace_back(m_frameCount, row);
+            flushFrameLog(false);
         }
         if (lastFrame) {
             m_window.requestClose();
@@ -392,10 +417,12 @@ void Application::setSceneUniforms(Shader& shader)
     m_atmosphere.apply(shader, static_cast<float>(m_camera.position.y));
 }
 
-void Application::recordFrameStats(float frameMs)
+void Application::recordFrameStats(float frameMs, float cpuMs)
 {
     const Terrain::Stats& stats = m_terrain->stats();
     m_frameMs.push_back(frameMs);
+    m_cpuMs.push_back(cpuMs);
+    m_gpuMs.push_back(-1.0f);
     m_terrainMs.push_back(static_cast<float>(stats.updateMs));
     m_triangleSum += static_cast<double>(stats.triangles);
     m_drawCallSum += stats.drawCalls;
@@ -437,6 +464,32 @@ void Application::printRunStats() const
                 times.size(), static_cast<double>(percentile(0.5)), static_cast<double>(percentile(0.99)),
                 static_cast<double>(times.back()), over120Hz, over60Hz);
 
+    // Time before the swap (CPU work plus any driver back-pressure) and, if timed, GPU work; the
+    // rest of a slow frame is the swap waiting to present.
+    const auto summary = [skip](const std::vector<float>& values, const char* label) {
+        std::vector<float> known;
+        for (std::size_t i = skip; i < values.size(); ++i) {
+            if (values[i] >= 0.0f) {
+                known.push_back(values[i]);
+            }
+        }
+        if (known.empty()) {
+            std::printf("%s: no samples\n", label);
+            return;
+        }
+        std::sort(known.begin(), known.end());
+        const auto at = [&known](double p) {
+            const auto index = static_cast<std::size_t>(p * static_cast<double>(known.size()));
+            return static_cast<double>(known[std::min(known.size() - 1, index)]);
+        };
+        std::printf("%s: median %.2f ms, p99 %.2f ms, max %.2f ms\n", label, at(0.5), at(0.99),
+                    static_cast<double>(known.back()));
+    };
+    summary(m_cpuMs, "Before swap (CPU work and driver waits)");
+    if (m_gpuTimer) {
+        summary(m_gpuMs, "GPU time (timer queries)");
+    }
+
     std::vector<float> terrain(m_terrainMs.begin() + static_cast<std::ptrdiff_t>(skip), m_terrainMs.end());
     double terrainSum = 0.0;
     for (float t : terrain) {
@@ -445,6 +498,28 @@ void Application::printRunStats() const
     std::printf("Terrain main-thread work (uploads and selection): avg %.3f ms, max %.3f ms\n",
                 terrainSum / static_cast<double>(terrain.size()),
                 static_cast<double>(*std::max_element(terrain.begin(), terrain.end())));
+}
+
+void Application::flushFrameLog(bool all)
+{
+    if (!m_frameLog) {
+        return;
+    }
+    // A row is written once its GPU time is known, or left blank if the query never completed.
+    constexpr int kMaxWaitFrames = 16;
+    while (!m_pendingLogRows.empty()) {
+        const auto& [frame, row] = m_pendingLogRows.front();
+        const float gpu = m_gpuMs[static_cast<std::size_t>(frame - 1)];
+        if (m_gpuTimer && gpu < 0.0f && !all && frame > m_frameCount - kMaxWaitFrames) {
+            break;
+        }
+        if (gpu >= 0.0f) {
+            std::fprintf(m_frameLog, "%s%.3f\n", row.c_str(), static_cast<double>(gpu));
+        } else {
+            std::fprintf(m_frameLog, "%s\n", row.c_str());
+        }
+        m_pendingLogRows.pop_front();
+    }
 }
 
 void Application::updateTitle()
