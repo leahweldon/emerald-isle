@@ -12,7 +12,7 @@
 
 namespace emerald {
 
-bool saveFramebufferPng(int width, int height, const std::string& path)
+bool saveFramebufferPng(unsigned framebuffer, int width, int height, const std::string& path)
 {
     if (width <= 0 || height <= 0) {
         return false;
@@ -22,8 +22,12 @@ bool saveFramebufferPng(int width, int height, const std::string& path)
     std::vector<unsigned char> pixels(rowBytes * static_cast<std::size_t>(height));
 
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadBuffer(GL_BACK);
+    GLint previous = 0;
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previous);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+    glReadBuffer(framebuffer == 0 ? GL_BACK : GL_COLOR_ATTACHMENT0);
     glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(previous));
 
     // OpenGL's origin is bottom-left; image files expect the first row at the top.
     std::vector<unsigned char> row(rowBytes);

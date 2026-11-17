@@ -20,6 +20,9 @@ void logGlfwError(int code, const char* description)
 Window::Window(const WindowConfig& config)
 {
     glfwSetErrorCallback(logGlfwError);
+    if (config.headless) {
+        glfwInitHint(GLFW_COCOA_MENUBAR, GLFW_FALSE);
+    }
     if (!glfwInit()) {
         throw std::runtime_error("Failed to initialise GLFW");
     }
@@ -31,8 +34,15 @@ Window::Window(const WindowConfig& config)
     // macOS only exposes core profiles through a forward-compatible context.
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 #endif
-    glfwWindowHint(GLFW_VISIBLE, config.visible ? GLFW_TRUE : GLFW_FALSE);
-    glfwWindowHint(GLFW_SAMPLES, 4);
+    if (config.headless) {
+        // The default framebuffer is never shown, so it needs no MSAA or depth.
+        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+        glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
+        glfwWindowHint(GLFW_SAMPLES, 0);
+        glfwWindowHint(GLFW_DEPTH_BITS, 0);
+    } else {
+        glfwWindowHint(GLFW_SAMPLES, config.samples);
+    }
 
     m_handle = glfwCreateWindow(config.width, config.height, config.title.c_str(), nullptr, nullptr);
     if (!m_handle) {
@@ -41,7 +51,7 @@ Window::Window(const WindowConfig& config)
     }
 
     glfwMakeContextCurrent(m_handle);
-    glfwSwapInterval(config.vsync ? 1 : 0);
+    glfwSwapInterval(config.vsync && !config.headless ? 1 : 0);
 
     if (gladLoadGL(glfwGetProcAddress) == 0) {
         glfwDestroyWindow(m_handle);
@@ -49,9 +59,16 @@ Window::Window(const WindowConfig& config)
         throw std::runtime_error("Failed to load OpenGL functions");
     }
 
-    glfwGetFramebufferSize(m_handle, &m_framebufferWidth, &m_framebufferHeight);
+    if (config.headless) {
+        m_framebufferWidth = config.width;
+        m_framebufferHeight = config.height;
+    } else {
+        glfwGetFramebufferSize(m_handle, &m_framebufferWidth, &m_framebufferHeight);
+    }
     glfwSetWindowUserPointer(m_handle, this);
-    glfwSetFramebufferSizeCallback(m_handle, onFramebufferResize);
+    if (!config.headless) {
+        glfwSetFramebufferSizeCallback(m_handle, onFramebufferResize);
+    }
     glfwSetKeyCallback(m_handle, onKey);
     glfwSetMouseButtonCallback(m_handle, onMouseButton);
     glfwSetCursorPosCallback(m_handle, onCursor);

@@ -47,11 +47,13 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      # GitHub's Linux runners have no GPU, so the smoke test renders through
-      # Mesa's software rasteriser on a virtual display and keeps the frame.
+      # GitHub's Linux runners have no GPU, so the smoke test renders through Mesa's software
+      # rasteriser and keeps the frame. Headless runs still need xvfb (24-bit) for the GLX context.
       - name: Render smoke test
         if: runner.os == 'Linux'
-        run: xvfb-run -a -s "-screen 0 1920x1080x24" ./build/emerald-isle --frames 10 --screenshot frame.png
+        run: |
+          xvfb-run -a -s "-screen 0 640x480x24" ./build/emerald-isle --headless \
+            --frames 10 --screenshot frame.png
 
       # Flies with tiles streaming continuously over the procedural archipelago, and west over
       # Kerry across the DEM border. Checks correctness, not timing: a runner without a GPU is too
@@ -61,8 +63,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           for view in archipelago kerry; do
-            xvfb-run -a -s "-screen 0 640x360x24" ./build/emerald-isle --view "$view" \
-              --autofly 10 --no-vsync --width 640 --height 360 --validate 100
+            xvfb-run -a -s "-screen 0 640x480x24" ./build/emerald-isle --headless --view "$view" \
+              --autofly 10 --width 640 --height 360 --validate 100
           done
 
       - name: Upload rendered frame
