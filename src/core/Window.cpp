@@ -53,6 +53,9 @@ Window::Window(const WindowConfig& config)
     glfwSetWindowUserPointer(m_handle, this);
     glfwSetFramebufferSizeCallback(m_handle, onFramebufferResize);
     glfwSetKeyCallback(m_handle, onKey);
+    glfwSetMouseButtonCallback(m_handle, onMouseButton);
+    glfwSetCursorPosCallback(m_handle, onCursor);
+    glfwSetScrollCallback(m_handle, onScroll);
 
     std::printf("OpenGL %s | %s\n",
                 reinterpret_cast<const char*>(glGetString(GL_VERSION)),
@@ -107,11 +110,41 @@ void Window::onFramebufferResize(GLFWwindow* handle, int width, int height)
     glViewport(0, 0, width, height);
 }
 
+void Window::setCursorCaptured(bool captured)
+{
+    if (captured == m_cursorCaptured) {
+        return;
+    }
+    m_cursorCaptured = captured;
+    glfwSetInputMode(m_handle, GLFW_CURSOR, captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+    if (glfwRawMouseMotionSupported()) {
+        glfwSetInputMode(m_handle, GLFW_RAW_MOUSE_MOTION, captured ? GLFW_TRUE : GLFW_FALSE);
+    }
+    // The cursor jumps when capture changes; do not report that as movement.
+    m_input.resetCursor();
+}
+
 void Window::onKey(GLFWwindow* handle, int key, int /*scancode*/, int action, int /*mods*/)
 {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
         glfwSetWindowShouldClose(handle, GLFW_TRUE);
     }
+    static_cast<Window*>(glfwGetWindowUserPointer(handle))->m_input.onKey(key, action);
+}
+
+void Window::onMouseButton(GLFWwindow* handle, int button, int action, int /*mods*/)
+{
+    static_cast<Window*>(glfwGetWindowUserPointer(handle))->m_input.onMouseButton(button, action);
+}
+
+void Window::onCursor(GLFWwindow* handle, double x, double y)
+{
+    static_cast<Window*>(glfwGetWindowUserPointer(handle))->m_input.onCursor(x, y);
+}
+
+void Window::onScroll(GLFWwindow* handle, double xOffset, double yOffset)
+{
+    static_cast<Window*>(glfwGetWindowUserPointer(handle))->m_input.onScroll(xOffset, yOffset);
 }
 
 } // namespace emerald

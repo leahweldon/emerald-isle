@@ -10,14 +10,16 @@ class Shader;
 // World axes: +X east, +Y up, -Z north.
 glm::vec3 sunDirection(float bearingDegrees, float elevationDegrees);
 
+// Fraction of sunlight reaching sea level along sunDir, from the same Rayleigh + Mie model as
+// sky.frag. Gives the low sun its warm colour.
+glm::vec3 sunTransmittance(const glm::vec3& sunDir);
+
 // Sun and sky parameters shared by every pass, so the visible sun matches the lighting.
-// Colours are authored in sRGB and converted to linear in apply(); shaders light in linear space.
+// Ambient light and fog colour come from the sky cubemap (see Sky).
 struct Atmosphere {
     glm::vec3 sunDir = sunDirection(225.0f, 22.0f); // south-west, low afternoon sun
-    glm::vec3 sunColour{1.0f, 0.92f, 0.80f};
-    glm::vec3 ambient{0.42f, 0.47f, 0.55f};
-    glm::vec3 horizonColour{0.80f, 0.86f, 0.91f};
-    glm::vec3 zenithColour{0.24f, 0.45f, 0.72f};
+    float sunStrength = 1.0f;   // direct light on terrain = sunStrength * sunTransmittance
+    float exposure = 1.3f;      // sky radiance scale into display range
 
     // Height fog: density at sea level (per metre), falling off exponentially with altitude.
     float fogDensity = 1.5e-5f;
@@ -27,7 +29,7 @@ struct Atmosphere {
     float highAltitudeStart = 5000.0f;
     float highAltitudeEnd = 100000.0f;
 
-    // Sets uSunDir, uSunColour, uAmbient, uHorizonColour, uZenithColour, uFogDensity and uFogFalloff.
+    // Sets uSunDir, uSunColour, uFogDensity and uFogFalloff.
     void apply(Shader& shader, float cameraHeight = 0.0f) const;
 };
 

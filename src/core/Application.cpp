@@ -3,7 +3,7 @@
 #include "core/Screenshot.hpp"
 #include "render/Shader.hpp"
 #include "render/SeaPlane.hpp"
-#include "render/SkyGradient.hpp"
+#include "render/Sky.hpp"
 #include "render/TerrainMesh.hpp"
 #include "render/TextureArray.hpp"
 #include "render/ViewPresets.hpp"
@@ -23,7 +23,6 @@ namespace emerald {
 
 namespace {
 
-constexpr float kOrbitSpeed = 0.05f; // radians per second
 
 // Metres. The sea plane reaches the far plane (corners at ~0.99x far) so it meets the horizon.
 constexpr float kFarPlane = 15000e3f;
@@ -34,6 +33,7 @@ constexpr GLuint kColourUnit = 0;
 constexpr GLuint kNormalUnit = 1;
 constexpr GLuint kCoastUnit = 2;
 constexpr GLuint kHeightUnit = 3;
+constexpr GLuint kSkyUnit = 4;
 
 std::vector<std::filesystem::path> materialFiles(const std::filesystem::path& dir, const char* map)
 {
@@ -44,8 +44,6 @@ std::vector<std::filesystem::path> materialFiles(const std::filesystem::path& di
     return files;
 }
 
-// Caps per-frame motion so startup stalls do not jump the camera.
-constexpr float kMaxStepSeconds = 1.0f / 30.0f;
 
 void printUsage(const char* program)
 {
@@ -58,9 +56,21 @@ void printUsage(const char* program)
         "  --frames <n>          Exit after rendering n frames\n"
         "  --screenshot <file>   Save the last frame as a PNG, then exit\n"
         "  --terrain-step <n>    Use every nth heightmap pixel (default 2)\n"
-        "  --view <name>         Fixed camera preset: %s\n"
+        "  --view <name>         Start from a camera preset: %s\n"
+        "  --sun-bearing <deg>   Sun compass bearing, 0 = north (default 225)\n"
+        "  --sun-elevation <deg> Sun elevation above the horizon (default 22)\n"
         "  --help                Show this message\n",
         EMERALD_VERSION, program, viewPresetNames().c_str());
+}
+
+float parseFloat(const char* flag, const char* value, float min, float max)
+{
+    char* end = nullptr;
+    const float parsed = std::strtof(value, &end);
+    if (end == value || *end != '\0' || !(parsed >= min && parsed <= max)) {
+        throw std::invalid_argument(std::string("Invalid value for ") + flag + ": " + value);
+    }
+    return parsed;
 }
 
 int parsePositive(const char* flag, const char* value)
@@ -117,6 +127,10 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
                 throw std::invalid_argument("Unknown view '" + options.view +
                                             "' (available: " + viewPresetNames() + ")");
             }
+        } else if (std::strcmp(arg, "--sun-bearing") == 0 && hasValue) {
+            options.sunBearing = parseFloat(arg, argv[++i], -360.0f, 360.0f);
+        } else if (std::strcmp(arg, "--sun-elevation") == 0 && hasValue) {
+            options.sunElevation = parseFloat(arg, argv[++i], -10.0f, 90.0f);
         } else {
             throw std::invalid_argument(std::string("Unknown or incomplete option: ") + arg +
                                         " (run with --help for usage)");
@@ -140,7 +154,7 @@ Application::Application(AppOptions options)
     glCullFace(GL_BACK);
 
     const std::filesystem::path shaderDir = m_options.assetDir / "shaders";
-    m_sky = std::make_unique<SkyGradient>(shaderDir);
+    m_sky = std::make_unique<Sky>(shaderDir);
     m_terrainShader =
         std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "terrain.frag");
     m_seaShader = std::make_unique<Shader>(shaderDir / "sea.vert", shaderDir / "sea.frag");
@@ -172,10 +186,21 @@ Application::Application(AppOptions options)
     m_seaShader->set("uTerrainSize", glm::vec2(m_terrain->width(), m_terrain->depth()));
     m_seaShader->set("uSeaRadius", kSeaHalfSize);
 
-    // Default orbit starts from the overview preset.
-    const std::string view = m_options.view.empty() ? "overview" : m_options.view;
-    applyViewPreset(*findViewPreset(view), m_camera);
+    m_atmosphere.sunDir = sunDirection(m_options.sunBearing, m_options.sunElevation);
     m_camera.farPlane = kFarPlane;
+    m_controller = std::make_unique<CameraController>(
+        m_camera, [this](float x, float z) { return m_terrain->groundHeight(x, z); });
+
+    // No --view: slow orbit from the overview. With --view: free-fly from that pose, still
+    // until there is input, so screenshots are reproducible.
+    if (m_options.view.empty()) {
+        const ViewPreset& overview = *findViewPreset("overview");
+        m_controller->startOrbit(overview.target, overview.azimuth, overview.elevation,
+                                 overview.distance, true);
+    } else {
+        applyViewPreset(*findViewPreset(m_options.view), m_camera);
+        m_controller->startFreeFly();
+    }
 }
 
 Application::~Application() = default;
@@ -185,6 +210,7 @@ int Application::run()
     while (!m_window.shouldClose()) {
         const float delta = m_timer.tick();
 
+        m_window.input().beginFrame();
         m_window.pollEvents();
         update(delta);
         render();
@@ -216,26 +242,19 @@ int Application::run()
 
 void Application::update(float deltaSeconds)
 {
-    // Presets stay fixed so screenshots are reproducible.
-    if (m_options.view.empty()) {
-        m_camera.orbit(kOrbitSpeed * std::min(deltaSeconds, kMaxStepSeconds));
-    }
+    m_controller->update(m_window, deltaSeconds);
 }
 
 void Application::render()
 {
+    // Re-renders the sky cubemap only when the sun has changed.
+    m_sky->update(m_atmosphere);
+
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     const glm::mat4 projection = m_camera.projection(m_window.aspectRatio());
     const glm::mat4 rotationOnly(glm::mat3(m_camera.view()));
-
-    // Sky is a background pass: no depth test or write.
-    glDisable(GL_DEPTH_TEST);
-    glDepthMask(GL_FALSE);
-    m_sky->draw(glm::inverse(projection * rotationOnly), m_atmosphere);
-    glDepthMask(GL_TRUE);
-    glEnable(GL_DEPTH_TEST);
 
     m_terrainShader->use();
     setSceneUniforms(*m_terrainShader);
@@ -243,32 +262,43 @@ void Application::render()
     m_materialColour->bind(kColourUnit);
     m_materialNormal->bind(kNormalUnit);
     m_terrain->bindHeightTexture(kHeightUnit);
+    m_sky->applyEnvironment(*m_terrainShader, kSkyUnit);
     m_terrain->draw();
 
     // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.
     m_seaShader->use();
     setSceneUniforms(*m_seaShader);
     m_terrain->bindCoastMask(kCoastUnit);
+    m_sky->applyEnvironment(*m_seaShader, kSkyUnit);
     glEnable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(1.0f, 1.0f);
     m_sea->draw();
     glDisable(GL_POLYGON_OFFSET_FILL);
+
+    // Skybox last, at the far plane, so it is only shaded where nothing else was drawn.
+    m_sky->drawBackground(glm::inverse(projection * rotationOnly), m_atmosphere);
 }
 
 void Application::setSceneUniforms(Shader& shader)
 {
     shader.set("uView", m_camera.view());
     shader.set("uProjection", m_camera.projection(m_window.aspectRatio()));
-    shader.set("uCameraPos", m_camera.position());
-    m_atmosphere.apply(shader, m_camera.position().y);
+    shader.set("uCameraPos", m_camera.position);
+    m_atmosphere.apply(shader, m_camera.position.y);
 }
 
 void Application::updateTitle()
 {
-    char title[128];
-    std::snprintf(title, sizeof(title), "%s  |  %.0f FPS  |  %.2f ms",
+    char speed[32];
+    if (m_controller->mode() == CameraController::Mode::FreeFly) {
+        std::snprintf(speed, sizeof(speed), "%.0f m/s", static_cast<double>(m_controller->baseSpeed()));
+    } else {
+        std::snprintf(speed, sizeof(speed), "orbit");
+    }
+    char title[160];
+    std::snprintf(title, sizeof(title), "%s  |  %.0f FPS  |  %.2f ms  |  %s",
                   m_options.window.title.c_str(),
-                  m_timer.framesPerSecond(), m_timer.frameTimeMs());
+                  m_timer.framesPerSecond(), m_timer.frameTimeMs(), speed);
     m_window.setTitle(title);
 }
 

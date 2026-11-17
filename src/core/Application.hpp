@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/CameraController.hpp"
 #include "core/FrameTimer.hpp"
 #include "core/Window.hpp"
 #include "render/Atmosphere.hpp"
@@ -11,7 +12,7 @@
 
 namespace emerald {
 
-class SkyGradient;
+class Sky;
 class TerrainMesh;
 class SeaPlane;
 class Shader;
@@ -27,6 +28,9 @@ struct AppOptions {
     int terrainStep = 2;
     // Fixed camera preset name; empty means the default slow orbit.
     std::string view;
+    // Sun position in degrees (compass bearing, elevation); defaults to the Atmosphere default.
+    float sunBearing = 225.0f;
+    float sunElevation = 22.0f;
     std::filesystem::path assetDir;
 };
 
@@ -49,7 +53,7 @@ private:
     AppOptions m_options;
     Window m_window;
     FrameTimer m_timer;
-    std::unique_ptr<SkyGradient> m_sky;
+    std::unique_ptr<Sky> m_sky;
     std::unique_ptr<TerrainMesh> m_terrain;
     std::unique_ptr<Shader> m_terrainShader;
     std::unique_ptr<TextureArray> m_materialColour;
@@ -57,6 +61,7 @@ private:
     std::unique_ptr<SeaPlane> m_sea;
     std::unique_ptr<Shader> m_seaShader;
     Camera m_camera;
+    std::unique_ptr<CameraController> m_controller;
     Atmosphere m_atmosphere;
     int m_frameCount = 0;
 };

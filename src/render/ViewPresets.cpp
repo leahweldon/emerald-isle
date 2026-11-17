@@ -45,10 +45,7 @@ std::string viewPresetNames()
 
 void applyViewPreset(const ViewPreset& preset, Camera& camera)
 {
-    camera.target = preset.target;
-    camera.azimuth = preset.azimuth;
-    camera.elevation = preset.elevation;
-    camera.distance = preset.distance;
+    camera.lookFrom(preset.target, preset.azimuth, preset.elevation, preset.distance);
     // Near plane scales with distance to keep depth precision at the coast.
     camera.nearPlane = preset.distance * 0.01f;
 }

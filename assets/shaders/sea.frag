@@ -6,8 +6,8 @@ out vec4 fragColour;
 uniform vec3 uCameraPos;
 uniform vec3 uSunDir;     // towards the sun, normalised
 uniform vec3 uSunColour;
-uniform vec3 uAmbient;
-uniform vec3 uHorizonColour;
+uniform samplerCube uSkyCube;
+uniform vec3 uIrradianceSH[9];
 uniform float uFogDensity;
 uniform float uFogFalloff;
 uniform sampler2D uCoastMask;  // blurred land mask, see TerrainMesh::bindCoastMask
@@ -19,10 +19,37 @@ const vec3 kSea     = vec3(0.004, 0.055, 0.085);
 const vec3 kShallow = vec3(0.020, 0.160, 0.150); // matches terrain.frag
 
 // Lighting is linear; the default framebuffer expects sRGB.
+// Display transform shared by every pass that writes to the screen: linear below 0.8, then a
+// smooth shoulder to 1 so the bright sky around the sun compresses instead of clipping.
+vec3 toneMap(vec3 c)
+{
+    const float knee = 0.8;
+    vec3 over = max(c - knee, 0.0);
+    return min(c, vec3(knee)) + (1.0 - knee) * (1.0 - exp(-over / (1.0 - knee)));
+}
+
 vec3 linearToSrgb(vec3 c)
 {
     c = max(c, vec3(0.0));
     return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+
+// Diffuse sky light from order-2 SH (coefficients pre-convolved and divided by pi on the CPU).
+vec3 skyAmbient(vec3 n)
+{
+    return max(uIrradianceSH[0] * 0.282095
+             + uIrradianceSH[1] * 0.488603 * n.y + uIrradianceSH[2] * 0.488603 * n.z
+             + uIrradianceSH[3] * 0.488603 * n.x
+             + uIrradianceSH[4] * 1.092548 * n.x * n.y + uIrradianceSH[5] * 1.092548 * n.y * n.z
+             + uIrradianceSH[6] * 0.315392 * (3.0 * n.z * n.z - 1.0)
+             + uIrradianceSH[7] * 1.092548 * n.x * n.z
+             + uIrradianceSH[8] * 0.546274 * (n.x * n.x - n.y * n.y), vec3(0.0));
+}
+
+// Fog colour is the sky behind the fragment, so distant terrain and sea meet the skybox exactly.
+vec3 fogColour(vec3 cameraPos, vec3 worldPos)
+{
+    return texture(uSkyCube, normalize(worldPos - cameraPos)).rgb;
 }
 
 // Height fog: optical depth of exponentially thinning air along the view ray.
@@ -50,7 +77,7 @@ void main()
     float diffuse = max(dot(n, uSunDir), 0.0);
     // Blinn-Phong glint from the sun.
     float specular = pow(max(dot(n, normalize(uSunDir + toCamera)), 0.0), 256.0);
-    vec3 colour = water * (uAmbient + uSunColour * diffuse) + uSunColour * specular * 0.4;
+    vec3 colour = water * (skyAmbient(n) + uSunColour * diffuse) + uSunColour * specular * 0.4;
 
     // Same fog as terrain.frag.
     // Ramp fog to exactly 1 at the plane's edge, so the sea reaches the sky's horizon colour
@@ -60,6 +87,6 @@ void main()
     float nearEdge = 0.1 * uSeaRadius;
     float edge = smoothstep(0.0, 1.0, clamp((1.0 / nearEdge - 1.0 / d) /
                                             (1.0 / nearEdge - 1.0 / uSeaRadius), 0.0, 1.0));
-    colour = mix(colour, uHorizonColour, max(fogAmount(uCameraPos, vWorldPos), edge));
-    fragColour = vec4(linearToSrgb(colour), 1.0);
+    colour = mix(colour, fogColour(uCameraPos, vWorldPos), max(fogAmount(uCameraPos, vWorldPos), edge));
+    fragColour = vec4(linearToSrgb(toneMap(colour)), 1.0);
 }

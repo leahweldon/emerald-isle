@@ -202,6 +202,10 @@ TerrainMesh::TerrainMesh(const std::filesystem::path& heightmapPath, const Terra
     glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
     glBindTexture(GL_TEXTURE_2D, 0);
 
+    m_heights = map.values;
+    m_heightsWidth = map.width;
+    m_heightsHeight = map.height;
+
     std::printf("Terrain: %dx%d grid, %d triangles\n", cols, rows, m_indexCount / 3);
 }
 
@@ -231,6 +235,28 @@ void TerrainMesh::bindHeightTexture(GLuint unit) const
 {
     glActiveTexture(GL_TEXTURE0 + unit);
     glBindTexture(GL_TEXTURE_2D, m_heightTexture);
+}
+
+float TerrainMesh::groundHeight(float x, float z) const
+{
+    // Texel centres sit on the grid: column c at x = (c - (width - 1) / 2) * spacing.
+    const float fx = x / m_metresPerPixel + 0.5f * static_cast<float>(m_heightsWidth - 1);
+    const float fz = z / m_metresPerPixel + 0.5f * static_cast<float>(m_heightsHeight - 1);
+    if (fx < 0.0f || fz < 0.0f || fx > static_cast<float>(m_heightsWidth - 1) ||
+        fz > static_cast<float>(m_heightsHeight - 1)) {
+        return 0.0f; // open sea outside the heightmap
+    }
+    const int x0 = std::min(static_cast<int>(fx), m_heightsWidth - 2);
+    const int z0 = std::min(static_cast<int>(fz), m_heightsHeight - 2);
+    const float tx = fx - static_cast<float>(x0);
+    const float tz = fz - static_cast<float>(z0);
+    const auto at = [this](int c, int r) {
+        return m_heights[static_cast<std::size_t>(r) * static_cast<std::size_t>(m_heightsWidth) +
+                         static_cast<std::size_t>(c)];
+    };
+    const float top = at(x0, z0) + (at(x0 + 1, z0) - at(x0, z0)) * tx;
+    const float bottom = at(x0, z0 + 1) + (at(x0 + 1, z0 + 1) - at(x0, z0 + 1)) * tx;
+    return std::max(top + (bottom - top) * tz, 0.0f);
 }
 
 } // namespace emerald
