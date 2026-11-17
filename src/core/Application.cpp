@@ -39,6 +39,17 @@ constexpr GLuint kCoastUnit = 2;
 constexpr GLuint kHeightUnit = 3;
 constexpr GLuint kSkyUnit = 4;
 
+// MSVC deprecates fopen (C4996, an error with warnings as errors); fopen_s is its replacement.
+std::FILE* openForWriting(const std::string& path)
+{
+#ifdef _MSC_VER
+    std::FILE* file = nullptr;
+    return fopen_s(&file, path.c_str(), "w") == 0 ? file : nullptr;
+#else
+    return std::fopen(path.c_str(), "w");
+#endif
+}
+
 std::vector<std::filesystem::path> materialFiles(const std::filesystem::path& dir, const char* map)
 {
     std::vector<std::filesystem::path> files;
@@ -203,7 +214,7 @@ Application::Application(AppOptions options)
     m_seaShader->set("uSeaRadius", kSeaHalfSize);
 
     if (!m_options.frameLogPath.empty()) {
-        m_frameLog = std::fopen(m_options.frameLogPath.c_str(), "w");
+        m_frameLog = openForWriting(m_options.frameLogPath);
         if (!m_frameLog) {
             throw std::runtime_error("Could not open frame log " + m_options.frameLogPath);
         }
@@ -458,7 +469,7 @@ void Application::updateTitle()
         std::snprintf(speed, sizeof(speed), "orbit");
     }
     const Terrain::Stats& stats = m_terrain->stats();
-    char streaming[32] = "";
+    char streaming[48] = ""; // " (+N streaming)" is at most 35 bytes
     if (stats.outstandingTiles > 0) {
         std::snprintf(streaming, sizeof(streaming), " (+%zu streaming)", stats.outstandingTiles);
     }
