@@ -78,6 +78,8 @@ void printUsage(const char* program)
         "  --autofly <s>         Fly straight ahead for s seconds, print stats, exit\n"
         "  --frame-log <file>    Write per-frame phase timings (CSV)\n"
         "  --gpu-timing          Also measure GPU time per frame (adds ~0.4 ms on macOS)\n"
+        "  --validate <tiles>    Check for GL errors and terrain holes, require at least this many\n"
+        "                        tiles generated and resident, exit non-zero on failure\n"
         "  --help                Show this message\n",
         EMERALD_VERSION, program, viewPresetNames().c_str());
 }
@@ -148,6 +150,8 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.sunBearing = parseFloat(arg, argv[++i], -360.0f, 360.0f);
         } else if (std::strcmp(arg, "--sun-elevation") == 0 && hasValue) {
             options.sunElevation = parseFloat(arg, argv[++i], -10.0f, 90.0f);
+        } else if (std::strcmp(arg, "--validate") == 0 && hasValue) {
+            options.validateMinTiles = parsePositive(arg, argv[++i]);
         } else if (std::strcmp(arg, "--gpu-timing") == 0) {
             options.gpuTiming = true;
         } else if (std::strcmp(arg, "--frame-log") == 0 && hasValue) {
@@ -328,6 +332,9 @@ int Application::run()
 
         m_window.swapBuffers();
         const auto afterSwap = Clock::now();
+        if (m_options.validateMinTiles > 0) {
+            validateFrame();
+        }
 
         if (m_timer.hasNewSample()) {
             updateTitle();
@@ -356,6 +363,7 @@ int Application::run()
             flushFrameLog(false);
         }
         if (lastFrame) {
+            m_finished = true;
             m_window.requestClose();
         }
     }
@@ -363,6 +371,9 @@ int Application::run()
     std::printf("Rendered %d frames, last average %.1f FPS (%.2f ms/frame)\n",
                 m_frameCount, m_timer.framesPerSecond(), m_timer.frameTimeMs());
     printRunStats();
+    if (m_options.validateMinTiles > 0 && !reportValidation()) {
+        return EXIT_FAILURE;
+    }
     return EXIT_SUCCESS;
 }
 
@@ -508,6 +519,54 @@ void Application::printRunStats() const
     std::printf("Terrain main-thread work (uploads and selection): avg %.3f ms, max %.3f ms\n",
                 terrainSum / static_cast<double>(terrain.size()),
                 static_cast<double>(*std::max_element(terrain.begin(), terrain.end())));
+}
+
+void Application::validateFrame()
+{
+    for (GLenum error = glGetError(); error != GL_NO_ERROR; error = glGetError()) {
+        if (m_glErrorCount++ == 0) {
+            m_firstGlError = error;
+        }
+    }
+    const Terrain::Stats& stats = m_terrain->stats();
+    m_terrainReady = m_terrainReady || (stats.missingNodes == 0 && stats.cameraCovered);
+    if (!m_terrainReady) {
+        return;
+    }
+    ++m_validatedFrames;
+    m_holeFrames += stats.missingNodes > 0 ? 1 : 0;
+    m_uncoveredFrames += stats.cameraCovered ? 0 : 1;
+}
+
+bool Application::reportValidation() const
+{
+    const Terrain::Stats& stats = m_terrain->stats();
+    const auto minTiles = static_cast<std::uint64_t>(m_options.validateMinTiles);
+    struct Check {
+        const char* name;
+        bool passed;
+    };
+    const Check checks[] = {
+        {"run completed", m_finished},
+        {"no GL errors", m_glErrorCount == 0},
+        {"initial terrain loaded", m_terrainReady && m_validatedFrames > 0},
+        {"no frames with holes in view", m_holeFrames == 0},
+        {"ground under the camera always loaded", m_uncoveredFrames == 0},
+        {"enough tiles generated", stats.tilesGenerated >= minTiles},
+        {"enough tiles resident", m_peakResidentTiles >= m_options.validateMinTiles},
+    };
+    std::printf("Validation (%d frames checked after the initial load): %d GL errors (first 0x%04X), "
+                "%d frames with holes, %d frames without ground under the camera, %llu tiles generated, "
+                "peak %d resident, minimum %d\n",
+                m_validatedFrames, m_glErrorCount, m_firstGlError, m_holeFrames, m_uncoveredFrames,
+                static_cast<unsigned long long>(stats.tilesGenerated), m_peakResidentTiles,
+                m_options.validateMinTiles);
+    bool passed = true;
+    for (const Check& check : checks) {
+        std::printf("  %s %s\n", check.passed ? "PASS" : "FAIL", check.name);
+        passed = passed && check.passed;
+    }
+    return passed;
 }
 
 void Application::flushFrameLog(bool all)

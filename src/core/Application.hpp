@@ -43,6 +43,10 @@ struct AppOptions {
     std::string frameLogPath;
     // Measure GPU time per frame with timer queries (adds overhead on macOS).
     bool gpuTiming = false;
+    // When greater than zero, check correctness during the run (GL errors, holes in the terrain,
+    // tiles streamed) and exit with failure if any check fails. The value is the minimum number
+    // of tiles that must be generated and resident.
+    int validateMinTiles = 0;
     std::filesystem::path assetDir;
 };
 
@@ -64,6 +68,8 @@ private:
     void recordFrameStats(float frameMs, float cpuMs);
     void printRunStats() const;
     void flushFrameLog(bool all);
+    void validateFrame();
+    bool reportValidation() const;
     void setSceneUniforms(Shader& shader);
 
     AppOptions m_options;
@@ -94,6 +100,16 @@ private:
     double m_triangleSum = 0.0;
     double m_drawCallSum = 0.0;
     int m_peakResidentTiles = 0;
+
+    // --validate counters. Hole checks start once the initial load has covered the view, which
+    // does not need streaming to catch up completely (it may never, on a software renderer).
+    bool m_finished = false; // the run reached its frame limit or autofly duration
+    bool m_terrainReady = false;
+    int m_validatedFrames = 0;
+    int m_glErrorCount = 0;
+    unsigned m_firstGlError = 0;
+    int m_holeFrames = 0;
+    int m_uncoveredFrames = 0;
 };
 
 } // namespace emerald
