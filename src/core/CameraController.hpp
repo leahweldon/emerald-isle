@@ -12,7 +12,7 @@ namespace emerald {
 class Window;
 
 // Drives a Camera from input. Free-fly: WASD move, Q/E down/up, arrows turn and pitch, Shift
-// faster, [ ] or - = change speed, two-finger scroll (or wheel) turns, mouse look with the right
+// faster, [ ] or - = scale speed (which otherwise follows height above the ground), two-finger scroll (or wheel) turns, mouse look with the right
 // button held or after Tab captures the cursor. Orbit: slow rotation around a target.
 // C switches mode, P prints a --view preset line.
 class CameraController {
@@ -34,7 +34,9 @@ public:
     void update(Window& window, float deltaSeconds);
 
     Mode mode() const { return m_mode; }
-    float baseSpeed() const { return m_baseSpeed; } // metres per second, before Shift
+    // Current free-fly speed in m/s: proportional to height above the ground, times the [ ] multiplier
+    // and the Shift boost while held.
+    float effectiveSpeed() const { return m_effectiveSpeed; }
 
     // The current pose as a ViewPreset initialiser line, for src/render/ViewPresets.cpp.
     std::string presetLine() const;
@@ -44,6 +46,7 @@ private:
     void updateOrbit(float dt);
     void applyOrbit();
     void keepAboveGround();
+    float heightAboveGround() const;
     void updateNearPlane();
     // First point where the view ray meets the ground or sea, or a fixed distance ahead.
     glm::dvec3 lookTarget() const;
@@ -54,7 +57,9 @@ private:
 
     // Free-fly state.
     glm::vec3 m_velocity{0.0f};
-    float m_baseSpeed = 300.0f; // metres per second
+    float m_speedMultiplier = 1.0f; // [ ] or - =
+    float m_altitude = 0.0f;        // smoothed height above ground or sea, metres
+    float m_effectiveSpeed = 0.0f;
     glm::vec2 m_scrollTurn{0.0f}; // smoothed scroll look rate, radians per second
     float m_autoflySpeed = 0.0f;  // > 0 while autoflying
 

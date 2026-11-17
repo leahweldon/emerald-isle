@@ -448,7 +448,12 @@ void Application::updateTitle()
     if (m_controller->autoflying()) {
         std::snprintf(speed, sizeof(speed), "autofly");
     } else if (m_controller->mode() == CameraController::Mode::FreeFly) {
-        std::snprintf(speed, sizeof(speed), "%.0f m/s", static_cast<double>(m_controller->baseSpeed()));
+        const double v = static_cast<double>(m_controller->effectiveSpeed());
+        if (v >= 1000.0) {
+            std::snprintf(speed, sizeof(speed), "%.1f km/s", v / 1000.0);
+        } else {
+            std::snprintf(speed, sizeof(speed), "%.0f m/s", v);
+        }
     } else {
         std::snprintf(speed, sizeof(speed), "orbit");
     }

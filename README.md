@@ -98,12 +98,12 @@ The window title shows the frame rate and frame time, terrain triangles, draw ca
 | Free look | **Tab** captures the cursor, then move a finger; **Tab** again to release | **Tab**, then move the mouse |
 | Turn / pitch | **←** **→** / **↑** **↓** | **←** **→** / **↑** **↓** |
 | Faster | Hold **Shift** (5×) | Hold **Shift** (5×) |
-| Change base speed | **[** / **]** or **-** / **=** (×1.25 per press) | **[** / **]** or **-** / **=** |
+| Speed multiplier | **[** / **]** or **-** / **=** (×1.25 per press) | **[** / **]** or **-** / **=** |
 | Free-fly ↔ orbit | **C** | **C** |
 | Print pose as a `--view` preset line | **P** | **P** |
 | Quit | **Esc** | **Esc** |
 
-The window title also shows the current base speed (or "orbit"). Without `--view` the app starts in a slow orbit of the island; press **C** to take control. The camera stays at least 30 m above the ground and sea.
+Flying speed follows your height above the ground, like a map viewer: about 50 m/s skimming the hills at 30 m, about 2.4 km/s at a 1.5 km cruising height (Kerry to the edge of the DEM in about 12 s), and faster still from orbit. The multiplier keys scale that, and the window title shows the current speed (or "orbit"). Without `--view` the app starts in a slow orbit of the island; press **C** to take control. The camera stays at least 30 m above the ground and sea.
 
 ## Project structure
 

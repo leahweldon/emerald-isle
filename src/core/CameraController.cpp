@@ -16,8 +16,14 @@ namespace {
 constexpr float kMinClearance = 30.0f;     // metres above ground or sea
 constexpr float kFastMultiplier = 5.0f;    // with Shift
 constexpr float kSpeedStep = 1.25f;        // per [ ] or - = press
-constexpr float kMinSpeed = 10.0f;
-constexpr float kMaxSpeed = 50000.0f;
+constexpr float kMinMultiplier = 1.0f / 32.0f;
+constexpr float kMaxMultiplier = 32.0f;
+// Free-fly speed follows height above the ground (like a map viewer): slow and precise near the
+// terrain, fast high up. ~2.4 km/s at a 1.5 km cruising height crosses 30 km in about 12 s.
+constexpr float kSpeedPerMetre = 1.6f;     // m/s of speed per metre of height
+constexpr float kMinSpeed = 20.0f;
+constexpr float kMaxSpeed = 100000.0f;
+constexpr float kAltitudeSmoothing = 2.0f; // 1/s; speed does not jump at cliffs and coastlines
 constexpr float kResponse = 6.0f;          // 1/s; velocity reaches ~95% of target in 0.5 s
 constexpr float kMouseSensitivity = 0.0025f; // radians per screen pixel
 constexpr float kTurnRate = 1.2f;          // radians per second, arrow keys
@@ -55,6 +61,7 @@ void CameraController::startFreeFly()
 {
     m_mode = Mode::FreeFly;
     m_velocity = glm::vec3(0.0f);
+    m_altitude = heightAboveGround();
     m_scrollTurn = glm::vec2(0.0f);
     keepAboveGround();
     updateNearPlane();
@@ -116,8 +123,8 @@ void CameraController::updateFreeFly(Window& window, float dt)
     const int slower = (input.wasPressed(GLFW_KEY_LEFT_BRACKET) ? 1 : 0) +
                        (input.wasPressed(GLFW_KEY_MINUS) ? 1 : 0);
     if (faster != slower) {
-        m_baseSpeed = std::clamp(m_baseSpeed * std::pow(kSpeedStep, static_cast<float>(faster - slower)),
-                                 kMinSpeed, kMaxSpeed);
+        m_speedMultiplier = std::clamp(m_speedMultiplier * std::pow(kSpeedStep, static_cast<float>(faster - slower)),
+                                       kMinMultiplier, kMaxMultiplier);
     }
 
     // Look: mouse while captured or with the right button held, plus arrow keys.
@@ -152,7 +159,10 @@ void CameraController::updateFreeFly(Window& window, float dt)
         wish = glm::normalize(wish);
     }
     const bool fast = input.isDown(GLFW_KEY_LEFT_SHIFT) || input.isDown(GLFW_KEY_RIGHT_SHIFT);
-    const glm::vec3 targetVelocity = wish * m_baseSpeed * (fast ? kFastMultiplier : 1.0f);
+    m_altitude += (heightAboveGround() - m_altitude) * (1.0f - std::exp(-kAltitudeSmoothing * dt));
+    const float cruise = std::clamp(kSpeedPerMetre * m_altitude, kMinSpeed, kMaxSpeed) * m_speedMultiplier;
+    m_effectiveSpeed = cruise * (fast ? kFastMultiplier : 1.0f);
+    const glm::vec3 targetVelocity = wish * m_effectiveSpeed;
     m_velocity += (targetVelocity - m_velocity) * (1.0f - std::exp(-kResponse * dt));
     m_camera.position += glm::dvec3(m_velocity * dt);
 
@@ -182,6 +192,12 @@ void CameraController::keepAboveGround()
         m_camera.position.y = ground + kMinClearance;
         m_velocity.y = std::max(m_velocity.y, 0.0f);
     }
+}
+
+float CameraController::heightAboveGround() const
+{
+    return static_cast<float>(
+        std::max(m_camera.position.y - m_groundHeight(m_camera.position.x, m_camera.position.z), 0.0));
 }
 
 void CameraController::updateNearPlane()
