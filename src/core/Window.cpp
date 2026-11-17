@@ -57,9 +57,10 @@ Window::Window(const WindowConfig& config)
     glfwSetCursorPosCallback(m_handle, onCursor);
     glfwSetScrollCallback(m_handle, onScroll);
 
-    std::printf("OpenGL %s | %s\n",
+    const GLFWvidmode* mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+    std::printf("OpenGL %s | %s | display %d Hz\n",
                 reinterpret_cast<const char*>(glGetString(GL_VERSION)),
-                reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
+                reinterpret_cast<const char*>(glGetString(GL_RENDERER)), mode ? mode->refreshRate : 0);
 }
 
 Window::~Window()

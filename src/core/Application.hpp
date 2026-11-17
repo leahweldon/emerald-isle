@@ -53,6 +53,7 @@ public:
     int run();
 
 private:
+    void warmUp();
     void update(float deltaSeconds);
     void render();
     void updateTitle();

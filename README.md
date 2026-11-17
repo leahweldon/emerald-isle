@@ -85,7 +85,7 @@ build\Release\emerald-isle.exe       # Windows (Visual Studio generator)
 | `--autofly <s>` | Fly straight ahead at 2.5 km/s for *s* seconds, print frame and streaming stats, exit |
 | `--frame-log <file>` | Write a CSV row per frame: time in events, update, terrain streaming, rendering and swap, plus tile and triangle counts |
 
-The window title shows the frame rate and frame time, terrain triangles, draw calls and loaded tiles (plus any still streaming). On exit the app prints frame-time percentiles, frames over twice the median of the 60 before them, frames over 25 ms, and the terrain's main-thread cost. With vsync on, the frame rate is capped by the display; macOS Low Power Mode caps ProMotion displays at 60 Hz.
+The window title shows the frame rate and frame time, terrain triangles, draw calls and loaded tiles (plus any still streaming). On exit the app prints frame-time percentiles, frames over twice the median of the 60 before them, frames over 25 ms, and the terrain's main-thread cost. With vsync on, the frame rate follows the display's refresh rate (logged at startup). On a MacBook's ProMotion display, GLFW with OpenGL runs at 120 Hz, but macOS Low Power Mode caps the display at 60 Hz.
 
 ### Controls
 

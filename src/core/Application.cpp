@@ -233,6 +233,23 @@ Application::Application(AppOptions options)
         std::printf("Autofly: %.0f s at %.0f m/s\n", static_cast<double>(m_options.autoflySeconds),
                     static_cast<double>(kAutoflySpeed));
     }
+
+    warmUp();
+}
+
+void Application::warmUp()
+{
+    // One-off work that otherwise lands in the first frame (~100-200 ms): macOS finishing the
+    // window on the first event poll, the sky cubemap and its SH readback, first-use pipeline
+    // compilation and the first present. Done here, before the frame loop and its timer start.
+    const auto start = std::chrono::steady_clock::now();
+    m_window.pollEvents();
+    m_sky->update(m_atmosphere);
+    render();
+    m_window.swapBuffers();
+    glFinish();
+    std::printf("Warm-up: %.0f ms before the first frame\n",
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
 }
 
 Application::~Application()
