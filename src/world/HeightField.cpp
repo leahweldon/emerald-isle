@@ -27,6 +27,8 @@ constexpr double kRidgeScale = 9e3;
 constexpr double kRidgeRelief = 800.0;    // ridged crests, scaled by ruggedness
 constexpr double kErosionScale = 5e3;
 constexpr double kErosionRelief = 200.0;  // slope-damped detail: gullies on slopes, smooth valleys
+constexpr double kRollingScale = 3e3;
+constexpr double kRollingRelief = 50.0;   // gentle swells so lowland is not a flat plain
 constexpr double kCliffScale = 70e3;      // which coasts get cliffs
 constexpr double kCliffHeight = 160.0;
 constexpr double kCliffWidth = 0.004;     // continent units over which the cliff rises
@@ -130,13 +132,16 @@ double HeightField::proceduralAt(double x, double z) const
     // Faded to zero at the shoreline so gullies never cut pits below sea level on coastal lowland.
     const double erosion = m_noise.erodedFbm(qx / kErosionScale, qz / kErosionScale, 6) * kErosionRelief *
                            smoothstep(0.0, 0.2, land);
+    // Rolling swells only raise the ground, and fade out at the shoreline, so they add no pits.
+    const double swell = 0.5 + 0.5 * m_noise.fbm(qx / kRollingScale - 40.2, qz / kRollingScale + 12.8, 3);
+    const double rolling = swell * kRollingRelief * smoothstep(0.005, 0.04, land);
 
     // Cliffs on some coasts: the ground rises steeply just inland of the shoreline.
     const double cliffy =
         smoothstep(0.1, 0.45, m_noise.fbm(x / kCliffScale + 63.0, z / kCliffScale - 5.0, 2));
     const double cliff = cliffy * kCliffHeight * smoothstep(0.0, kCliffWidth, land);
 
-    const double h = base + ridges + erosion + cliff;
+    const double h = base + ridges + erosion + rolling + cliff;
     if (h <= kPeakKnee) {
         return h;
     }
