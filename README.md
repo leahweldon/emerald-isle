@@ -14,7 +14,7 @@ A real-time terrain renderer of Ireland, written in C++17 and modern shader-base
 - [x] **2. Terrain:** mesh generated from an Ireland heightmap, with per-vertex normals and directional lighting
 - [x] **3. Surface materials:** grass, rock and sand blended by height and slope
 - [x] **4. Sky and camera:** cubemap sky and a free-fly camera
-- [ ] **5. Infinite world:** terrain chunks streamed around the camera, with level of detail
+- [x] **5. Infinite world:** terrain chunks streamed around the camera, with level of detail
 - [ ] **6. Shadows:** shadow mapping from a moving sun, with a day/night cycle
 - [ ] **7. Water:** planar reflections and animated waves
 - [ ] **8. Weather:** GPU-instanced rain
@@ -25,9 +25,28 @@ A real-time terrain renderer of Ireland, written in C++17 and modern shader-base
 
 Each image is reproducible with `--view <name> --screenshot <file>`, plus the sun options where shown.
 
+![Milestone 5: procedural archipelago about 1,000 km west of Ireland, streamed around the camera (--view archipelago)](docs/images/milestone-05.png)
+
 ![Milestone 4: low sun over Dingle Bay from the Glenbeigh hills, with the atmospheric sky and sun glint (--view glenbeigh --sun-bearing 290 --sun-elevation 4)](docs/images/milestone-04.png)
 
 ![The whole island from the south-east (--view overview)](docs/images/milestone-03.png)
+
+## How the infinite world works
+
+```mermaid
+flowchart LR
+    H["HeightField<br/>Ireland DEM, blended into<br/>seeded procedural islands"] --> W["Worker thread<br/>generates 67×67 height tiles"]
+    Q["Quadtree selection<br/>each frame, around the camera"] -- missing tiles, coarse first --> W
+    W -- finished tiles --> U["Main thread<br/>≤16 uploads per frame"]
+    U --> C["LRU tile cache<br/>one texture per tile"]
+    C --> Q
+    Q -- visible nodes, nearest first --> D["Draw: one shared 64×64 grid per node<br/>heights sampled in the vertex shader"]
+```
+
+- **Height:** inside Ireland's rectangle the world is the Copernicus DEM. Outside it, domain-warped fractal noise is shaped into islands with a falloff to sea level. The two are cross-faded near the DEM border, with a ring of open sea around Ireland so there is no seam. The same `--seed` always gives the same world.
+- **Level of detail (CDLOD):** the world is a quadtree of square nodes from 4 km to 524 km across, with roots tiled around the camera. A node splits into four when the camera is within 2.5× the child size, so every node covers a similar part of the screen. Grid vertices morph onto the next coarser grid as they approach a node's range, so levels meet without popping or cracks; skirts cover any gap while a level is still loading. Nodes outside the view frustum are skipped.
+- **Streaming:** missing tiles are generated on a background thread, coarsest first, and uploaded a few per frame. A node is drawn with its parent's coarser tile until its own detail arrives, so a frame never waits for the worker.
+- **Precision:** the camera position is double precision and everything is rendered relative to it (a floating origin). Material textures and noise repeat every 360 km, so their coordinates are wrapped per node. Thousands of kilometres out, there is no jitter.
 
 ## Building
 
@@ -59,12 +78,14 @@ build\Release\emerald-isle.exe       # Windows (Visual Studio generator)
 | `--no-vsync` | Render as fast as possible, to measure frame rate |
 | `--frames <n>` | Exit after rendering *n* frames |
 | `--screenshot <file>` | Save the final frame as a PNG, then exit |
-| `--terrain-step <n>` | Use every *n*th heightmap pixel (default 2); higher is faster |
-| `--view <name>` | Start in free-fly at a preset pose instead of the orbit: `overview`, `kerry`, `wicklow`, `glenbeigh` |
+| `--view <name>` | Start in free-fly at a preset pose instead of the orbit: `overview`, `kerry`, `wicklow`, `glenbeigh`, `archipelago` |
 | `--sun-bearing <deg>` | Sun compass bearing, 0 = north (default 225, south-west) |
 | `--sun-elevation <deg>` | Sun elevation above the horizon (default 22) |
+| `--seed <n>` | Procedural world seed (default 1); the same seed always gives the same islands |
+| `--autofly <s>` | Fly straight ahead at 2.5 km/s for *s* seconds, print frame and streaming stats, exit |
+| `--frame-log <file>` | Write a CSV row per frame: time in events, update, terrain streaming, rendering and swap, plus tile and triangle counts |
 
-The window title shows the averaged frame rate and frame time.
+The window title shows the frame rate and frame time, terrain triangles, draw calls and loaded tiles (plus any still streaming). On exit the app prints frame-time percentiles, frames over twice the median of the 60 before them, frames over 25 ms, and the terrain's main-thread cost. With vsync on, the frame rate follows the display's refresh rate (logged at startup). On a MacBook's ProMotion display, GLFW with OpenGL runs at 120 Hz, but macOS Low Power Mode caps the display at 60 Hz.
 
 ### Controls
 
@@ -77,19 +98,20 @@ The window title shows the averaged frame rate and frame time.
 | Free look | **Tab** captures the cursor, then move a finger; **Tab** again to release | **Tab**, then move the mouse |
 | Turn / pitch | **←** **→** / **↑** **↓** | **←** **→** / **↑** **↓** |
 | Faster | Hold **Shift** (5×) | Hold **Shift** (5×) |
-| Change base speed | **[** / **]** or **-** / **=** (×1.25 per press) | **[** / **]** or **-** / **=** |
+| Speed multiplier | **[** / **]** or **-** / **=** (×1.25 per press) | **[** / **]** or **-** / **=** |
 | Free-fly ↔ orbit | **C** | **C** |
 | Print pose as a `--view` preset line | **P** | **P** |
 | Quit | **Esc** | **Esc** |
 
-The window title shows the frame rate, frame time and current base speed (or "orbit"). Without `--view` the app starts in a slow orbit of the island; press **C** to take control. The camera stays at least 30 m above the ground and sea.
+Flying speed follows your height above the ground, like a map viewer: about 50 m/s skimming the hills at 30 m, about 2.4 km/s at a 1.5 km cruising height (Kerry to the edge of the DEM in about 12 s), and faster still from orbit. The multiplier keys scale that, and the window title shows the current speed (or "orbit"). Without `--view` the app starts in a slow orbit of the island; press **C** to take control. The camera stays at least 30 m above the ground and sea.
 
 ## Project structure
 
 ```text
 src/
   core/     window and context, frame timing, application loop, screenshots
-  render/   shaders, atmosphere, camera and view presets, terrain mesh, materials, sea
+  render/   shaders, atmosphere, camera and view presets, CDLOD terrain, materials, sea
+  world/    height field (DEM + procedural islands), noise, background tile streaming
 assets/
   shaders/  GLSL source
   textures/ Ireland heightmap (16-bit, built by tools/make_heightmap.py)

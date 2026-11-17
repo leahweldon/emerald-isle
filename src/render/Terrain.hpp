@@ -1,0 +1,105 @@
+#pragma once
+
+#include "world/TileStreamer.hpp"
+
+#include <glad/gl.h>
+#include <glm/glm.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <unordered_map>
+#include <vector>
+
+namespace emerald {
+
+class HeightField;
+class Shader;
+
+// Endless terrain as a CDLOD quadtree. Every node is drawn with one shared grid mesh; heights come
+// from streamed per-node tile textures, sampled in the vertex shader, and vertices
+// geomorph towards the next coarser grid as distance approaches the node's range so levels meet
+// without popping or cracks. Rendering is camera-relative (floating origin).
+class Terrain {
+public:
+    struct Stats {
+        int drawCalls = 0;
+        std::size_t triangles = 0;
+        int residentTiles = 0;
+        std::size_t outstandingTiles = 0;
+        int uploadsThisFrame = 0;
+        std::uint64_t tilesGenerated = 0; // since startup
+        double updateMs = 0.0;            // main-thread cost of update(): uploads and selection
+    };
+
+    explicit Terrain(const HeightField& heightField);
+    ~Terrain();
+
+    Terrain(const Terrain&) = delete;
+    Terrain& operator=(const Terrain&) = delete;
+
+    // Uploads finished tiles (bounded per frame), selects nodes for this camera and queues missing
+    // tiles. Never waits for the worker.
+    void update(const glm::dvec3& cameraPos, const glm::mat4& viewProjection);
+
+    // Draws the nodes chosen by update(). The shader must be bound with scene uniforms set.
+    void draw(Shader& shader, GLuint heightTileUnit);
+
+    // Blurred land mask over the DEM extent (R8, 1 = land), for shallow-water shading.
+    // Row 0 is north (-Z); sample at uv = xz / demSize() + 0.5.
+    void bindCoastMask(GLuint unit) const;
+    glm::vec2 demSize() const { return m_demSize; }
+
+    // True when everything the last update() wanted is loaded and nothing is queued.
+    bool settled() const { return m_settled; }
+    const Stats& stats() const { return m_stats; }
+
+private:
+    struct Slot {
+        TileKey key;
+        float minY = 0.0f;
+        float maxY = 0.0f;
+        std::uint64_t lastUsed = 0;
+        GLuint texture = 0; // 0 when the slot is free
+    };
+    struct DrawNode {
+        TileKey key;
+        GLuint texture;
+        double distance; // camera to node bounds, for front-to-back order
+    };
+
+    void selectNode(const TileKey& key, const glm::dvec3& cameraPos, const glm::vec4 planes[6],
+                    std::vector<TileStreamer::Request>& wanted);
+    // Keeps coarse tiles loaded outside the view, so turning reveals terrain rather than holes.
+    void prefetchNode(const TileKey& key, const glm::dvec3& cameraPos,
+                      std::vector<TileStreamer::Request>& wanted);
+    // Slot index of a loaded tile (marking it used this frame), or -1.
+    int residentSlot(const TileKey& key);
+    void uploadTile(const TileData& tile);
+    void buildGridMesh();
+    void buildCoastMask(const HeightField& heightField);
+
+    std::unique_ptr<TileStreamer> m_streamer;
+    // One small R32F texture per resident tile. Each upload creates a fresh texture, so the driver
+    // never has to wait for frames in flight that still read an older tile.
+    int m_capacity = 0;
+    std::vector<Slot> m_slots;
+    std::unordered_map<TileKey, int, TileKeyHash> m_lookup;
+    std::uint64_t m_frame = 0;
+
+    GLuint m_vao = 0;
+    GLuint m_vbo = 0;
+    GLuint m_ebo = 0;
+    GLsizei m_gridIndexCount = 0;
+    GLsizei m_totalIndexCount = 0;
+
+    GLuint m_coastMask = 0;
+    glm::vec2 m_demSize{0.0f};
+
+    std::vector<DrawNode> m_drawList;
+    glm::dvec3 m_cameraPos{0.0};
+    bool m_settled = false;
+    Stats m_stats;
+};
+
+} // namespace emerald

@@ -7,7 +7,7 @@ namespace emerald {
 namespace {
 
 // Targets from ITM coordinates of each landmark, relative to the heightmap centre.
-const std::array<ViewPreset, 4> kPresets = {{
+const std::array<ViewPreset, 5> kPresets = {{
     // Whole island from the south-east, side-lit by the south-west sun.
     {"overview", glm::vec3(0.0f, 0.0f, 0.0f), 0.8f, 0.2f, 400e3f},
     // MacGillycuddy's Reeks and Carrauntoohil from the east.
@@ -17,6 +17,9 @@ const std::array<ViewPreset, 4> kPresets = {{
     // Low over the Glenbeigh hills (~400 m above them), looking west-north-west across Dingle Bay
     // and the Dingle peninsula to the Atlantic; the south-west sun rakes in from the left.
     {"glenbeigh", glm::vec3(-154956.0f, 0.0f, 137293.0f), 1.047f, 0.045f, 30030.0f},
+    // Procedural archipelago ~1160 km north-west of Ireland (default seed), looking north-west
+    // across the islands with the south-west sun to the left.
+    {"archipelago", glm::vec3(-994e3f, 0.0f, -235e3f), 0.785f, 0.07f, 50e3f},
 }};
 
 } // namespace
@@ -45,7 +48,7 @@ std::string viewPresetNames()
 
 void applyViewPreset(const ViewPreset& preset, Camera& camera)
 {
-    camera.lookFrom(preset.target, preset.azimuth, preset.elevation, preset.distance);
+    camera.lookFrom(glm::dvec3(preset.target), preset.azimuth, preset.elevation, preset.distance);
     // Near plane scales with distance to keep depth precision at the coast.
     camera.nearPlane = preset.distance * 0.01f;
 }

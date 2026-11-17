@@ -57,6 +57,7 @@ add_library(glad STATIC external/glad/src/gl.c)
 target_include_directories(glad SYSTEM PUBLIC external/glad/include)
 
 find_package(OpenGL REQUIRED)
+find_package(Threads REQUIRED)
 
 # ---------------------------------------------------------------------------
 # Application
@@ -74,12 +75,15 @@ add_executable(emerald-isle
     src/render/SeaPlane.cpp
     src/render/Shader.cpp
     src/render/Sky.cpp
-    src/render/TerrainMesh.cpp
+    src/render/Terrain.cpp
     src/render/TextureArray.cpp
-    src/render/ViewPresets.cpp)
+    src/render/ViewPresets.cpp
+    src/world/HeightField.cpp
+    src/world/Noise.cpp
+    src/world/TileStreamer.cpp)
 
 target_include_directories(emerald-isle PRIVATE src)
-target_link_libraries(emerald-isle PRIVATE glfw glad glm::glm stb OpenGL::GL)
+target_link_libraries(emerald-isle PRIVATE glfw glad glm::glm stb OpenGL::GL Threads::Threads)
 target_compile_definitions(emerald-isle PRIVATE
     GLFW_INCLUDE_NONE
     EMERALD_VERSION="${PROJECT_VERSION}")

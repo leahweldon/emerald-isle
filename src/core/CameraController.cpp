@@ -16,8 +16,14 @@ namespace {
 constexpr float kMinClearance = 30.0f;     // metres above ground or sea
 constexpr float kFastMultiplier = 5.0f;    // with Shift
 constexpr float kSpeedStep = 1.25f;        // per [ ] or - = press
-constexpr float kMinSpeed = 10.0f;
-constexpr float kMaxSpeed = 50000.0f;
+constexpr float kMinMultiplier = 1.0f / 32.0f;
+constexpr float kMaxMultiplier = 32.0f;
+// Free-fly speed follows height above the ground (like a map viewer): slow and precise near the
+// terrain, fast high up. ~2.4 km/s at a 1.5 km cruising height crosses 30 km in about 12 s.
+constexpr float kSpeedPerMetre = 1.6f;     // m/s of speed per metre of height
+constexpr float kMinSpeed = 20.0f;
+constexpr float kMaxSpeed = 100000.0f;
+constexpr float kAltitudeSmoothing = 2.0f; // 1/s; speed does not jump at cliffs and coastlines
 constexpr float kResponse = 6.0f;          // 1/s; velocity reaches ~95% of target in 0.5 s
 constexpr float kMouseSensitivity = 0.0025f; // radians per screen pixel
 constexpr float kTurnRate = 1.2f;          // radians per second, arrow keys
@@ -33,13 +39,13 @@ constexpr float kTargetFallback = 20000.0f; // metres, when the view ray misses 
 
 } // namespace
 
-CameraController::CameraController(Camera& camera, std::function<float(float, float)> groundHeight)
+CameraController::CameraController(Camera& camera, std::function<double(double, double)> groundHeight)
     : m_camera(camera)
     , m_groundHeight(std::move(groundHeight))
 {
 }
 
-void CameraController::startOrbit(const glm::vec3& target, float azimuth, float elevation,
+void CameraController::startOrbit(const glm::dvec3& target, float azimuth, float elevation,
                                   float distance, bool animate)
 {
     m_mode = Mode::Orbit;
@@ -55,9 +61,16 @@ void CameraController::startFreeFly()
 {
     m_mode = Mode::FreeFly;
     m_velocity = glm::vec3(0.0f);
+    m_altitude = heightAboveGround();
     m_scrollTurn = glm::vec2(0.0f);
     keepAboveGround();
     updateNearPlane();
+}
+
+void CameraController::startAutofly(float speed)
+{
+    startFreeFly();
+    m_autoflySpeed = speed;
 }
 
 void CameraController::update(Window& window, float deltaSeconds)
@@ -68,11 +81,12 @@ void CameraController::update(Window& window, float deltaSeconds)
     if (input.wasPressed(GLFW_KEY_C)) {
         if (m_mode == Mode::FreeFly) {
             // Orbit around what the camera is looking at, starting from the current view.
-            const glm::vec3 target = lookTarget();
-            const glm::vec3 offset = m_camera.position - target;
-            const float distance = glm::length(offset);
-            startOrbit(target, std::atan2(offset.x, offset.z), std::asin(offset.y / distance),
-                       distance, true);
+            const glm::dvec3 target = lookTarget();
+            const glm::dvec3 offset = m_camera.position - target;
+            const double distance = glm::length(offset);
+            startOrbit(target, static_cast<float>(std::atan2(offset.x, offset.z)),
+                       static_cast<float>(std::asin(offset.y / distance)), static_cast<float>(distance),
+                       true);
             window.setCursorCaptured(false);
         } else {
             startFreeFly();
@@ -84,7 +98,13 @@ void CameraController::update(Window& window, float deltaSeconds)
         std::fflush(stdout);
     }
 
-    if (m_mode == Mode::FreeFly) {
+    if (m_autoflySpeed > 0.0f) {
+        // Level flight along the heading; ground clearance still lifts the camera over hills.
+        const glm::vec3 heading(std::sin(m_camera.yaw), 0.0f, -std::cos(m_camera.yaw));
+        m_camera.position += glm::dvec3(heading * (m_autoflySpeed * dt));
+        keepAboveGround();
+        updateNearPlane();
+    } else if (m_mode == Mode::FreeFly) {
         updateFreeFly(window, dt);
     } else {
         updateOrbit(dt);
@@ -103,8 +123,8 @@ void CameraController::updateFreeFly(Window& window, float dt)
     const int slower = (input.wasPressed(GLFW_KEY_LEFT_BRACKET) ? 1 : 0) +
                        (input.wasPressed(GLFW_KEY_MINUS) ? 1 : 0);
     if (faster != slower) {
-        m_baseSpeed = std::clamp(m_baseSpeed * std::pow(kSpeedStep, static_cast<float>(faster - slower)),
-                                 kMinSpeed, kMaxSpeed);
+        m_speedMultiplier = std::clamp(m_speedMultiplier * std::pow(kSpeedStep, static_cast<float>(faster - slower)),
+                                       kMinMultiplier, kMaxMultiplier);
     }
 
     // Look: mouse while captured or with the right button held, plus arrow keys.
@@ -139,9 +159,12 @@ void CameraController::updateFreeFly(Window& window, float dt)
         wish = glm::normalize(wish);
     }
     const bool fast = input.isDown(GLFW_KEY_LEFT_SHIFT) || input.isDown(GLFW_KEY_RIGHT_SHIFT);
-    const glm::vec3 targetVelocity = wish * m_baseSpeed * (fast ? kFastMultiplier : 1.0f);
+    m_altitude += (heightAboveGround() - m_altitude) * (1.0f - std::exp(-kAltitudeSmoothing * dt));
+    const float cruise = std::clamp(kSpeedPerMetre * m_altitude, kMinSpeed, kMaxSpeed) * m_speedMultiplier;
+    m_effectiveSpeed = cruise * (fast ? kFastMultiplier : 1.0f);
+    const glm::vec3 targetVelocity = wish * m_effectiveSpeed;
     m_velocity += (targetVelocity - m_velocity) * (1.0f - std::exp(-kResponse * dt));
-    m_camera.position += m_velocity * dt;
+    m_camera.position += glm::dvec3(m_velocity * dt);
 
     keepAboveGround();
     updateNearPlane();
@@ -164,60 +187,65 @@ void CameraController::applyOrbit()
 
 void CameraController::keepAboveGround()
 {
-    const float ground = m_groundHeight(m_camera.position.x, m_camera.position.z);
+    const double ground = m_groundHeight(m_camera.position.x, m_camera.position.z);
     if (m_camera.position.y < ground + kMinClearance) {
         m_camera.position.y = ground + kMinClearance;
         m_velocity.y = std::max(m_velocity.y, 0.0f);
     }
 }
 
+float CameraController::heightAboveGround() const
+{
+    return static_cast<float>(
+        std::max(m_camera.position.y - m_groundHeight(m_camera.position.x, m_camera.position.z), 0.0));
+}
+
 void CameraController::updateNearPlane()
 {
     // Large enough for depth precision at the coast, small enough not to clip nearby slopes.
-    const float altitude = m_camera.position.y - m_groundHeight(m_camera.position.x, m_camera.position.z);
+    const auto altitude = static_cast<float>(
+        m_camera.position.y - m_groundHeight(m_camera.position.x, m_camera.position.z));
     m_camera.nearPlane = std::clamp(altitude * 0.3f, 2.0f, 5000.0f);
 }
 
-glm::vec3 CameraController::lookTarget() const
+glm::dvec3 CameraController::lookTarget() const
 {
-    const glm::vec3 origin = m_camera.position;
-    const glm::vec3 dir = m_camera.forward();
-    float t = 0.0f;
-    float step = std::max(50.0f, origin.y * 0.01f);
-    const auto below = [&](float distance) {
-        const glm::vec3 p = origin + dir * distance;
+    const glm::dvec3 origin = m_camera.position;
+    const glm::dvec3 dir(m_camera.forward());
+    double t = 0.0;
+    double step = std::max(50.0, origin.y * 0.01);
+    const auto below = [&](double distance) {
+        const glm::dvec3 p = origin + dir * distance;
         return p.y <= m_groundHeight(p.x, p.z);
     };
-    while (t < 500000.0f) {
+    while (t < 500000.0) {
         if (below(t + step)) {
             // Refine the crossing between t and t + step.
-            float lo = t;
-            float hi = t + step;
+            double lo = t;
+            double hi = t + step;
             for (int i = 0; i < 16; ++i) {
-                const float mid = 0.5f * (lo + hi);
+                const double mid = 0.5 * (lo + hi);
                 (below(mid) ? hi : lo) = mid;
             }
             return origin + dir * hi;
         }
         t += step;
-        step *= 1.02f;
+        step *= 1.02;
     }
-    return origin + dir * kTargetFallback;
+    return origin + dir * static_cast<double>(kTargetFallback);
 }
 
 std::string CameraController::presetLine() const
 {
-    const glm::vec3 target = lookTarget();
-    const glm::vec3 offset = m_camera.position - target;
-    const float distance = glm::length(offset);
-    const float azimuth = std::atan2(offset.x, offset.z);
-    const float elevation = std::asin(offset.y / distance);
+    const glm::dvec3 target = lookTarget();
+    const glm::dvec3 offset = m_camera.position - target;
+    const double distance = glm::length(offset);
+    const double azimuth = std::atan2(offset.x, offset.z);
+    const double elevation = std::asin(offset.y / distance);
     char line[192];
     std::snprintf(line, sizeof(line),
                   "    {\"name\", glm::vec3(%.1ff, %.1ff, %.1ff), %.4ff, %.4ff, %.1ff},",
-                  static_cast<double>(target.x), static_cast<double>(target.y),
-                  static_cast<double>(target.z), static_cast<double>(azimuth),
-                  static_cast<double>(elevation), static_cast<double>(distance));
+                  target.x, target.y, target.z, azimuth, elevation, distance);
     return line;
 }
 

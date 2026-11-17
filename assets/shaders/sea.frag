@@ -1,9 +1,10 @@
 #version 330 core
 
-in vec3 vWorldPos;
+in vec3 vRelPos;   // relative to the camera
+in vec2 vWorldXZ;
 out vec4 fragColour;
 
-uniform vec3 uCameraPos;
+uniform float uCameraHeight;
 uniform vec3 uSunDir;     // towards the sun, normalised
 uniform vec3 uSunColour;
 uniform samplerCube uSkyCube;
@@ -47,31 +48,30 @@ vec3 skyAmbient(vec3 n)
 }
 
 // Fog colour is the sky behind the fragment, so distant terrain and sea meet the skybox exactly.
-vec3 fogColour(vec3 cameraPos, vec3 worldPos)
+vec3 fogColour(vec3 relPos)
 {
-    return texture(uSkyCube, normalize(worldPos - cameraPos)).rgb;
+    return texture(uSkyCube, normalize(relPos)).rgb;
 }
 
-// Height fog: optical depth of exponentially thinning air along the view ray.
-float fogAmount(vec3 cameraPos, vec3 worldPos)
+// Height fog: optical depth of exponentially thinning air along the view ray from the camera.
+float fogAmount(vec3 relPos)
 {
-    vec3 ray = worldPos - cameraPos;
-    float dist = length(ray);
+    float dist = length(relPos);
     float k = uFogFalloff;
-    float base = exp(-k * cameraPos.y);
-    float rise = k * ray.y;
+    float base = exp(-k * uCameraHeight);
+    float rise = k * relPos.y;
     // Integral of exp(-k * height) over the ray, divided by its length.
-    float avg = abs(rise) > 1e-4 ? (base - exp(-k * worldPos.y)) / rise : base;
+    float avg = abs(rise) > 1e-4 ? (base - exp(-k * (uCameraHeight + relPos.y))) / rise : base;
     return 1.0 - exp(-uFogDensity * dist * avg);
 }
 
 void main()
 {
     const vec3 n = vec3(0.0, 1.0, 0.0);
-    vec3 toCamera = normalize(uCameraPos - vWorldPos);
+    vec3 toCamera = normalize(-vRelPos);
 
     // Shallower-looking water near land. No bathymetry, so distance to coast stands in for depth.
-    float coast = texture(uCoastMask, vWorldPos.xz / uTerrainSize + 0.5).r;
+    float coast = texture(uCoastMask, vWorldXZ / uTerrainSize + 0.5).r;
     vec3 water = mix(kSea, kShallow, smoothstep(0.02, 0.5, coast));
 
     float diffuse = max(dot(n, uSunDir), 0.0);
@@ -83,10 +83,10 @@ void main()
     // Ramp fog to exactly 1 at the plane's edge, so the sea reaches the sky's horizon colour
     // whatever the camera height. Linear in 1/distance, which is roughly linear on screen near
     // the horizon, so the fade spreads over many rows instead of a few.
-    float d = max(length(vWorldPos.xz - uCameraPos.xz), 1.0);
+    float d = max(length(vRelPos.xz), 1.0);
     float nearEdge = 0.1 * uSeaRadius;
     float edge = smoothstep(0.0, 1.0, clamp((1.0 / nearEdge - 1.0 / d) /
                                             (1.0 / nearEdge - 1.0 / uSeaRadius), 0.0, 1.0));
-    colour = mix(colour, fogColour(uCameraPos, vWorldPos), max(fogAmount(uCameraPos, vWorldPos), edge));
+    colour = mix(colour, fogColour(vRelPos), max(fogAmount(vRelPos), edge));
     fragColour = vec4(linearToSrgb(toneMap(colour)), 1.0);
 }
