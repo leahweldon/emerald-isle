@@ -22,6 +22,7 @@ class HeightField;
 class SeaPlane;
 class Shader;
 class GpuTimer;
+class OffscreenTarget;
 class TextureArray;
 
 struct AppOptions {
@@ -84,6 +85,7 @@ private:
     std::unique_ptr<SeaPlane> m_sea;
     std::unique_ptr<Shader> m_seaShader;
     std::unique_ptr<GpuTimer> m_gpuTimer;
+    std::unique_ptr<OffscreenTarget> m_offscreen; // --headless only
     Camera m_camera;
     std::unique_ptr<CameraController> m_controller;
     Atmosphere m_atmosphere;

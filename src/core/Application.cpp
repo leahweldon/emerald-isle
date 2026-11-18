@@ -2,6 +2,7 @@
 
 #include "core/Screenshot.hpp"
 #include "render/GpuTimer.hpp"
+#include "render/OffscreenTarget.hpp"
 #include "render/Shader.hpp"
 #include "render/SeaPlane.hpp"
 #include "render/Sky.hpp"
@@ -69,6 +70,8 @@ void printUsage(const char* program)
         "  --width <px>          Window width (default 1280)\n"
         "  --height <px>         Window height (default 720)\n"
         "  --no-vsync            Render as fast as possible, to measure frame rate\n"
+        "  --headless            Hidden window, render offscreen at --width x --height; needs\n"
+        "                        --frames, --screenshot or --autofly\n"
         "  --frames <n>          Exit after rendering n frames\n"
         "  --screenshot <file>   Save the last frame as a PNG, then exit\n"
         "  --view <name>         Start from a camera preset: %s\n"
@@ -132,6 +135,8 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             return false;
         } else if (std::strcmp(arg, "--no-vsync") == 0) {
             options.window.vsync = false;
+        } else if (std::strcmp(arg, "--headless") == 0) {
+            options.window.headless = true;
         } else if (std::strcmp(arg, "--width") == 0 && hasValue) {
             options.window.width = parsePositive(arg, argv[++i]);
         } else if (std::strcmp(arg, "--height") == 0 && hasValue) {
@@ -176,6 +181,14 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
     if (!options.screenshotPath.empty() && options.frameLimit == 0) {
         options.frameLimit = 10;
     }
+    if (options.window.headless) {
+        // A hidden window gets no input, so nothing could end the run.
+        if (options.frameLimit == 0 && options.autoflySeconds <= 0.0f) {
+            throw std::invalid_argument("--headless needs --frames, --screenshot or --autofly");
+        }
+        // Nothing is presented, so there is no refresh to wait for.
+        options.window.vsync = false;
+    }
     return true;
 }
 
@@ -183,7 +196,13 @@ Application::Application(AppOptions options)
     : m_options(std::move(options))
     , m_window(m_options.window)
 {
-    glViewport(0, 0, m_window.framebufferWidth(), m_window.framebufferHeight());
+    if (m_options.window.headless) {
+        m_offscreen = std::make_unique<OffscreenTarget>(m_window.framebufferWidth(),
+                                                        m_window.framebufferHeight(),
+                                                        m_options.window.samples);
+    } else {
+        glViewport(0, 0, m_window.framebufferWidth(), m_window.framebufferHeight());
+    }
     glEnable(GL_MULTISAMPLE);
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
@@ -324,7 +343,8 @@ int Application::run()
                                (m_options.frameLimit > 0 && (counted >= m_options.frameLimit || timedOut));
         if (lastFrame && !m_options.screenshotPath.empty()) {
             // Read the back buffer before it is presented, so the capture matches this frame.
-            if (!saveFramebufferPng(m_window.framebufferWidth(), m_window.framebufferHeight(),
+            const unsigned source = m_offscreen ? m_offscreen->readFramebuffer() : 0;
+            if (!saveFramebufferPng(source, m_window.framebufferWidth(), m_window.framebufferHeight(),
                                     m_options.screenshotPath)) {
                 return EXIT_FAILURE;
             }
@@ -414,6 +434,11 @@ void Application::render()
 
     // Skybox last, at the far plane, so it is only shaded where nothing else was drawn.
     m_sky->drawBackground(glm::inverse(projection * rotationOnly), m_atmosphere);
+
+    // Stands in for the resolve a multisampled default framebuffer does on swap.
+    if (m_offscreen) {
+        m_offscreen->resolve();
+    }
 }
 
 void Application::setSceneUniforms(Shader& shader)

@@ -4,8 +4,8 @@
 
 namespace emerald {
 
-// Reads the current default framebuffer and writes it to a PNG file.
+// Reads a framebuffer (0: the default back buffer) and writes it to a PNG file.
 // Used for the --screenshot option, which produces README images and CI artefacts.
-bool saveFramebufferPng(int width, int height, const std::string& path);
+bool saveFramebufferPng(unsigned framebuffer, int width, int height, const std::string& path);
 
 } // namespace emerald

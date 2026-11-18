@@ -13,7 +13,10 @@ struct WindowConfig {
     int height = 720;
     std::string title = "Emerald Isle";
     bool vsync = true;
-    bool visible = true;
+    int samples = 4; // MSAA samples, for the default framebuffer or the headless target
+    // Hidden window that never takes focus; the app renders into an OffscreenTarget instead.
+    // The framebuffer size is then width x height exactly, with no HiDPI scaling.
+    bool headless = false;
 };
 
 // Owns the GLFW window and its OpenGL 3.3 core context.
