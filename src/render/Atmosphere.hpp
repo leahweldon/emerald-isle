@@ -18,7 +18,7 @@ glm::vec3 sunTransmittance(const glm::vec3& sunDir);
 // Ambient light and fog colour come from the sky cubemap (see Sky).
 struct Atmosphere {
     glm::vec3 sunDir = sunDirection(225.0f, 22.0f); // south-west, low afternoon sun
-    float sunStrength = 1.0f;   // direct light on terrain = sunStrength * sunTransmittance
+    float sunStrength = 1.4f;   // direct light on terrain = sunStrength * sunTransmittance
     float exposure = 1.3f;      // sky radiance scale into display range
     glm::mat3 starRotation{1.0f}; // world directions to the celestial sphere, from the time of day
 
@@ -29,6 +29,9 @@ struct Atmosphere {
     // The light that shades and casts shadows: the sun, or the moon once the sun has set.
     glm::vec3 lightDir() const;
     glm::vec3 lightColour() const;
+    // Scale on the sky's diffuse light: half while the sun is well up, so sunlit ground stands
+    // out from shade, rising to full as it sets (as the eye adapts to the sky).
+    float ambientScale() const;
     // Moonlight relative to sunlight in the sky model, and the airglow floor (before exposure).
     float moonSkyIntensity() const;
     glm::vec3 nightSky() const;
@@ -41,7 +44,7 @@ struct Atmosphere {
     float highAltitudeStart = 5000.0f;
     float highAltitudeEnd = 100000.0f;
 
-    // Sets uLightDir, uLightColour, uFogDensity and uFogFalloff.
+    // Sets uLightDir, uLightColour, uAmbientScale, uFogDensity and uFogFalloff.
     void apply(Shader& shader, float cameraHeight = 0.0f) const;
 };
 

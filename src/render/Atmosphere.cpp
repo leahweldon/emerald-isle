@@ -89,6 +89,11 @@ glm::vec3 Atmosphere::lightColour() const
     return night() * kMoonLight * sunTransmittance(moonDir()) / overhead;
 }
 
+float Atmosphere::ambientScale() const
+{
+    return glm::mix(1.0f, 0.5f, glm::smoothstep(0.0f, 0.17f, sunDir.y));
+}
+
 float Atmosphere::moonSkyIntensity() const
 {
     return kMoonSky * night();
@@ -103,6 +108,7 @@ void Atmosphere::apply(Shader& shader, float cameraHeight) const
 {
     shader.set("uLightDir", lightDir());
     shader.set("uLightColour", lightColour());
+    shader.set("uAmbientScale", ambientScale());
     const float t = glm::smoothstep(highAltitudeStart, highAltitudeEnd, cameraHeight);
     shader.set("uFogDensity", fogDensity * glm::mix(1.0f, highAltitudeFogScale, t));
     shader.set("uFogFalloff", 1.0f / fogScaleHeight);

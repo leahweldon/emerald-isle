@@ -9,6 +9,7 @@ uniform vec3 uLightDir;   // towards the sun, or the moon at night
 uniform vec3 uLightColour;
 uniform samplerCube uSkyCube;
 uniform vec3 uIrradianceSH[9];
+uniform float uAmbientScale;
 uniform float uFogDensity;
 uniform float uFogFalloff;
 uniform sampler2D uCoastMask;  // blurred land mask, see TerrainMesh::bindCoastMask
@@ -40,7 +41,7 @@ vec3 linearToSrgb(vec3 c)
 // Diffuse sky light from order-2 SH (coefficients pre-convolved and divided by pi on the CPU).
 vec3 skyAmbient(vec3 n)
 {
-    return max(uIrradianceSH[0] * 0.282095
+    return uAmbientScale * max(uIrradianceSH[0] * 0.282095
              + uIrradianceSH[1] * 0.488603 * n.y + uIrradianceSH[2] * 0.488603 * n.z
              + uIrradianceSH[3] * 0.488603 * n.x
              + uIrradianceSH[4] * 1.092548 * n.x * n.y + uIrradianceSH[5] * 1.092548 * n.y * n.z
