@@ -23,6 +23,7 @@ class HeightField;
 class SeaPlane;
 class Shader;
 class GpuTimer;
+class ShadowMaps;
 class OffscreenTarget;
 class TextureArray;
 
@@ -73,6 +74,7 @@ private:
     void update(float deltaSeconds);
     void updateTime(float deltaSeconds);
     void render();
+    void renderShadows(const glm::mat4& projection);
     void updateTitle();
     void recordFrameStats(float frameMs, float cpuMs);
     void printRunStats() const;
@@ -93,6 +95,8 @@ private:
     std::unique_ptr<TextureArray> m_materialNormal;
     std::unique_ptr<SeaPlane> m_sea;
     std::unique_ptr<Shader> m_seaShader;
+    std::unique_ptr<Shader> m_shadowShader;
+    std::unique_ptr<ShadowMaps> m_shadows;
     std::unique_ptr<GpuTimer> m_gpuTimer;
     std::unique_ptr<OffscreenTarget> m_offscreen; // --headless only
     Camera m_camera;

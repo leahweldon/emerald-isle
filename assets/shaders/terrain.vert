@@ -1,6 +1,7 @@
 #version 330 core
 
 // One shared grid drawn per CDLOD node; heights come from the node's streamed tile.
+// With SHADOW_PASS defined it only positions vertices for a shadow cascade's depth pass.
 layout(location = 0) in vec3 aGrid; // grid x, grid z (0..quads), skirt flag
 
 uniform mat4 uView;          // rotation only
@@ -17,12 +18,16 @@ uniform vec2 uNodeMaterialOrigin; // same corner in world space modulo the mater
 uniform float uNodeSize;
 uniform vec2 uMorphRange;      // distance where morphing to the coarser grid starts and ends
 
+#ifdef SHADOW_PASS
+uniform mat4 uShadowViewProj;  // camera-relative position to the cascade's clip space
+#else
 out vec3 vRelPos;    // relative to the camera
 out vec2 vWorldXZ;
 out float vWorldY;
 out vec2 vTileUV;
 out float vMorph;
 out vec4 vNoise;     // broad, local, patches, macro: material noise, smooth enough per vertex
+#endif
 
 // Material noise repeats exactly every kMaterialPeriod metres (each scale divides it), matching
 // the per-node wrap of world coordinates. Evaluated per vertex: it is low frequency and costly.
@@ -90,7 +95,11 @@ void main()
     // Skirts hang below the edge to cover gaps against a coarser neighbour.
     height -= aGrid.z * max(2.0 * spacing, 20.0);
 
-    vRelPos = vec3(xz.x, height - uCameraHeight, xz.y);
+    vec3 relPos = vec3(xz.x, height - uCameraHeight, xz.y);
+#ifdef SHADOW_PASS
+    gl_Position = uShadowViewProj * vec4(relPos, 1.0);
+#else
+    vRelPos = relPos;
     vWorldXZ = uNodeMaterialOrigin + grid * spacing;
     vWorldY = height;
     vTileUV = tileUV(grid);
@@ -98,4 +107,5 @@ void main()
     vNoise = vec4(fbm(vWorldXZ, 24000.0, vec2(0.0)), fbm(vWorldXZ, 6000.0, vec2(17.0)),
                   fbm(vWorldXZ, 2500.0, vec2(5.0)), fbm(vWorldXZ, 40000.0, vec2(3.0)));
     gl_Position = uProjection * uView * vec4(vRelPos, 1.0);
+#endif
 }

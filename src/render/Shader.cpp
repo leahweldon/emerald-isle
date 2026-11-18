@@ -22,9 +22,38 @@ std::string readFile(const std::filesystem::path& path)
     return contents.str();
 }
 
-GLuint compileStage(GLenum stage, const std::filesystem::path& path)
+// Replaces each line of the form #include "name" with that file from the same directory (one
+// level, no guards), and inserts the defines after the #version line.
+std::string preprocess(const std::filesystem::path& path, const std::string& defines)
 {
-    const std::string source = readFile(path);
+    std::istringstream in(readFile(path));
+    std::string out;
+    std::string line;
+    bool versionSeen = false;
+    while (std::getline(in, line)) {
+        const std::string directive = "#include \"";
+        if (line.compare(0, directive.size(), directive) == 0) {
+            const std::size_t end = line.find('"', directive.size());
+            if (end == std::string::npos) {
+                throw std::runtime_error("Malformed #include in " + path.string() + ": " + line);
+            }
+            out += readFile(path.parent_path() / line.substr(directive.size(), end - directive.size()));
+            out += '\n';
+            continue;
+        }
+        out += line;
+        out += '\n';
+        if (!versionSeen && line.compare(0, 8, "#version") == 0) {
+            versionSeen = true;
+            out += defines;
+        }
+    }
+    return out;
+}
+
+GLuint compileStage(GLenum stage, const std::filesystem::path& path, const std::string& defines)
+{
+    const std::string source = preprocess(path, defines);
     const char* sourcePtr = source.c_str();
 
     const GLuint shader = glCreateShader(stage);
@@ -46,12 +75,13 @@ GLuint compileStage(GLenum stage, const std::filesystem::path& path)
 
 } // namespace
 
-Shader::Shader(const std::filesystem::path& vertexPath, const std::filesystem::path& fragmentPath)
+Shader::Shader(const std::filesystem::path& vertexPath, const std::filesystem::path& fragmentPath,
+               const std::string& defines)
 {
-    const GLuint vertex = compileStage(GL_VERTEX_SHADER, vertexPath);
+    const GLuint vertex = compileStage(GL_VERTEX_SHADER, vertexPath, defines);
     GLuint fragment = 0;
     try {
-        fragment = compileStage(GL_FRAGMENT_SHADER, fragmentPath);
+        fragment = compileStage(GL_FRAGMENT_SHADER, fragmentPath, defines);
     } catch (...) {
         glDeleteShader(vertex);
         throw;
@@ -122,6 +152,7 @@ void Shader::set(const std::string& name, int value) { glUniform1i(location(name
 void Shader::set(const std::string& name, float value) { glUniform1f(location(name), value); }
 void Shader::set(const std::string& name, const glm::vec2& value) { glUniform2fv(location(name), 1, glm::value_ptr(value)); }
 void Shader::set(const std::string& name, const glm::vec3& value) { glUniform3fv(location(name), 1, glm::value_ptr(value)); }
+void Shader::set(const std::string& name, const glm::vec4& value) { glUniform4fv(location(name), 1, glm::value_ptr(value)); }
 void Shader::set(const std::string& name, const glm::mat3& value) { glUniformMatrix3fv(location(name), 1, GL_FALSE, glm::value_ptr(value)); }
 void Shader::set(const std::string& name, const glm::mat4& value) { glUniformMatrix4fv(location(name), 1, GL_FALSE, glm::value_ptr(value)); }
 

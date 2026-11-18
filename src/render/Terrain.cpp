@@ -50,9 +50,12 @@ void extractPlanes(const glm::mat4& m, glm::vec4 planes[6])
     planes[5] = row3 - row2;
 }
 
-bool boxVisible(const glm::vec4 planes[6], const glm::vec3& lo, const glm::vec3& hi)
+bool boxVisible(const glm::vec4 planes[6], const glm::vec3& lo, const glm::vec3& hi, int skipPlane = -1)
 {
     for (int i = 0; i < 6; ++i) {
+        if (i == skipPlane) {
+            continue;
+        }
         const glm::vec4& p = planes[i];
         // The corner furthest along the plane normal.
         const glm::vec3 v(p.x >= 0.0f ? hi.x : lo.x, p.y >= 0.0f ? hi.y : lo.y,
@@ -305,6 +308,8 @@ void Terrain::update(const glm::dvec3& cameraPos, const glm::mat4& viewProjectio
     const double rootSize = nodeSize(kMaxLevel);
     const std::int64_t cx = floorDiv(cameraPos.x, rootSize);
     const std::int64_t cz = floorDiv(cameraPos.z, rootSize);
+    m_rootX = cx;
+    m_rootZ = cz;
     for (std::int64_t dz = -kRootRadius; dz <= kRootRadius; ++dz) {
         for (std::int64_t dx = -kRootRadius; dx <= kRootRadius; ++dx) {
             selectNode(TileKey{kMaxLevel, cx + dx, cz + dz}, cameraPos, planes, wanted);
@@ -394,7 +399,63 @@ void Terrain::selectNode(const TileKey& key, const glm::dvec3& cameraPos, const 
     m_drawList.push_back(DrawNode{key, m_slots[static_cast<std::size_t>(slot)].texture, distance});
 }
 
+void Terrain::selectCaster(const TileKey& key, const glm::vec4 planes[6], double lodScale)
+{
+    const int slot = residentSlot(key);
+    if (slot < 0) {
+        return;
+    }
+    const Slot& s = m_slots[static_cast<std::size_t>(slot)];
+    const double size = nodeSize(key.level);
+    const glm::dvec3 lo(static_cast<double>(key.x) * size, s.minY, static_cast<double>(key.z) * size);
+    const glm::dvec3 hi = lo + glm::dvec3(size, static_cast<double>(s.maxY - s.minY), size);
+    // Plane 4 is the side facing the light: casters beyond it are clamped onto it, not culled.
+    if (!boxVisible(planes, glm::vec3(lo - m_cameraPos), glm::vec3(hi - m_cameraPos), 4)) {
+        return;
+    }
+    const double distance = distanceToBox(m_cameraPos, lo, hi);
+    if (key.level > 0 && distance < lodRange(key.level - 1) * lodScale) {
+        TileKey children[4];
+        bool ready = true;
+        for (int i = 0; i < 4; ++i) {
+            children[i] = TileKey{key.level - 1, key.x * 2 + (i & 1), key.z * 2 + (i >> 1)};
+            ready = ready && m_lookup.count(children[i]) != 0;
+        }
+        if (ready) {
+            for (const TileKey& child : children) {
+                selectCaster(child, planes, lodScale);
+            }
+            return;
+        }
+    }
+    m_casterList.push_back(DrawNode{key, s.texture, distance});
+}
+
+void Terrain::drawShadowCasters(Shader& shader, GLuint heightTileUnit, const glm::mat4& lightViewProj,
+                                float lodScale)
+{
+    glm::vec4 planes[6];
+    extractPlanes(lightViewProj, planes);
+    m_casterList.clear();
+    for (std::int64_t dz = -kRootRadius; dz <= kRootRadius; ++dz) {
+        for (std::int64_t dx = -kRootRadius; dx <= kRootRadius; ++dx) {
+            selectCaster(TileKey{kMaxLevel, m_rootX + dx, m_rootZ + dz}, planes, lodScale);
+        }
+    }
+    drawNodes(shader, heightTileUnit, m_casterList, m_gridIndexCount);
+    m_stats.shadowDrawCalls += static_cast<int>(m_casterList.size());
+    m_stats.shadowTriangles += m_casterList.size() * static_cast<std::size_t>(m_gridIndexCount / 3);
+}
+
 void Terrain::draw(Shader& shader, GLuint heightTileUnit)
+{
+    drawNodes(shader, heightTileUnit, m_drawList, m_totalIndexCount);
+    m_stats.drawCalls = static_cast<int>(m_drawList.size());
+    m_stats.triangles = m_drawList.size() * static_cast<std::size_t>(m_totalIndexCount / 3);
+}
+
+void Terrain::drawNodes(Shader& shader, GLuint heightTileUnit, const std::vector<DrawNode>& nodes,
+                        GLsizei indexCount)
 {
     glActiveTexture(GL_TEXTURE0 + heightTileUnit);
     shader.set("uHeightTile", static_cast<int>(heightTileUnit));
@@ -408,7 +469,7 @@ void Terrain::draw(Shader& shader, GLuint heightTileUnit)
     const GLint morphLoc = shader.uniformLocation("uMorphRange");
 
     glBindVertexArray(m_vao);
-    for (const DrawNode& node : m_drawList) {
+    for (const DrawNode& node : nodes) {
         const double size = nodeSize(node.key.level);
         const double ox = static_cast<double>(node.key.x) * size;
         const double oz = static_cast<double>(node.key.z) * size;
@@ -425,12 +486,9 @@ void Terrain::draw(Shader& shader, GLuint heightTileUnit)
         } else {
             glUniform2f(morphLoc, 1e30f, 2e30f); // no coarser level to morph to
         }
-        glDrawElements(GL_TRIANGLES, m_totalIndexCount, GL_UNSIGNED_SHORT, nullptr);
+        glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, nullptr);
     }
     glBindVertexArray(0);
-
-    m_stats.drawCalls = static_cast<int>(m_drawList.size());
-    m_stats.triangles = m_drawList.size() * static_cast<std::size_t>(m_totalIndexCount / 3);
 }
 
 } // namespace emerald

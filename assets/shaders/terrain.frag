@@ -28,6 +28,8 @@ uniform float uNodeSize;
 uniform sampler2DArray uMaterialColour;
 uniform sampler2DArray uMaterialNormal;
 
+#include "shadow.glsl"
+
 // Layer order matches kMaterials in Application.cpp.
 const float kGrass = 0.0;
 const float kSand  = 1.0;
@@ -306,7 +308,11 @@ void main()
     // Fade the last metres above sea level into shallow water to soften the pixel coastline.
     albedo = mix(kShallow, albedo, smoothstep(0.0, 2.5, metres));
 
+    // Shadows dim direct light only; the sky's ambient light reaches into them.
     float diffuse = max(dot(shadingNormal, uLightDir), 0.0);
+    if (diffuse > 0.0) {
+        diffuse *= shadowVisibility(vRelPos, n, max(dot(n, uLightDir), 0.0), 1.0);
+    }
     vec3 colour = albedo * (skyAmbient(shadingNormal) + uLightColour * diffuse);
 
     colour = mix(colour, fogColour(vRelPos), fog);

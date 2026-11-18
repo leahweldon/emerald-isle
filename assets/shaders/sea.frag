@@ -15,6 +15,8 @@ uniform sampler2D uCoastMask;  // blurred land mask, see TerrainMesh::bindCoastM
 uniform vec2 uTerrainSize;     // heightmap extent in XZ, metres
 uniform float uSeaRadius;      // nearest edge of the camera-centred plane, metres
 
+#include "shadow.glsl"
+
 // Linear space. Saturated so distant water stays blue-green through the haze.
 const vec3 kSea     = vec3(0.004, 0.055, 0.085);
 const vec3 kShallow = vec3(0.020, 0.160, 0.150); // matches terrain.frag
@@ -74,9 +76,12 @@ void main()
     float coast = texture(uCoastMask, vWorldXZ / uTerrainSize + 0.5).r;
     vec3 water = mix(kSea, kShallow, smoothstep(0.02, 0.5, coast));
 
+    // Terrain shadows on the water (headlands over bays) dim the direct light and its glint.
     float diffuse = max(dot(n, uLightDir), 0.0);
+    float visibility = diffuse > 0.0 ? shadowVisibility(vRelPos, n, diffuse, 1.0) : 0.0;
+    diffuse *= visibility;
     // Blinn-Phong glint from the sun or moon.
-    float specular = pow(max(dot(n, normalize(uLightDir + toCamera)), 0.0), 256.0);
+    float specular = visibility * pow(max(dot(n, normalize(uLightDir + toCamera)), 0.0), 256.0);
     vec3 colour = water * (skyAmbient(n) + uLightColour * diffuse) + uLightColour * specular * 0.4;
 
     // Same fog as terrain.frag.

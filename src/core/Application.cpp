@@ -5,6 +5,7 @@
 #include "render/OffscreenTarget.hpp"
 #include "render/Shader.hpp"
 #include "render/SeaPlane.hpp"
+#include "render/ShadowMaps.hpp"
 #include "render/Sky.hpp"
 #include "render/Terrain.hpp"
 #include "render/TextureArray.hpp"
@@ -42,6 +43,7 @@ constexpr GLuint kNormalUnit = 1;
 constexpr GLuint kCoastUnit = 2;
 constexpr GLuint kHeightUnit = 3;
 constexpr GLuint kSkyUnit = 4;
+constexpr GLuint kShadowUnit = 5;
 
 // MSVC deprecates fopen (C4996, an error with warnings as errors); fopen_s is its replacement.
 std::FILE* openForWriting(const std::string& path)
@@ -256,6 +258,9 @@ Application::Application(AppOptions options)
     m_terrainShader =
         std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "terrain.frag");
     m_seaShader = std::make_unique<Shader>(shaderDir / "sea.vert", shaderDir / "sea.frag");
+    m_shadowShader = std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "shadow.frag",
+                                              "#define SHADOW_PASS\n");
+    m_shadows = std::make_unique<ShadowMaps>();
     if (m_options.gpuTiming) {
         m_gpuTimer = std::make_unique<GpuTimer>();
     }
@@ -494,9 +499,11 @@ void Application::render()
     const glm::mat4 projection = m_camera.projection(m_window.aspectRatio());
     const glm::mat4 rotationOnly(glm::mat3(m_camera.view()));
     m_terrain->update(m_camera.position, projection * m_camera.view());
+    renderShadows(projection);
 
     m_terrainShader->use();
     setSceneUniforms(*m_terrainShader);
+    m_shadows->apply(*m_terrainShader, kShadowUnit);
     m_terrainShader->set("uExaggeration", m_heightField->verticalExaggeration());
     m_materialColour->bind(kColourUnit);
     m_materialNormal->bind(kNormalUnit);
@@ -506,6 +513,7 @@ void Application::render()
     // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.
     m_seaShader->use();
     setSceneUniforms(*m_seaShader);
+    m_shadows->apply(*m_seaShader, kShadowUnit);
     m_terrain->bindCoastMask(kCoastUnit);
     m_sky->applyEnvironment(*m_seaShader, kSkyUnit);
     glEnable(GL_POLYGON_OFFSET_FILL);
@@ -521,6 +529,29 @@ void Application::render()
     if (m_offscreen) {
         m_offscreen->resolve();
     }
+}
+
+void Application::renderShadows(const glm::mat4& projection)
+{
+    // Twilight has no direct light to shadow; the maps keep their last contents meanwhile.
+    const glm::vec3 light = m_atmosphere.lightColour();
+    if (std::max(light.r, std::max(light.g, light.b)) < 1e-4f) {
+        return;
+    }
+    const glm::dvec3& eye = m_camera.position;
+    const double ground = m_heightField->groundHeight(eye.x, eye.z);
+    m_shadows->update(eye, m_camera.forward(), m_camera.fovY, projection[1][1] / projection[0][0],
+                      static_cast<float>(eye.y - ground), m_atmosphere.lightDir());
+
+    m_shadowShader->use();
+    m_shadowShader->set("uCameraHeight", static_cast<float>(eye.y));
+    for (int cascade = 0; cascade < ShadowMaps::kCascades; ++cascade) {
+        m_shadows->begin(cascade);
+        m_shadowShader->set("uShadowViewProj", m_shadows->viewProjection(cascade));
+        m_terrain->drawShadowCasters(*m_shadowShader, kHeightUnit, m_shadows->viewProjection(cascade),
+                                     ShadowMaps::lodScale(cascade));
+    }
+    m_shadows->end();
 }
 
 void Application::setSceneUniforms(Shader& shader)

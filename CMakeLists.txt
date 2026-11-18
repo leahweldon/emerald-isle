@@ -77,6 +77,7 @@ add_executable(emerald-isle
     src/render/OffscreenTarget.cpp
     src/render/SeaPlane.cpp
     src/render/Shader.cpp
+    src/render/ShadowMaps.cpp
     src/render/Sky.cpp
     src/render/Terrain.cpp
     src/render/TextureArray.cpp
