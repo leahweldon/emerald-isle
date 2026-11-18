@@ -44,6 +44,7 @@ constexpr GLuint kCoastUnit = 2;
 constexpr GLuint kHeightUnit = 3;
 constexpr GLuint kSkyUnit = 4;
 constexpr GLuint kShadowUnit = 5;
+constexpr GLuint kHorizonUnit = 6;
 
 // MSVC deprecates fopen (C4996, an error with warnings as errors); fopen_s is its replacement.
 std::FILE* openForWriting(const std::string& path)
@@ -508,7 +509,7 @@ void Application::render()
     m_materialColour->bind(kColourUnit);
     m_materialNormal->bind(kNormalUnit);
     m_sky->applyEnvironment(*m_terrainShader, kSkyUnit);
-    m_terrain->draw(*m_terrainShader, kHeightUnit);
+    m_terrain->draw(*m_terrainShader, kHeightUnit, kHorizonUnit);
 
     // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.
     m_seaShader->use();

@@ -47,7 +47,8 @@ public:
     void update(const glm::dvec3& cameraPos, const glm::mat4& viewProjection);
 
     // Draws the nodes chosen by update(). The shader must be bound with scene uniforms set.
-    void draw(Shader& shader, GLuint heightTileUnit);
+    // Each node's horizon map (see TileStreamer) is bound to horizonUnit.
+    void draw(Shader& shader, GLuint heightTileUnit, GLuint horizonUnit);
 
     // Depth pass for one shadow cascade: loaded nodes inside its volume (clip space from
     // lightViewProj, camera-relative), at the view's level of detail scaled by lodScale (< 1 is
@@ -71,18 +72,21 @@ private:
         float maxY = 0.0f;
         std::uint64_t lastUsed = 0;
         GLuint texture = 0; // 0 when the slot is free
+        GLuint horizon = 0; // 2-layer array, or 0 for fine nodes without one
     };
     struct DrawNode {
         TileKey key;
         GLuint texture;
+        GLuint horizon;
         double distance; // camera to node bounds, for front-to-back order
     };
 
     void selectNode(const TileKey& key, const glm::dvec3& cameraPos, const glm::vec4 planes[6],
                     std::vector<TileStreamer::Request>& wanted);
     void selectCaster(const TileKey& key, const glm::vec4 planes[6], double lodScale);
-    void drawNodes(Shader& shader, GLuint heightTileUnit, const std::vector<DrawNode>& nodes,
-                   GLsizei indexCount);
+    // horizonUnit < 0 skips the horizon maps (depth passes).
+    void drawNodes(Shader& shader, GLuint heightTileUnit, int horizonUnit,
+                   const std::vector<DrawNode>& nodes, GLsizei indexCount);
     // Keeps coarse tiles loaded outside the view, so turning reveals terrain rather than holes.
     void prefetchNode(const TileKey& key, const glm::dvec3& cameraPos,
                       std::vector<TileStreamer::Request>& wanted);
@@ -107,6 +111,7 @@ private:
     GLsizei m_totalIndexCount = 0;
 
     GLuint m_coastMask = 0;
+    GLuint m_flatHorizon = 0; // horizon at 0 degrees everywhere, for nodes without a map
     glm::vec2 m_demSize{0.0f};
 
     std::vector<DrawNode> m_drawList;

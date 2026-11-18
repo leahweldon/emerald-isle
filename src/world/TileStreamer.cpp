@@ -3,9 +3,90 @@
 #include "world/HeightField.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace emerald {
+
+namespace {
+
+// Heights around the node for the horizon search: a coarse grid of kContextSamples at an eighth
+// of the node size, reaching two node widths past every edge.
+constexpr int kContextSamples = 41;
+constexpr double kContextSpacing = 1.0 / 8.0; // in node widths
+constexpr double kContextMargin = 2.0;        // node widths
+constexpr double kStepGrowth = 1.2;           // each march step 20% longer than the last
+
+double bilinear(const std::vector<float>& grid, int size, double x, double z)
+{
+    const int x0 = std::clamp(static_cast<int>(std::floor(x)), 0, size - 2);
+    const int z0 = std::clamp(static_cast<int>(std::floor(z)), 0, size - 2);
+    const double fx = x - x0;
+    const double fz = z - z0;
+    const auto at = [&](int i, int j) {
+        return static_cast<double>(grid[static_cast<std::size_t>(j) * static_cast<std::size_t>(size) +
+                                        static_cast<std::size_t>(i)]);
+    };
+    return (at(x0, z0) * (1 - fx) + at(x0 + 1, z0) * fx) * (1 - fz) +
+           (at(x0, z0 + 1) * (1 - fx) + at(x0 + 1, z0 + 1) * fx) * fz;
+}
+
+// Marches outwards from every other grid vertex in each direction, using the tile's own heights
+// inside the node and the coarse context grid beyond it, and keeps the steepest elevation angle.
+std::vector<unsigned char> computeHorizon(const HeightField& heightField, const TileKey& key,
+                                          const std::vector<float>& heights)
+{
+    const double size = nodeSize(key.level);
+    const double spacing = size / kTileQuads;
+    const double originX = static_cast<double>(key.x) * size;
+    const double originZ = static_cast<double>(key.z) * size;
+
+    std::vector<float> context(static_cast<std::size_t>(kContextSamples) * kContextSamples);
+    const double contextSpacing = size * kContextSpacing;
+    const double contextX = originX - kContextMargin * size;
+    const double contextZ = originZ - kContextMargin * size;
+    float minY = 0.0f;
+    float maxY = 0.0f;
+    heightField.fillTile(contextX, contextZ, contextSpacing, kContextSamples, context.data(), minY, maxY);
+
+    const auto heightAt = [&](double x, double z) {
+        const double gx = (x - originX) / spacing;
+        const double gz = (z - originZ) / spacing;
+        if (gx >= 0.0 && gx <= kTileQuads && gz >= 0.0 && gz <= kTileQuads) {
+            return bilinear(heights, kTileSamples, gx + kTileBorder, gz + kTileBorder);
+        }
+        return bilinear(context, kContextSamples, (x - contextX) / contextSpacing,
+                        (z - contextZ) / contextSpacing);
+    };
+
+    const double maxDistance = kContextMargin * size;
+    const std::size_t layerSize = static_cast<std::size_t>(kHorizonSize) * kHorizonSize * 4;
+    std::vector<unsigned char> horizon(layerSize * 2);
+    for (int dir = 0; dir < kHorizonDirections; ++dir) {
+        const double bearing = dir * (2.0 * 3.14159265358979323846 / kHorizonDirections);
+        const double dx = std::sin(bearing);
+        const double dz = -std::cos(bearing); // north is -Z
+        for (int v = 0; v < kHorizonSize; ++v) {
+            for (int u = 0; u < kHorizonSize; ++u) {
+                const double x = originX + 2 * u * spacing;
+                const double z = originZ + 2 * v * spacing;
+                const double h0 = heights[static_cast<std::size_t>(2 * v + kTileBorder) * kTileSamples +
+                                          static_cast<std::size_t>(2 * u + kTileBorder)];
+                double steepest = 0.0;
+                for (double t = spacing; t <= maxDistance; t *= kStepGrowth) {
+                    steepest = std::max(steepest, (heightAt(x + dx * t, z + dz * t) - h0) / t);
+                }
+                const double angle = std::atan(steepest) / (0.5 * 3.14159265358979323846);
+                const std::size_t texel = (static_cast<std::size_t>(v) * kHorizonSize + static_cast<std::size_t>(u)) * 4;
+                horizon[static_cast<std::size_t>(dir / 4) * layerSize + texel + static_cast<std::size_t>(dir % 4)] =
+                    static_cast<unsigned char>(std::lround(std::clamp(angle, 0.0, 1.0) * 255.0));
+            }
+        }
+    }
+    return horizon;
+}
+
+} // namespace
 
 TileStreamer::TileStreamer(const HeightField& heightField)
     : m_heightField(heightField)
@@ -33,6 +114,9 @@ TileData TileStreamer::generate(const HeightField& heightField, const TileKey& k
     heightField.fillTile(static_cast<double>(key.x) * size - kTileBorder * spacing,
                          static_cast<double>(key.z) * size - kTileBorder * spacing, spacing,
                          kTileSamples, tile.heights.data(), tile.minY, tile.maxY);
+    if (key.level >= kHorizonMinLevel) {
+        tile.horizon = computeHorizon(heightField, key, tile.heights);
+    }
     return tile;
 }
 

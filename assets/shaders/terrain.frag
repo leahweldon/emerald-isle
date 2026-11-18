@@ -30,6 +30,30 @@ uniform sampler2DArray uMaterialNormal;
 
 #include "shadow.glsl"
 
+uniform sampler2DArray uHorizon; // the node's horizon map: 8 directions in two RGBA layers
+uniform float uTileBorder;
+
+// Soft edge for distant shadows, also hiding the 8-bit angle steps: about a degree.
+const float kHorizonSoftness = 0.018;
+
+// Direct-light visibility beyond the cascades: is the light above the precomputed horizon in its
+// direction? Horizon angles are interpolated between the two nearest of the eight directions.
+float horizonVisibility()
+{
+    vec2 grid = vTileUV * uTileSamples - uTileBorder - 0.5;
+    vec2 uv = (grid * 0.5 + 0.5) / (0.5 * uTileQuads + 1.0);
+    vec4 northToEast = texture(uHorizon, vec3(uv, 0.0));
+    vec4 southToWest = texture(uHorizon, vec3(uv, 1.0));
+    float angles[8] = float[8](northToEast.x, northToEast.y, northToEast.z, northToEast.w,
+                               southToWest.x, southToWest.y, southToWest.z, southToWest.w);
+    float bearing = atan(uLightDir.x, -uLightDir.z); // 0 = north, clockwise
+    float sector = mod(bearing / (3.14159265 / 4.0), 8.0);
+    int i0 = int(sector) % 8;
+    float horizon = mix(angles[i0], angles[(i0 + 1) % 8], fract(sector)) * (3.14159265 / 2.0);
+    float elevation = asin(clamp(uLightDir.y, -1.0, 1.0));
+    return smoothstep(horizon - kHorizonSoftness, horizon + kHorizonSoftness, elevation);
+}
+
 // Layer order matches kMaterials in Application.cpp.
 const float kGrass = 0.0;
 const float kSand  = 1.0;
@@ -311,7 +335,8 @@ void main()
     // Shadows dim direct light only; the sky's ambient light reaches into them.
     float diffuse = max(dot(shadingNormal, uLightDir), 0.0);
     if (diffuse > 0.0) {
-        diffuse *= shadowVisibility(vRelPos, n, max(dot(n, uLightDir), 0.0), 1.0);
+        float far = dot(vRelPos, uViewForward) > uCascadeStart.w ? horizonVisibility() : 1.0;
+        diffuse *= shadowVisibility(vRelPos, n, max(dot(n, uLightDir), 0.0), far);
     }
     vec3 colour = albedo * (skyAmbient(shadingNormal) + uLightColour * diffuse);
 
