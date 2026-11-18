@@ -285,7 +285,7 @@ void Application::warmUp()
     // compilation and the first present. Done here, before the frame loop and its timer start.
     const auto start = std::chrono::steady_clock::now();
     m_window.pollEvents();
-    m_sky->update(m_atmosphere);
+    m_sky->renderNow(m_atmosphere);
     render();
     m_window.swapBuffers();
     glFinish();
@@ -404,7 +404,7 @@ void Application::update(float deltaSeconds)
 
 void Application::render()
 {
-    // Re-renders the sky cubemap only when the sun has changed.
+    // Refreshes the sky one cubemap face per frame while the sun moves.
     m_sky->update(m_atmosphere);
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);

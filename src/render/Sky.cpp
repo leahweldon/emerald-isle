@@ -2,6 +2,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -57,103 +58,203 @@ std::array<float, 9> shBasis(const glm::vec3& d)
             1.092548f * d.x * d.z, 0.546274f * (d.x * d.x - d.y * d.y)};
 }
 
+// Mip level read back for the SH: 32 px faces are plenty for order-2 harmonics.
+constexpr int kShMipLevel = 3;
+
+// The sky shader's inputs: a refresh starts when any of these change.
+bool sameSky(const Atmosphere& a, const Atmosphere& b)
+{
+    return a.sunDir == b.sunDir && a.exposure == b.exposure;
+}
+
 } // namespace
 
 Sky::Sky(const std::filesystem::path& shaderDir, int faceSize)
     : m_skyShader(shaderDir / "fullscreen.vert", shaderDir / "sky.frag")
     , m_skyboxShader(shaderDir / "skybox.vert", shaderDir / "skybox.frag")
     , m_faceSize(faceSize)
+    , m_shSize(std::max(faceSize >> kShMipLevel, 1))
 {
     // Full-screen triangles come from gl_VertexID; core profile still needs a VAO bound.
     glGenVertexArrays(1, &m_vao);
 
     glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
-    glGenTextures(1, &m_cubemap);
-    glBindTexture(GL_TEXTURE_CUBE_MAP, m_cubemap);
-    for (int face = 0; face < 6; ++face) {
-        glTexImage2D(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face), 0, GL_RGB16F,
-                     m_faceSize, m_faceSize, 0, GL_RGB, GL_FLOAT, nullptr);
+    glGenTextures(2, m_cubemaps.data());
+    for (GLuint cubemap : m_cubemaps) {
+        glBindTexture(GL_TEXTURE_CUBE_MAP, cubemap);
+        for (int level = 0; level <= kShMipLevel; ++level) {
+            const int size = std::max(m_faceSize >> level, 1);
+            for (int face = 0; face < 6; ++face) {
+                glTexImage2D(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face), level, GL_RGB16F,
+                             size, size, 0, GL_RGB, GL_FLOAT, nullptr);
+            }
+        }
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_BASE_LEVEL, 0);
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL, kShMipLevel);
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
     }
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
 
     glGenFramebuffers(1, &m_framebuffer);
+    glGenBuffers(1, &m_readback);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, m_readback);
+    glBufferData(GL_PIXEL_PACK_BUFFER, static_cast<GLsizeiptr>(readbackBytes()), nullptr, GL_STREAM_READ);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 }
 
 Sky::~Sky()
 {
+    if (m_fence) {
+        glDeleteSync(m_fence);
+    }
+    glDeleteBuffers(1, &m_readback);
     glDeleteFramebuffers(1, &m_framebuffer);
-    glDeleteTextures(1, &m_cubemap);
+    glDeleteTextures(2, m_cubemaps.data());
     glDeleteVertexArrays(1, &m_vao);
 }
 
-bool Sky::update(const Atmosphere& atmosphere)
+std::size_t Sky::readbackBytes() const
 {
-    if (m_valid && atmosphere.sunDir == m_sunDir && atmosphere.exposure == m_exposure) {
-        return false;
-    }
+    const auto size = static_cast<std::size_t>(m_shSize);
+    return kFaces.size() * size * size * 3 * sizeof(float);
+}
 
+void Sky::renderNow(const Atmosphere& atmosphere)
+{
+    if (m_stage == Stage::Readback) {
+        finishReadback(true);
+    }
+    m_rendering = atmosphere;
+    for (std::size_t face = 0; face < kFaces.size(); ++face) {
+        renderFace(face);
+    }
+    startReadback();
+    finishReadback(true);
+    std::printf("Sky: cubemap rendered (%d px faces), ambient SH updated\n", m_faceSize);
+}
+
+void Sky::update(const Atmosphere& atmosphere)
+{
+    switch (m_stage) {
+    case Stage::Idle:
+        if (m_valid && sameSky(atmosphere, m_shown)) {
+            return;
+        }
+        m_rendering = atmosphere;
+        m_nextFace = 0;
+        m_stage = Stage::Faces;
+        [[fallthrough]];
+    case Stage::Faces:
+        renderFace(m_nextFace++);
+        if (m_nextFace == kFaces.size()) {
+            startReadback();
+        }
+        return;
+    case Stage::Readback:
+        finishReadback(false);
+        return;
+    }
+}
+
+void Sky::renderFace(std::size_t face)
+{
     GLint viewport[4];
     glGetIntegerv(GL_VIEWPORT, viewport);
     GLint previousFramebuffer = 0;
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousFramebuffer);
 
     glBindFramebuffer(GL_FRAMEBUFFER, m_framebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                           static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face),
+                           m_cubemaps[1 - m_front], 0);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previousFramebuffer));
+        throw std::runtime_error("Sky cubemap framebuffer is incomplete");
+    }
     glViewport(0, 0, m_faceSize, m_faceSize);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
 
     m_skyShader.use();
-    m_skyShader.set("uSunDir", atmosphere.sunDir);
-    m_skyShader.set("uExposure", atmosphere.exposure);
+    m_skyShader.set("uSunDir", m_rendering.sunDir);
+    m_skyShader.set("uExposure", m_rendering.exposure);
     m_skyShader.set("uEncodeSrgb", 0);
     const glm::mat4 projection = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 10.0f);
+    const glm::mat4 view = glm::lookAt(glm::vec3(0.0f), kFaces[face].forward, kFaces[face].up);
+    m_skyShader.set("uInvViewProjRotation", glm::inverse(projection * view));
     glBindVertexArray(m_vao);
-    for (std::size_t face = 0; face < kFaces.size(); ++face) {
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                               static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face),
-                               m_cubemap, 0);
-        if (face == 0 && glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-            glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previousFramebuffer));
-            throw std::runtime_error("Sky cubemap framebuffer is incomplete");
-        }
-        const glm::mat4 view = glm::lookAt(glm::vec3(0.0f), kFaces[face].forward, kFaces[face].up);
-        m_skyShader.set("uInvViewProjRotation", glm::inverse(projection * view));
-        glDrawArrays(GL_TRIANGLES, 0, 3);
-    }
+    glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindVertexArray(0);
 
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previousFramebuffer));
     glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
     glEnable(GL_CULL_FACE);
     glEnable(GL_DEPTH_TEST);
+}
 
+void Sky::startReadback()
+{
+    // Box-filtered mips, then an asynchronous copy of the small level into the pack buffer.
+    glBindTexture(GL_TEXTURE_CUBE_MAP, m_cubemaps[1 - m_front]);
+    glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, m_readback);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    const std::size_t faceBytes = readbackBytes() / kFaces.size();
+    for (std::size_t face = 0; face < kFaces.size(); ++face) {
+        glGetTexImage(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face), kShMipLevel, GL_RGB,
+                      GL_FLOAT, reinterpret_cast<void*>(face * faceBytes));
+    }
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    m_fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    glFlush();
+    m_stage = Stage::Readback;
+}
+
+bool Sky::finishReadback(bool wait)
+{
+    const GLuint64 timeout = wait ? 10'000'000'000ull : 0; // 10 s when waiting
+    const GLenum status = glClientWaitSync(m_fence, 0, timeout);
+    if (status != GL_ALREADY_SIGNALED && status != GL_CONDITION_SATISFIED) {
+        if (wait) {
+            throw std::runtime_error("Timed out reading back the sky cubemap");
+        }
+        return false;
+    }
+    glDeleteSync(m_fence);
+    m_fence = nullptr;
+
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, m_readback);
+    const auto* texels = static_cast<const float*>(glMapBufferRange(
+        GL_PIXEL_PACK_BUFFER, 0, static_cast<GLsizeiptr>(readbackBytes()), GL_MAP_READ_BIT));
+    if (texels) {
+        computeIrradiance(texels);
+        glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+    }
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+
+    m_front = 1 - m_front;
+    m_shown = m_rendering;
     m_valid = true;
-    m_sunDir = atmosphere.sunDir;
-    m_exposure = atmosphere.exposure;
-    computeIrradiance();
-    std::printf("Sky: cubemap rendered (%d px faces), ambient SH updated\n", m_faceSize);
+    m_stage = Stage::Idle;
+    ++m_refreshes;
     return true;
 }
 
 // Projects the cubemap onto 9 SH coefficients (texels weighted by solid angle), then applies the
 // cosine-lobe convolution (Ramamoorthi and Hanrahan) and divides by pi for diffuse radiance.
-void Sky::computeIrradiance()
+void Sky::computeIrradiance(const float* texels)
 {
-    const auto size = static_cast<std::size_t>(m_faceSize);
-    std::vector<float> texels(size * size * 3);
+    const auto size = static_cast<std::size_t>(m_shSize);
     std::array<glm::vec3, 9> sh{};
     float totalWeight = 0.0f;
 
-    glBindTexture(GL_TEXTURE_CUBE_MAP, m_cubemap);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
     for (std::size_t face = 0; face < kFaces.size(); ++face) {
-        glGetTexImage(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face), 0, GL_RGB, GL_FLOAT,
-                      texels.data());
+        const float* faceTexels = texels + face * size * size * 3;
         for (std::size_t y = 0; y < size; ++y) {
             for (std::size_t x = 0; x < size; ++x) {
                 const float u = 2.0f * (static_cast<float>(x) + 0.5f) / static_cast<float>(size) - 1.0f;
@@ -163,7 +264,7 @@ void Sky::computeIrradiance()
                 const glm::vec3 dir = glm::normalize(faceDirection(face, u, v));
 
                 const std::size_t i = (y * size + x) * 3;
-                glm::vec3 radiance(texels[i], texels[i + 1], texels[i + 2]);
+                glm::vec3 radiance(faceTexels[i], faceTexels[i + 1], faceTexels[i + 2]);
                 if (dir.y < 0.0f) {
                     radiance *= kGroundBounce;
                 }
@@ -175,7 +276,6 @@ void Sky::computeIrradiance()
             }
         }
     }
-    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
 
     // Normalise the discrete sum to exactly 4 pi, then convolve with the clamped cosine.
     const float norm = 4.0f * glm::pi<float>() / totalWeight;
@@ -219,7 +319,7 @@ void Sky::drawBackground(const glm::mat4& invViewProjRotation, const Atmosphere&
 void Sky::bindCubemap(GLuint unit) const
 {
     glActiveTexture(GL_TEXTURE0 + unit);
-    glBindTexture(GL_TEXTURE_CUBE_MAP, m_cubemap);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, m_cubemaps[m_front]);
 }
 
 } // namespace emerald
