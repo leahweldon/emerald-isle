@@ -15,8 +15,18 @@ constexpr float kScaleHeightRayleigh = 7994.0f;
 constexpr float kScaleHeightMie = 1200.0f;
 const glm::vec3 kBetaRayleigh(5.8e-6f, 13.5e-6f, 33.1e-6f);
 constexpr float kBetaMie = 3e-6f;
-const glm::vec3 kBetaOzone(0.650e-6f, 1.881e-6f, 0.085e-6f); // ozone density follows Rayleigh
+const glm::vec3 kBetaOzone(0.650e-6f, 1.881e-6f, 0.085e-6f);
+constexpr float kOzoneCentre = 25e3f;    // ozone layer, a tent profile
+constexpr float kOzoneHalfWidth = 15e3f;
 constexpr int kSamples = 32;
+
+// Moonlight overhead in full darkness. Far brighter than real moonlight, as if the eye had
+// adapted, so the landscape stays readable; the sky model uses the same ratio to sunlight.
+const glm::vec3 kMoonLight(0.090f, 0.120f, 0.200f);
+constexpr float kMoonSky = 0.004f;
+// Airglow and starlight: keeps the night sky (and so the ambient light) a dark blue.
+const glm::vec3 kNightSky(0.0025f, 0.0045f, 0.0110f);
+constexpr float kSunsetY = -0.02f; // sun about 1 degree down: the moon takes over as the light
 
 } // namespace
 
@@ -47,19 +57,52 @@ glm::vec3 sunTransmittance(const glm::vec3& sunDir)
 
     float depthR = 0.0f;
     float depthM = 0.0f;
+    float depthO = 0.0f;
     for (int i = 0; i < kSamples; ++i) {
         const glm::vec3 p = origin + dir * (step * (static_cast<float>(i) + 0.5f));
         const float h = std::max(glm::length(p) - kEarthRadius, 0.0f);
         depthR += std::exp(-h / kScaleHeightRayleigh) * step;
         depthM += std::exp(-h / kScaleHeightMie) * step;
+        depthO += std::max(1.0f - std::abs(h - kOzoneCentre) / kOzoneHalfWidth, 0.0f) * step;
     }
-    return visible * glm::exp(-((kBetaRayleigh + kBetaOzone) * depthR + glm::vec3(kBetaMie * 1.1f * depthM)));
+    return visible * glm::exp(-(kBetaRayleigh * depthR + kBetaOzone * depthO +
+                                glm::vec3(kBetaMie * 1.1f * depthM)));
+}
+
+float Atmosphere::night() const
+{
+    return glm::smoothstep(kSunsetY, -0.12f, sunDir.y);
+}
+
+glm::vec3 Atmosphere::lightDir() const
+{
+    return sunDir.y > kSunsetY ? sunDir : moonDir();
+}
+
+glm::vec3 Atmosphere::lightColour() const
+{
+    if (sunDir.y > kSunsetY) {
+        return sunStrength * sunTransmittance(sunDir);
+    }
+    // A low moon is dimmed and warmed by the air like the sun; kMoonLight is its overhead value.
+    const glm::vec3 overhead = sunTransmittance(glm::vec3(0.0f, 1.0f, 0.0f));
+    return night() * kMoonLight * sunTransmittance(moonDir()) / overhead;
+}
+
+float Atmosphere::moonSkyIntensity() const
+{
+    return kMoonSky * night();
+}
+
+glm::vec3 Atmosphere::nightSky() const
+{
+    return kNightSky * night();
 }
 
 void Atmosphere::apply(Shader& shader, float cameraHeight) const
 {
-    shader.set("uSunDir", sunDir);
-    shader.set("uSunColour", sunStrength * sunTransmittance(sunDir));
+    shader.set("uLightDir", lightDir());
+    shader.set("uLightColour", lightColour());
     const float t = glm::smoothstep(highAltitudeStart, highAltitudeEnd, cameraHeight);
     shader.set("uFogDensity", fogDensity * glm::mix(1.0f, highAltitudeFogScale, t));
     shader.set("uFogFalloff", 1.0f / fogScaleHeight);

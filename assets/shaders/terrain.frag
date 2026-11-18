@@ -12,8 +12,8 @@ out vec4 fragColour;
 vec3 gWorldPos;
 
 uniform float uCameraHeight;
-uniform vec3 uSunDir;     // towards the sun, normalised
-uniform vec3 uSunColour;
+uniform vec3 uLightDir;   // towards the sun, or the moon at night
+uniform vec3 uLightColour;
 uniform samplerCube uSkyCube;
 uniform vec3 uIrradianceSH[9];
 uniform float uFogDensity;
@@ -306,8 +306,8 @@ void main()
     // Fade the last metres above sea level into shallow water to soften the pixel coastline.
     albedo = mix(kShallow, albedo, smoothstep(0.0, 2.5, metres));
 
-    float diffuse = max(dot(shadingNormal, uSunDir), 0.0);
-    vec3 colour = albedo * (skyAmbient(shadingNormal) + uSunColour * diffuse);
+    float diffuse = max(dot(shadingNormal, uLightDir), 0.0);
+    vec3 colour = albedo * (skyAmbient(shadingNormal) + uLightColour * diffuse);
 
     colour = mix(colour, fogColour(vRelPos), fog);
     fragColour = vec4(linearToSrgb(toneMap(colour)), 1.0);

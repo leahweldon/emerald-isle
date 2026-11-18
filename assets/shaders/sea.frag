@@ -5,8 +5,8 @@ in vec2 vWorldXZ;
 out vec4 fragColour;
 
 uniform float uCameraHeight;
-uniform vec3 uSunDir;     // towards the sun, normalised
-uniform vec3 uSunColour;
+uniform vec3 uLightDir;   // towards the sun, or the moon at night
+uniform vec3 uLightColour;
 uniform samplerCube uSkyCube;
 uniform vec3 uIrradianceSH[9];
 uniform float uFogDensity;
@@ -74,10 +74,10 @@ void main()
     float coast = texture(uCoastMask, vWorldXZ / uTerrainSize + 0.5).r;
     vec3 water = mix(kSea, kShallow, smoothstep(0.02, 0.5, coast));
 
-    float diffuse = max(dot(n, uSunDir), 0.0);
-    // Blinn-Phong glint from the sun.
-    float specular = pow(max(dot(n, normalize(uSunDir + toCamera)), 0.0), 256.0);
-    vec3 colour = water * (skyAmbient(n) + uSunColour * diffuse) + uSunColour * specular * 0.4;
+    float diffuse = max(dot(n, uLightDir), 0.0);
+    // Blinn-Phong glint from the sun or moon.
+    float specular = pow(max(dot(n, normalize(uLightDir + toCamera)), 0.0), 256.0);
+    vec3 colour = water * (skyAmbient(n) + uLightColour * diffuse) + uLightColour * specular * 0.4;
 
     // Same fog as terrain.frag.
     // Ramp fog to exactly 1 at the plane's edge, so the sea reaches the sky's horizon colour

@@ -31,6 +31,8 @@ const std::array<Face, 6> kFaces = {{
 
 // Matches kSunIntensity in sky.frag.
 constexpr float kSunDiscIntensity = 20.0f;
+// The moon's disc: bright enough to read as the light source, not to its true contrast.
+constexpr float kMoonDiscIntensity = 0.5f;
 
 // Below the horizon the cubemap repeats the horizon colour; as light from the ground it is scaled
 // down to stand in for terrain bounce.
@@ -64,7 +66,7 @@ constexpr int kShMipLevel = 3;
 // The sky shader's inputs: a refresh starts when any of these change.
 bool sameSky(const Atmosphere& a, const Atmosphere& b)
 {
-    return a.sunDir == b.sunDir && a.exposure == b.exposure;
+    return a.sunDir == b.sunDir && a.exposure == b.exposure; // the moon follows the sun
 }
 
 } // namespace
@@ -181,6 +183,9 @@ void Sky::renderFace(std::size_t face)
 
     m_skyShader.use();
     m_skyShader.set("uSunDir", m_rendering.sunDir);
+    m_skyShader.set("uMoonDir", m_rendering.moonDir());
+    m_skyShader.set("uMoonIntensity", m_rendering.moonSkyIntensity());
+    m_skyShader.set("uNightSky", m_rendering.nightSky());
     m_skyShader.set("uExposure", m_rendering.exposure);
     m_skyShader.set("uEncodeSrgb", 0);
     const glm::mat4 projection = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 10.0f);
@@ -296,13 +301,21 @@ void Sky::applyEnvironment(Shader& shader, GLuint unit) const
     }
 }
 
-void Sky::drawBackground(const glm::mat4& invViewProjRotation, const Atmosphere& atmosphere)
+void Sky::drawBackground(const glm::mat4& invViewProjRotation, const Atmosphere& atmosphere,
+                         float pixelAngle)
 {
     m_skyboxShader.use();
     m_skyboxShader.set("uInvViewProjRotation", invViewProjRotation);
     m_skyboxShader.set("uSunDir", atmosphere.sunDir);
     m_skyboxShader.set("uSunDiscColour", kSunDiscIntensity * atmosphere.exposure *
                                              sunTransmittance(atmosphere.sunDir));
+    m_skyboxShader.set("uMoonDir", atmosphere.moonDir());
+    m_skyboxShader.set("uMoonDiscColour", kMoonDiscIntensity * atmosphere.exposure *
+                                              sunTransmittance(atmosphere.moonDir()));
+    // Stars come out after the sun is 4 degrees down, fully by the end of nautical twilight.
+    m_skyboxShader.set("uStarBrightness", glm::smoothstep(-0.07f, -0.2f, atmosphere.sunDir.y));
+    m_skyboxShader.set("uStarRotation", atmosphere.starRotation);
+    m_skyboxShader.set("uPixelAngle", pixelAngle);
     m_skyboxShader.set("uSkyCube", 0);
     bindCubemap(0);
 

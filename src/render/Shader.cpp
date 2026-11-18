@@ -122,6 +122,7 @@ void Shader::set(const std::string& name, int value) { glUniform1i(location(name
 void Shader::set(const std::string& name, float value) { glUniform1f(location(name), value); }
 void Shader::set(const std::string& name, const glm::vec2& value) { glUniform2fv(location(name), 1, glm::value_ptr(value)); }
 void Shader::set(const std::string& name, const glm::vec3& value) { glUniform3fv(location(name), 1, glm::value_ptr(value)); }
+void Shader::set(const std::string& name, const glm::mat3& value) { glUniformMatrix3fv(location(name), 1, GL_FALSE, glm::value_ptr(value)); }
 void Shader::set(const std::string& name, const glm::mat4& value) { glUniformMatrix4fv(location(name), 1, GL_FALSE, glm::value_ptr(value)); }
 
 } // namespace emerald

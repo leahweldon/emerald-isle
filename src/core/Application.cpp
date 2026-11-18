@@ -13,6 +13,7 @@
 
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -473,6 +474,13 @@ void Application::updateTime(float deltaSeconds)
     m_time.advance(static_cast<double>(deltaSeconds));
     const SolarAngles sun = m_time.sun();
     m_atmosphere.sunDir = sunDirection(static_cast<float>(sun.bearing), static_cast<float>(sun.elevation));
+
+    // The stars turn once a sidereal day about the celestial pole (north, at the latitude's
+    // elevation); the year term keeps the same stars from showing at the same clock time all year.
+    const double turns = m_time.minutes() / 1436.07 + m_time.dayOfYear() / 365.25;
+    const glm::vec3 pole = sunDirection(0.0f, static_cast<float>(kIrelandLatitude));
+    m_atmosphere.starRotation = glm::mat3(glm::rotate(glm::mat4(1.0f),
+                                                      static_cast<float>(turns * 2.0 * glm::pi<double>()), pole));
 }
 
 void Application::render()
@@ -506,7 +514,8 @@ void Application::render()
     glDisable(GL_POLYGON_OFFSET_FILL);
 
     // Skybox last, at the far plane, so it is only shaded where nothing else was drawn.
-    m_sky->drawBackground(glm::inverse(projection * rotationOnly), m_atmosphere);
+    m_sky->drawBackground(glm::inverse(projection * rotationOnly), m_atmosphere,
+                          m_camera.fovY / static_cast<float>(m_window.framebufferHeight()));
 
     // Stands in for the resolve a multisampled default framebuffer does on swap.
     if (m_offscreen) {

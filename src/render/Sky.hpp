@@ -29,8 +29,9 @@ public:
     void update(const Atmosphere& atmosphere);
 
     // Background pass: call after opaque geometry. invViewProjRotation is the inverse of
-    // projection * view with translation removed.
-    void drawBackground(const glm::mat4& invViewProjRotation, const Atmosphere& atmosphere);
+    // projection * view with translation removed; pixelAngle (radians) sizes the stars.
+    void drawBackground(const glm::mat4& invViewProjRotation, const Atmosphere& atmosphere,
+                        float pixelAngle);
 
     void bindCubemap(GLuint unit) const;
 

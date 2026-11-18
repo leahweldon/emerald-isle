@@ -27,6 +27,7 @@ public:
     void set(const std::string& name, float value);
     void set(const std::string& name, const glm::vec2& value);
     void set(const std::string& name, const glm::vec3& value);
+    void set(const std::string& name, const glm::mat3& value);
     void set(const std::string& name, const glm::mat4& value);
 
     GLuint id() const { return m_program; }
