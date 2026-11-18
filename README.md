@@ -6,7 +6,7 @@ A real-time terrain renderer of Ireland, written in C++17 and modern shader-base
 
 > **Work in progress.** This is a ground-up rebuild of my Year 4 Computer Graphics final project at Trinity College Dublin, *Toward a Futuristic Emerald Isle*. The original used legacy fixed-function OpenGL; this version is built on a programmable pipeline, runs on macOS, Windows and Linux, and implements the features the original only approximated.
 
-![MacGillycuddy's Reeks, Kerry, from the east, with blended materials, sky lighting and height fog (--view kerry)](docs/images/hero.png)
+![MacGillycuddy's Reeks, Kerry, from the east, with blended materials, sky lighting and height fog: the renderer at milestone 5](docs/images/hero.png)
 
 ## Roadmap
 
@@ -15,7 +15,7 @@ A real-time terrain renderer of Ireland, written in C++17 and modern shader-base
 - [x] **3. Surface materials:** grass, rock and sand blended by height and slope
 - [x] **4. Sky and camera:** cubemap sky and a free-fly camera
 - [x] **5. Infinite world:** terrain chunks streamed around the camera, with level of detail
-- [ ] **6. Shadows:** shadow mapping from a moving sun, with a day/night cycle
+- [x] **6. Shadows:** cascaded shadow maps and horizon-map distant shadows from a moving sun, with a day/night cycle
 - [ ] **7. Water:** planar reflections and animated waves
 - [ ] **8. Weather:** GPU-instanced rain
 - [ ] **9. Tools:** in-app panel for toggling features and viewing frame timings
@@ -23,13 +23,17 @@ A real-time terrain renderer of Ireland, written in C++17 and modern shader-base
 
 ## Screenshots
 
-Each image is reproducible with `--view <name> --screenshot <file>`, plus the sun options where shown.
+The milestone 6 images are reproducible with `--view <name> --screenshot <file>` plus the options shown. Earlier images show the renderer as it was at that milestone; lighting has changed since, so they no longer reproduce exactly.
 
-![Milestone 5: procedural archipelago about 1,000 km west of Ireland, streamed around the camera (--view archipelago)](docs/images/milestone-05.png)
+![Milestone 6, shadows and day/night: golden hour over the procedural archipelago, with long shadows across the valleys (--view ridges --time 20:30)](docs/images/milestone-06.png)
 
-![Milestone 4: low sun over Dingle Bay from the Glenbeigh hills, with the atmospheric sky and sun glint (--view glenbeigh --sun-bearing 290 --sun-elevation 4)](docs/images/milestone-04.png)
+![Milestone 6, shadows and day/night: midsummer night over Kerry, with the full moon low in the south and stars (--view kerry-south --time 01:30)](docs/images/milestone-06-night.png)
 
-![The whole island from the south-east (--view overview)](docs/images/milestone-03.png)
+![Milestone 5, infinite world: procedural archipelago about 1,000 km west of Ireland, streamed around the camera](docs/images/milestone-05.png)
+
+![Milestone 4, sky and camera: low sun over Dingle Bay from the Glenbeigh hills, with the atmospheric sky and sun glint](docs/images/milestone-04.png)
+
+![Milestone 3, surface materials: the whole island from the south-east](docs/images/milestone-03.png)
 
 ## How the infinite world works
 
@@ -47,6 +51,13 @@ flowchart LR
 - **Level of detail (CDLOD):** the world is a quadtree of square nodes from 4 km to 524 km across, with roots tiled around the camera. A node splits into four when the camera is within 2.5× the child size, so every node covers a similar part of the screen. Grid vertices morph onto the next coarser grid as they approach a node's range, so levels meet without popping or cracks; skirts cover any gap while a level is still loading. Nodes outside the view frustum are skipped.
 - **Streaming:** missing tiles are generated on a background thread, coarsest first, and uploaded a few per frame. A node is drawn with its parent's coarser tile until its own detail arrives, so a frame never waits for the worker.
 - **Precision:** the camera position is double precision and everything is rendered relative to it (a floating origin). Material textures and noise repeat every 360 km, so their coordinates are wrapped per node. Thousands of kilometres out, there is no jitter.
+
+## How light and shadow work
+
+- **Sun and moon:** the sun's position comes from the NOAA solar equations for a local clock time and date at 53.4° N, 8° W, with Irish summer time and refraction, so sunrise directions, sunset times and the noon height are right (60° at midsummer, 13° at midwinter). Its colour and strength come from the same Rayleigh, Mie and ozone model as the sky, so a low sun is warm and dim. The moon is always full, opposite the sun, and takes over as the light once the sun has set; stars turn about the celestial pole and fade in with the dark, and the sky keeps a dark blue floor of airglow, so night is never black.
+- **Sky:** the sky is rendered into a cubemap, which also gives the ambient light (spherical harmonics) and the fog colour. While the sun moves, a second cubemap is rendered one face per frame and its small mip is read back asynchronously for the ambient light, then both are swapped in together, so the sky never causes a frame spike.
+- **Cascaded shadow maps:** four 2048² cascades cover the view from about half the camera's height above the ground out to ten times that height (30–150 km). Each cascade is fitted to the bounding sphere of its slice of the view and snapped to whole texels in world space, so shadows do not shimmer as the camera moves or turns. The depth pass reuses the CDLOD node selection, culled to each cascade and coarser in the outer ones, and clamps casters between a cascade and the sun onto its near plane. Receivers use a 3 × 3 hardware-filtered PCF, a normal offset that grows as the light grazes the surface, and a slope-scaled depth bias, and neighbouring cascades are cross-faded. Shadows dim only direct light, so the sky still lights the shade; they fall on the sea too.
+- **Distant shadows:** beyond the last cascade, each terrain tile (4 km nodes and coarser) carries a horizon map, made on the worker thread when the tile is generated: for every other grid point, the elevation of the horizon in eight compass directions, found by marching outwards over the tile and over a coarser grid of heights reaching two node widths beyond it. The shader interpolates the horizon angle at the light's bearing and compares it with the light's elevation, and the last cascade fades into it. This costs two texture fetches per pixel, about 2 ms more work per coarse tile on the worker and nothing measurable on the GPU; ray-marching the height texture towards the sun would need a dozen or more fetches per pixel every frame and could not see casters past the edge of the node's own tile. The sea gets cascade shadows only; beyond them the haze dominates.
 
 ## Building
 
@@ -79,7 +90,7 @@ build\Release\emerald-isle.exe       # Windows (Visual Studio generator)
 | `--headless` | Keep the window hidden and never take focus; render into an offscreen framebuffer at exactly `--width` × `--height` (no HiDPI scaling, 4× MSAA resolved). Needs `--frames`, `--screenshot` or `--autofly`. Vsync is off, and the frame log's focus column is always 0 |
 | `--frames <n>` | Exit after rendering *n* frames |
 | `--screenshot <file>` | Save the final frame as a PNG, then exit |
-| `--view <name>` | Start in free-fly at a preset pose instead of the orbit: `overview`, `kerry`, `wicklow`, `glenbeigh`, `archipelago` |
+| `--view <name>` | Start in free-fly at a preset pose instead of the orbit: `overview`, `kerry`, `wicklow`, `glenbeigh`, `archipelago`, `ridges`, `kerry-south` |
 | `--time <HH:MM>` | Local clock time in Irish civil time, summer time included (default 18:00). The sun's position comes from the solar equations for 53.4° N, 8° W |
 | `--date <MM-DD>` | Date (default 06-21, midsummer) |
 | `--sun-bearing <deg>`, `--sun-elevation <deg>` | Fix the sun at a compass bearing (0 = north, default 225) and elevation (default 22) instead of following the time of day |
@@ -120,8 +131,8 @@ Time runs at one minute per second in interactive sessions, and the window title
 ```text
 src/
   core/     window and context, frame timing, application loop, screenshots
-  render/   shaders, atmosphere, camera and view presets, CDLOD terrain, materials, sea
-  world/    height field (DEM + procedural islands), noise, background tile streaming
+  render/   shaders, atmosphere and sky, shadow maps, camera and view presets, CDLOD terrain, materials, sea
+  world/    height field (DEM + procedural islands), noise, solar position, tile streaming and horizon maps
 assets/
   shaders/  GLSL source
   textures/ Ireland heightmap (16-bit, built by tools/make_heightmap.py)
