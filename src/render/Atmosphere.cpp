@@ -35,7 +35,9 @@ glm::vec3 sunTransmittance(const glm::vec3& sunDir)
 {
     const glm::vec3 origin(0.0f, kEarthRadius + kObserverHeight, 0.0f);
     const glm::vec3 dir = glm::normalize(sunDir);
-    if (dir.y < -0.1f) {
+    // The sea horizon hides the sun as its disc (~0.5 degrees) sets.
+    const float visible = glm::smoothstep(-0.0047f, 0.0047f, dir.y);
+    if (visible <= 0.0f) {
         return glm::vec3(0.0f);
     }
     const float b = glm::dot(origin, dir);
@@ -51,7 +53,7 @@ glm::vec3 sunTransmittance(const glm::vec3& sunDir)
         depthR += std::exp(-h / kScaleHeightRayleigh) * step;
         depthM += std::exp(-h / kScaleHeightMie) * step;
     }
-    return glm::exp(-((kBetaRayleigh + kBetaOzone) * depthR + glm::vec3(kBetaMie * 1.1f * depthM)));
+    return visible * glm::exp(-((kBetaRayleigh + kBetaOzone) * depthR + glm::vec3(kBetaMie * 1.1f * depthM)));
 }
 
 void Atmosphere::apply(Shader& shader, float cameraHeight) const

@@ -12,6 +12,7 @@
 #include "world/HeightField.hpp"
 
 #include <glad/gl.h>
+#include <GLFW/glfw3.h>
 
 #include <algorithm>
 #include <chrono>
@@ -75,8 +76,10 @@ void printUsage(const char* program)
         "  --frames <n>          Exit after rendering n frames\n"
         "  --screenshot <file>   Save the last frame as a PNG, then exit\n"
         "  --view <name>         Start from a camera preset: %s\n"
-        "  --sun-bearing <deg>   Sun compass bearing, 0 = north (default 225)\n"
-        "  --sun-elevation <deg> Sun elevation above the horizon (default 22)\n"
+        "  --time <HH:MM>        Local clock time, Irish civil time (default 18:00)\n"
+        "  --date <MM-DD>        Date (default 06-21, midsummer)\n"
+        "  --sun-bearing <deg>   Fix the sun at this compass bearing, 0 = north (default 225)\n"
+        "  --sun-elevation <deg> Fix the sun at this elevation (default 22)\n"
         "  --seed <n>            Procedural world seed (default 1)\n"
         "  --autofly <s>         Fly straight ahead for s seconds, print stats, exit\n"
         "  --frame-log <file>    Write per-frame phase timings (CSV)\n"
@@ -95,6 +98,24 @@ float parseFloat(const char* flag, const char* value, float min, float max)
         throw std::invalid_argument(std::string("Invalid value for ") + flag + ": " + value);
     }
     return parsed;
+}
+
+// Two numbers separated by sep, each within its range, e.g. "21:30" or "06-21".
+void parsePair(const char* flag, const char* value, char sep, int maxFirst, int& first, int& second,
+               int minSecond, int maxSecond)
+{
+    char* end = nullptr;
+    const long a = std::strtol(value, &end, 10);
+    if (end == value || *end != sep) {
+        throw std::invalid_argument(std::string("Invalid value for ") + flag + ": " + value);
+    }
+    const char* rest = end + 1;
+    const long b = std::strtol(rest, &end, 10);
+    if (end == rest || *end != '\0' || a < 0 || a > maxFirst || b < minSecond || b > maxSecond) {
+        throw std::invalid_argument(std::string("Invalid value for ") + flag + ": " + value);
+    }
+    first = static_cast<int>(a);
+    second = static_cast<int>(b);
 }
 
 int parsePositive(const char* flag, const char* value)
@@ -151,10 +172,29 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
                 throw std::invalid_argument("Unknown view '" + options.view +
                                             "' (available: " + viewPresetNames() + ")");
             }
+        } else if (std::strcmp(arg, "--time") == 0 && hasValue) {
+            int hours = 0;
+            int minutes = 0;
+            parsePair(arg, argv[++i], ':', 23, hours, minutes, 0, 59);
+            options.timeMinutes = hours * 60.0 + minutes;
+        } else if (std::strcmp(arg, "--date") == 0 && hasValue) {
+            const char* value = argv[++i];
+            int month = 0;
+            int day = 0;
+            parsePair(arg, value, '-', 12, month, day, 1, 31);
+            int checkMonth = 0;
+            int checkDay = 0;
+            monthAndDay(dayOfYear(month, day), checkMonth, checkDay);
+            if (month < 1 || checkMonth != month || checkDay != day) {
+                throw std::invalid_argument(std::string("Invalid value for --date: ") + value);
+            }
+            options.dayOfYear = dayOfYear(month, day);
         } else if (std::strcmp(arg, "--sun-bearing") == 0 && hasValue) {
             options.sunBearing = parseFloat(arg, argv[++i], -360.0f, 360.0f);
+            options.fixedSun = true;
         } else if (std::strcmp(arg, "--sun-elevation") == 0 && hasValue) {
             options.sunElevation = parseFloat(arg, argv[++i], -10.0f, 90.0f);
+            options.fixedSun = true;
         } else if (std::strcmp(arg, "--validate") == 0 && hasValue) {
             options.validateMinTiles = parsePositive(arg, argv[++i]);
         } else if (std::strcmp(arg, "--gpu-timing") == 0) {
@@ -181,6 +221,8 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
     if (!options.screenshotPath.empty() && options.frameLimit == 0) {
         options.frameLimit = 10;
     }
+    // Runs that end by themselves keep the sun still, so they are reproducible.
+    options.timeRunning = options.frameLimit == 0 && options.autoflySeconds <= 0.0f;
     if (options.window.headless) {
         // A hidden window gets no input, so nothing could end the run.
         if (options.frameLimit == 0 && options.autoflySeconds <= 0.0f) {
@@ -195,6 +237,7 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
 Application::Application(AppOptions options)
     : m_options(std::move(options))
     , m_window(m_options.window)
+    , m_time(m_options.dayOfYear, m_options.timeMinutes, m_options.timeRunning)
 {
     if (m_options.window.headless) {
         m_offscreen = std::make_unique<OffscreenTarget>(m_window.framebufferWidth(),
@@ -251,7 +294,14 @@ Application::Application(AppOptions options)
         std::fprintf(m_frameLog, "frame,total_ms,events_ms,update_ms,terrain_ms,render_ms,swap_ms,"
                                  "uploads,outstanding,resident,triangles,draws,x,y,z,focused,gpu_ms\n");
     }
-    m_atmosphere.sunDir = sunDirection(m_options.sunBearing, m_options.sunElevation);
+    if (m_options.fixedSun) {
+        m_atmosphere.sunDir = sunDirection(m_options.sunBearing, m_options.sunElevation);
+    } else {
+        updateTime(0.0f);
+        const SolarAngles sun = m_time.sun();
+        std::printf("Sun: %s, bearing %.1f, elevation %.1f degrees\n", m_time.label().c_str(),
+                    sun.bearing, sun.elevation);
+    }
     m_camera.farPlane = kFarPlane;
     m_controller = std::make_unique<CameraController>(
         m_camera, [this](double x, double z) { return m_heightField->groundHeight(x, z); });
@@ -400,6 +450,29 @@ int Application::run()
 void Application::update(float deltaSeconds)
 {
     m_controller->update(m_window, deltaSeconds);
+    updateTime(deltaSeconds);
+}
+
+void Application::updateTime(float deltaSeconds)
+{
+    if (m_options.fixedSun) {
+        return;
+    }
+    const Input& input = m_window.input();
+    if (input.wasPressed(GLFW_KEY_T)) {
+        m_time.toggle();
+    }
+    const bool shift = input.isDown(GLFW_KEY_LEFT_SHIFT) || input.isDown(GLFW_KEY_RIGHT_SHIFT);
+    const double step = shift ? 60.0 : 15.0; // minutes per press
+    if (input.wasPressed(GLFW_KEY_COMMA)) {
+        m_time.step(-step);
+    }
+    if (input.wasPressed(GLFW_KEY_PERIOD)) {
+        m_time.step(step);
+    }
+    m_time.advance(static_cast<double>(deltaSeconds));
+    const SolarAngles sun = m_time.sun();
+    m_atmosphere.sunDir = sunDirection(static_cast<float>(sun.bearing), static_cast<float>(sun.elevation));
 }
 
 void Application::render()
@@ -636,11 +709,12 @@ void Application::updateTitle()
     if (stats.outstandingTiles > 0) {
         std::snprintf(streaming, sizeof(streaming), " (+%zu streaming)", stats.outstandingTiles);
     }
-    char title[256];
-    std::snprintf(title, sizeof(title), "%s  |  %.0f FPS  |  %.2f ms  |  %.2fM tris  |  %d draws  |  %d tiles%s  |  %s",
-                  m_options.window.title.c_str(), m_timer.framesPerSecond(), m_timer.frameTimeMs(),
-                  static_cast<double>(stats.triangles) / 1e6, stats.drawCalls, stats.residentTiles,
-                  streaming, speed);
+    const std::string time = m_options.fixedSun ? "fixed sun" : m_time.label();
+    char title[320];
+    std::snprintf(title, sizeof(title), "%s  |  %s  |  %.0f FPS  |  %.2f ms  |  %.2fM tris  |  %d draws  |  %d tiles%s  |  %s",
+                  m_options.window.title.c_str(), time.c_str(), m_timer.framesPerSecond(),
+                  m_timer.frameTimeMs(), static_cast<double>(stats.triangles) / 1e6, stats.drawCalls,
+                  stats.residentTiles, streaming, speed);
     m_window.setTitle(title);
 }
 

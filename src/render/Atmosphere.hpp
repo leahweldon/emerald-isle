@@ -11,7 +11,7 @@ class Shader;
 glm::vec3 sunDirection(float bearingDegrees, float elevationDegrees);
 
 // Fraction of sunlight reaching sea level along sunDir, from the same Rayleigh + Mie model as
-// sky.frag. Gives the low sun its warm colour.
+// sky.frag. Gives the low sun its warm colour, and fades to zero as the sun sets.
 glm::vec3 sunTransmittance(const glm::vec3& sunDir);
 
 // Sun and sky parameters shared by every pass, so the visible sun matches the lighting.

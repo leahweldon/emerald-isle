@@ -80,8 +80,9 @@ build\Release\emerald-isle.exe       # Windows (Visual Studio generator)
 | `--frames <n>` | Exit after rendering *n* frames |
 | `--screenshot <file>` | Save the final frame as a PNG, then exit |
 | `--view <name>` | Start in free-fly at a preset pose instead of the orbit: `overview`, `kerry`, `wicklow`, `glenbeigh`, `archipelago` |
-| `--sun-bearing <deg>` | Sun compass bearing, 0 = north (default 225, south-west) |
-| `--sun-elevation <deg>` | Sun elevation above the horizon (default 22) |
+| `--time <HH:MM>` | Local clock time in Irish civil time, summer time included (default 18:00). The sun's position comes from the solar equations for 53.4° N, 8° W |
+| `--date <MM-DD>` | Date (default 06-21, midsummer) |
+| `--sun-bearing <deg>`, `--sun-elevation <deg>` | Fix the sun at a compass bearing (0 = north, default 225) and elevation (default 22) instead of following the time of day |
 | `--seed <n>` | Procedural world seed (default 1); the same seed always gives the same islands |
 | `--autofly <s>` | Fly straight ahead at 2.5 km/s for *s* seconds, print frame and streaming stats, exit |
 | `--frame-log <file>` | Write a CSV row per frame: time in events, update, terrain streaming, rendering and swap, tile and triangle counts, and whether the window had focus |
@@ -105,10 +106,14 @@ On a MacBook's ProMotion display, GLFW with OpenGL presents at 120 Hz (measured 
 | Faster | Hold **Shift** (5×) | Hold **Shift** (5×) |
 | Speed multiplier | **[** / **]** or **-** / **=** (×1.25 per press) | **[** / **]** or **-** / **=** |
 | Free-fly ↔ orbit | **C** | **C** |
+| Pause / resume time | **T** | **T** |
+| Time back / forward 15 min | **,** / **.** (1 hour with **Shift**) | **,** / **.** (1 hour with **Shift**) |
 | Print pose as a `--view` preset line | **P** | **P** |
 | Quit | **Esc** | **Esc** |
 
 Flying speed follows your height above the ground, like a map viewer: about 50 m/s skimming the hills at 30 m, about 2.4 km/s at a 1.5 km cruising height (Kerry to the edge of the DEM in about 12 s), and faster still from orbit. The multiplier keys scale that, and the window title shows the current speed (or "orbit"). Without `--view` the app starts in a slow orbit of the island; press **C** to take control. The camera stays at least 30 m above the ground and sea.
+
+Time runs at one minute per second in interactive sessions, and the window title shows the clock and date. Runs that end by themselves (`--frames`, `--screenshot`, `--autofly`) keep the time fixed so they are reproducible.
 
 ## Project structure
 

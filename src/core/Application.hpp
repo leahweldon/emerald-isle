@@ -2,6 +2,7 @@
 
 #include "core/CameraController.hpp"
 #include "core/FrameTimer.hpp"
+#include "core/TimeOfDay.hpp"
 #include "core/Window.hpp"
 #include "render/Atmosphere.hpp"
 #include "render/Camera.hpp"
@@ -33,7 +34,13 @@ struct AppOptions {
     std::string screenshotPath;
     // Fixed camera preset name; empty means the default slow orbit.
     std::string view;
-    // Sun position in degrees (compass bearing, elevation); defaults to the Atmosphere default.
+    // Local clock time and date driving the sun (default 18:00 at midsummer). Time runs in
+    // interactive sessions and is paused for --frames, --screenshot and --autofly runs.
+    int dayOfYear = 172; // 21 June
+    double timeMinutes = 18.0 * 60.0;
+    bool timeRunning = true;
+    // --sun-bearing or --sun-elevation fix the sun in place of the time of day (degrees).
+    bool fixedSun = false;
     float sunBearing = 225.0f;
     float sunElevation = 22.0f;
     // Procedural world seed; the same seed always gives the same islands.
@@ -64,6 +71,7 @@ public:
 private:
     void warmUp();
     void update(float deltaSeconds);
+    void updateTime(float deltaSeconds);
     void render();
     void updateTitle();
     void recordFrameStats(float frameMs, float cpuMs);
@@ -76,6 +84,7 @@ private:
     AppOptions m_options;
     Window m_window;
     FrameTimer m_timer;
+    TimeOfDay m_time;
     std::unique_ptr<Sky> m_sky;
     std::unique_ptr<HeightField> m_heightField;
     std::unique_ptr<Terrain> m_terrain;
