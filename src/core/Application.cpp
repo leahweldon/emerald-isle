@@ -544,6 +544,11 @@ void Application::renderShadows(const glm::mat4& projection)
     m_shadows->update(eye, m_camera.forward(), m_camera.fovY, projection[1][1] / projection[0][0],
                       static_cast<float>(eye.y - ground), m_atmosphere.lightDir());
 
+    // Errors from earlier in the frame are counted by validateFrame(), not against the shadows.
+    const bool validating = m_options.validateMinTiles > 0;
+    if (validating) {
+        drainGlErrors(m_glErrorCount, m_firstGlError);
+    }
     m_shadowShader->use();
     m_shadowShader->set("uCameraHeight", static_cast<float>(eye.y));
     for (int cascade = 0; cascade < ShadowMaps::kCascades; ++cascade) {
@@ -553,6 +558,11 @@ void Application::renderShadows(const glm::mat4& projection)
                                      ShadowMaps::lodScale(cascade));
     }
     m_shadows->end();
+    if (validating) {
+        drainGlErrors(m_shadowGlErrorCount, m_firstShadowGlError);
+        ++m_shadowFrames;
+        m_shadowCasterFrames += m_terrain->stats().shadowDrawCalls > 0 ? 1 : 0;
+    }
 }
 
 void Application::setSceneUniforms(Shader& shader)
@@ -660,13 +670,18 @@ void Application::printRunStats() const
                 static_cast<double>(*std::max_element(terrain.begin(), terrain.end())));
 }
 
-void Application::validateFrame()
+void Application::drainGlErrors(int& count, unsigned& first)
 {
     for (GLenum error = glGetError(); error != GL_NO_ERROR; error = glGetError()) {
-        if (m_glErrorCount++ == 0) {
-            m_firstGlError = error;
+        if (count++ == 0) {
+            first = error;
         }
     }
+}
+
+void Application::validateFrame()
+{
+    drainGlErrors(m_glErrorCount, m_firstGlError);
     const Terrain::Stats& stats = m_terrain->stats();
     m_terrainReady = m_terrainReady || (stats.missingNodes == 0 && stats.cameraCovered);
     if (!m_terrainReady) {
@@ -688,6 +703,8 @@ bool Application::reportValidation() const
     const Check checks[] = {
         {"run completed", m_finished},
         {"no GL errors", m_glErrorCount == 0},
+        {"no GL errors in shadow passes", m_shadowGlErrorCount == 0},
+        {"shadow casters drawn", m_shadowCasterFrames > 0},
         {"initial terrain loaded", m_terrainReady && m_validatedFrames > 0},
         {"no frames with holes in view", m_holeFrames == 0},
         {"ground under the camera always loaded", m_uncoveredFrames == 0},
@@ -696,10 +713,12 @@ bool Application::reportValidation() const
     };
     std::printf("Validation (%d frames checked after the initial load): %d GL errors (first 0x%04X), "
                 "%d frames with holes, %d frames without ground under the camera, %llu tiles generated, "
-                "peak %d resident, minimum %d\n",
+                "peak %d resident, minimum %d; shadow passes in %d frames (%d with casters), "
+                "%d GL errors in them (first 0x%04X)\n",
                 m_validatedFrames, m_glErrorCount, m_firstGlError, m_holeFrames, m_uncoveredFrames,
                 static_cast<unsigned long long>(stats.tilesGenerated), m_peakResidentTiles,
-                m_options.validateMinTiles);
+                m_options.validateMinTiles, m_shadowFrames, m_shadowCasterFrames, m_shadowGlErrorCount,
+                m_firstShadowGlError);
     bool passed = true;
     for (const Check& check : checks) {
         std::printf("  %s %s\n", check.passed ? "PASS" : "FAIL", check.name);

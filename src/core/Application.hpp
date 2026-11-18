@@ -80,6 +80,8 @@ private:
     void printRunStats() const;
     void flushFrameLog(bool all);
     void validateFrame();
+    // Reads every pending GL error into count (recording the first), for --validate.
+    static void drainGlErrors(int& count, unsigned& first);
     bool reportValidation() const;
     void setSceneUniforms(Shader& shader);
 
@@ -125,6 +127,10 @@ private:
     unsigned m_firstGlError = 0;
     int m_holeFrames = 0;
     int m_uncoveredFrames = 0;
+    int m_shadowGlErrorCount = 0; // raised inside the shadow passes
+    unsigned m_firstShadowGlError = 0;
+    int m_shadowFrames = 0;       // frames that rendered the shadow passes
+    int m_shadowCasterFrames = 0; // ... and drew at least one caster
 };
 
 } // namespace emerald
