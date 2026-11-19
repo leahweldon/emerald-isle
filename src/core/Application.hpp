@@ -20,7 +20,9 @@ namespace emerald {
 class Sky;
 class Terrain;
 class HeightField;
-class SeaPlane;
+class SeaSurface;
+class SeabedMap;
+class ReflectionTarget;
 class Shader;
 class GpuTimer;
 class ShadowMaps;
@@ -75,6 +77,9 @@ private:
     void updateTime(float deltaSeconds);
     void render();
     void renderShadows(const glm::mat4& projection);
+    void renderSeabed();
+    void renderReflection(const glm::mat4& projection);
+    void setTerrainUniforms(Shader& shader);
     void updateTitle();
     void recordFrameStats(float frameMs, float cpuMs);
     void printRunStats() const;
@@ -95,10 +100,13 @@ private:
     std::unique_ptr<Shader> m_terrainShader;
     std::unique_ptr<TextureArray> m_materialColour;
     std::unique_ptr<TextureArray> m_materialNormal;
-    std::unique_ptr<SeaPlane> m_sea;
+    std::unique_ptr<SeaSurface> m_sea;
     std::unique_ptr<Shader> m_seaShader;
     std::unique_ptr<Shader> m_shadowShader;
     std::unique_ptr<ShadowMaps> m_shadows;
+    std::unique_ptr<SeabedMap> m_seabed;
+    std::unique_ptr<Shader> m_reflectionShader;
+    std::unique_ptr<ReflectionTarget> m_reflection;
     std::unique_ptr<GpuTimer> m_gpuTimer;
     std::unique_ptr<OffscreenTarget> m_offscreen; // --headless only
     Camera m_camera;

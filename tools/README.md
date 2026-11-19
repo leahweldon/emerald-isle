@@ -38,3 +38,27 @@ On Windows use `tools\.venv\Scripts\python`. Options:
 The renderer reads these as `kHeightmapMetresPerUnit` and `kHeightmapMetresPerPixel` in `src/render/TerrainMesh.hpp`. If `--long-side` changes the pixel size, update `kHeightmapMetresPerPixel` to match.
 
 Average resampling smooths peaks: the highest pixel at 230 m is about 945 m, against Carrauntoohil's 1039 m.
+
+## make_water_normals.py
+
+Builds the two tileable water normal maps in `assets/textures/water/` from a random wave spectrum, so no texture is downloaded. Each map is the inverse FFT of a directional, Phillips-like spectrum on an integer frequency grid (so it tiles exactly), with slopes taken from the spectrum's derivatives and scaled to a target RMS slope.
+
+| Map | Peak wavelength | Character |
+|---|---|---|
+| `water-normal-1.png` | 1/6 of the tile | longer ripples aligned across the wind (texture +X) |
+| `water-normal-2.png` | 1/18 of the tile | short, choppier ripples, less aligned |
+
+### Rerunning
+
+Uses only numpy, from the same environment as `make_heightmap.py`. From the repository root:
+
+```bash
+tools/.venv/bin/python tools/make_water_normals.py
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--out-dir <dir>` | `assets/textures/water` | Output directory |
+| `--size <px>` | `512` | Width and height of each map |
+
+The seeds and spectrum shapes are fixed in the script, so the output is the same on every run. Normals are OpenGL convention (+Y in green).

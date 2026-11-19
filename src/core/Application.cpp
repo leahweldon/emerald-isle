@@ -4,7 +4,9 @@
 #include "render/GpuTimer.hpp"
 #include "render/OffscreenTarget.hpp"
 #include "render/Shader.hpp"
-#include "render/SeaPlane.hpp"
+#include "render/SeaSurface.hpp"
+#include "render/SeabedMap.hpp"
+#include "render/ReflectionTarget.hpp"
 #include "render/ShadowMaps.hpp"
 #include "render/Sky.hpp"
 #include "render/Terrain.hpp"
@@ -31,9 +33,9 @@ namespace emerald {
 namespace {
 
 
-// Metres. The sea plane reaches the far plane (corners at ~0.99x far) so it meets the horizon.
+// Metres. The sea reaches almost to the far plane, so it meets the horizon.
 constexpr float kFarPlane = 15000e3f;
-constexpr float kSeaHalfSize = 0.7f * kFarPlane;
+constexpr float kSeaRadius = 0.99f * kFarPlane;
 constexpr float kAutoflySpeed = 2500.0f; // metres per second, ~150 km a minute
 
 // Material layers, in the order terrain.frag indexes them (kGrass, kSand, kHeath, kRock).
@@ -45,6 +47,13 @@ constexpr GLuint kHeightUnit = 3;
 constexpr GLuint kSkyUnit = 4;
 constexpr GLuint kShadowUnit = 5;
 constexpr GLuint kHorizonUnit = 6;
+constexpr GLuint kRippleUnit = 7;
+constexpr GLuint kSeabedUnit = 8;
+constexpr GLuint kReflectionUnit = 9;
+// The reflection is rendered at this fraction of the screen size, and with this level-of-detail
+// scale (< 1 is coarser): rippled and seen at grazing angles, it does not need more.
+constexpr int kReflectionDivisor = 2;
+constexpr float kReflectionLodScale = 0.5f;
 
 // MSVC deprecates fopen (C4996, an error with warnings as errors); fopen_s is its replacement.
 std::FILE* openForWriting(const std::string& path)
@@ -262,6 +271,10 @@ Application::Application(AppOptions options)
     m_shadowShader = std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "shadow.frag",
                                               "#define SHADOW_PASS\n");
     m_shadows = std::make_unique<ShadowMaps>();
+    m_seabed = std::make_unique<SeabedMap>();
+    m_reflectionShader = std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "terrain.frag",
+                                                  "#define REFLECTION_PASS\n");
+    m_reflection = std::make_unique<ReflectionTarget>();
     if (m_options.gpuTiming) {
         m_gpuTimer = std::make_unique<GpuTimer>();
     }
@@ -273,7 +286,7 @@ Application::Application(AppOptions options)
     std::printf("World: seed %u\n", m_options.seed);
 
     m_terrain = std::make_unique<Terrain>(*m_heightField);
-    m_sea = std::make_unique<SeaPlane>(kSeaHalfSize);
+    m_sea = std::make_unique<SeaSurface>(kSeaRadius, Wind{}, m_options.assetDir / "textures" / "water");
 
     const std::filesystem::path materialDir = m_options.assetDir / "textures" / "materials";
     m_materialColour = std::make_unique<TextureArray>(materialFiles(materialDir, "Color"),
@@ -285,13 +298,15 @@ Application::Application(AppOptions options)
                 m_materialColour->trilinear() ? "trilinear" : "NOT trilinear",
                 static_cast<double>(m_materialColour->anisotropy()));
 
-    m_terrainShader->use();
-    m_terrainShader->set("uMaterialColour", static_cast<int>(kColourUnit));
-    m_terrainShader->set("uMaterialNormal", static_cast<int>(kNormalUnit));
+    for (Shader* shader : {m_terrainShader.get(), m_reflectionShader.get()}) {
+        shader->use();
+        shader->set("uMaterialColour", static_cast<int>(kColourUnit));
+        shader->set("uMaterialNormal", static_cast<int>(kNormalUnit));
+    }
     m_seaShader->use();
     m_seaShader->set("uCoastMask", static_cast<int>(kCoastUnit));
     m_seaShader->set("uTerrainSize", m_terrain->demSize());
-    m_seaShader->set("uSeaRadius", kSeaHalfSize);
+    m_seaShader->set("uSeaRadius", kSeaRadius);
 
     if (!m_options.frameLogPath.empty()) {
         m_frameLog = openForWriting(m_options.frameLogPath);
@@ -501,19 +516,25 @@ void Application::render()
     const glm::mat4 rotationOnly(glm::mat3(m_camera.view()));
     m_terrain->update(m_camera.position, projection * m_camera.view());
     renderShadows(projection);
+    renderSeabed();
+    renderReflection(projection);
 
     m_terrainShader->use();
-    setSceneUniforms(*m_terrainShader);
-    m_shadows->apply(*m_terrainShader, kShadowUnit);
-    m_terrainShader->set("uExaggeration", m_heightField->verticalExaggeration());
-    m_materialColour->bind(kColourUnit);
-    m_materialNormal->bind(kNormalUnit);
-    m_sky->applyEnvironment(*m_terrainShader, kSkyUnit);
+    setTerrainUniforms(*m_terrainShader);
     m_terrain->draw(*m_terrainShader, kHeightUnit, kHorizonUnit);
 
     // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.
     m_seaShader->use();
     setSceneUniforms(*m_seaShader);
+    // Screenshots freeze the waves, so they are reproducible.
+    const double waveTime = m_options.screenshotPath.empty() ? m_timer.elapsedSeconds() : 0.0;
+    m_sea->apply(*m_seaShader, m_camera.position, waveTime, kRippleUnit);
+    m_seabed->apply(*m_seaShader, kSeabedUnit);
+    m_reflection->bindTexture(kReflectionUnit);
+    m_seaShader->set("uReflection", static_cast<int>(kReflectionUnit));
+    m_seaShader->set("uViewportSize", glm::vec2(static_cast<float>(m_window.framebufferWidth()),
+                                                static_cast<float>(m_window.framebufferHeight())));
+    m_seaShader->set("uExaggeration", m_heightField->verticalExaggeration());
     m_shadows->apply(*m_seaShader, kShadowUnit);
     m_terrain->bindCoastMask(kCoastUnit);
     m_sky->applyEnvironment(*m_seaShader, kSkyUnit);
@@ -563,6 +584,48 @@ void Application::renderShadows(const glm::mat4& projection)
         ++m_shadowFrames;
         m_shadowCasterFrames += m_terrain->stats().shadowDrawCalls > 0 ? 1 : 0;
     }
+}
+
+void Application::setTerrainUniforms(Shader& shader)
+{
+    setSceneUniforms(shader);
+    m_shadows->apply(shader, kShadowUnit);
+    shader.set("uExaggeration", m_heightField->verticalExaggeration());
+    m_materialColour->bind(kColourUnit);
+    m_materialNormal->bind(kNormalUnit);
+    m_sky->applyEnvironment(shader, kSkyUnit);
+}
+
+void Application::renderReflection(const glm::mat4& projection)
+{
+    m_reflection->resize(std::max(m_window.framebufferWidth() / kReflectionDivisor, 1),
+                         std::max(m_window.framebufferHeight() / kReflectionDivisor, 1));
+    // Camera-relative position to its mirror image in the sea (y = 0): y -> -y - 2 * camera height.
+    glm::mat4 mirror(1.0f);
+    mirror[1][1] = -1.0f;
+    mirror[3][1] = -2.0f * static_cast<float>(m_camera.position.y);
+
+    m_reflection->begin();
+    m_reflectionShader->use();
+    setTerrainUniforms(*m_reflectionShader);
+    m_reflectionShader->set("uMirror", mirror);
+    m_terrain->drawReflection(*m_reflectionShader, kHeightUnit, kHorizonUnit,
+                              projection * m_camera.view() * mirror, kReflectionLodScale);
+    m_reflection->end();
+}
+
+void Application::renderSeabed()
+{
+    m_seabed->update(m_camera.position);
+    m_shadowShader->use();
+    m_shadowShader->set("uCameraHeight", static_cast<float>(m_camera.position.y));
+    for (int layer = 0; layer < SeabedMap::kLayers; ++layer) {
+        m_seabed->begin(layer);
+        m_shadowShader->set("uShadowViewProj", m_seabed->viewProjection(layer));
+        m_terrain->drawShadowCasters(*m_shadowShader, kHeightUnit, m_seabed->viewProjection(layer),
+                                     SeabedMap::lodScale(layer));
+    }
+    m_seabed->end();
 }
 
 void Application::setSceneUniforms(Shader& shader)

@@ -11,6 +11,10 @@ From [ambientCG](https://ambientcg.com/), released under [CC0 1.0](https://creat
 | Sand and beach | Ground 054 | https://ambientcg.com/view?id=Ground054 |
 | Upland heath and bog (tinted darker in the shader) | Ground 037 | https://ambientcg.com/view?id=Ground037 |
 
+## Water normal maps
+
+`assets/textures/water/` is generated from a random wave spectrum by `tools/make_water_normals.py`; no third-party assets.
+
 ## Elevation data
 
 Contains modified Copernicus DEM data, © DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018, provided under COPERNICUS by the European Union and ESA. See [tools/README.md](tools/README.md).

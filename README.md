@@ -16,14 +16,19 @@ A real-time terrain renderer of Ireland, written in C++17 and modern shader-base
 - [x] **4. Sky and camera:** cubemap sky and a free-fly camera
 - [x] **5. Infinite world:** terrain chunks streamed around the camera, with level of detail
 - [x] **6. Shadows:** cascaded shadow maps and horizon-map distant shadows from a moving sun, with a day/night cycle
-- [ ] **7. Water:** planar reflections and animated waves
+- [x] **7. Water:** Gerstner waves, drifting ripples, planar reflections, depth-tinted shallows, foam and a sun and moon glint
 - [ ] **8. Weather:** GPU-instanced rain
 - [ ] **9. Tools:** in-app panel for toggling features and viewing frame timings
 - [ ] **10. Web:** WebGL build with a live demo
 
 ## Screenshots
 
-The image at the top is milestone 6 at golden hour. Milestone 6 images are reproducible with `--view <name> --screenshot <file>` plus the options shown (rendered at 2560 × 1440 and downscaled). Earlier images show the renderer as it was at that milestone; lighting has changed since, so they no longer reproduce exactly.
+The image at the top is milestone 6 at golden hour. Milestone 6 and 7 images are reproducible with `--view <name> --screenshot <file>` plus the options shown (rendered at 2560 × 1440 and downscaled; screenshots freeze the waves).
+
+![Milestone 7, water: low sun over Dingle Bay from the Glenbeigh hills, with the Dingle peninsula mirrored in the sea and the sun's glint (--view glenbeigh --time 21:30)](docs/images/milestone-07.png)
+
+![Milestone 7, water: the same view at noon, with the sky and hills reflected and clear shallows at the shore (--view glenbeigh --time 13:30)](docs/images/milestone-07-noon.png)
+ Earlier images show the renderer as it was at that milestone; lighting has changed since, so they no longer reproduce exactly.
 
 ![Milestone 6, shadows and day/night: midsummer night over Kerry, with the full moon low in the south, stars and blue-grey moonlit land (--view kerry-south --time 01:30)](docs/images/milestone-06-night.png)
 
@@ -50,12 +55,20 @@ flowchart LR
 - **Streaming:** missing tiles are generated on a background thread, coarsest first, and uploaded a few per frame. A node is drawn with its parent's coarser tile until its own detail arrives, so a frame never waits for the worker.
 - **Precision:** the camera position is double precision and everything is rendered relative to it (a floating origin). Material textures and noise repeat every 360 km, so their coordinates are wrapped per node. Thousands of kilometres out, there is no jitter.
 
+## How the water works
+
+- **Surface:** the sea is a grid of rings centred on the camera, their radii growing by about 3% from 1 m out to the far plane, so cells stay roughly square at every distance and there is no edge. Four Gerstner waves, set by a wind constant (8 m/s towards the east-north-east) and travelling at their deep-water speeds, displace it in the vertex shader; each fades out within a few wavelengths of the camera, before the rings are too coarse to carry it. Their wave vectors lie on a 1,536 m lattice, so world positions are wrapped in double precision and stay exact anywhere.
+- **Ripples:** two tileable normal maps, generated from a wave spectrum by `tools/make_water_normals.py`, drift with the wind in different directions at 64 m and 16 m scales. Far away their mipmaps average out; the lost slope (Toksvig) and the slope of waves too small to resolve (Cox and Munk, from the wind speed) become roughness, so the glint spreads into a glitter path.
+- **Reflection:** Schlick Fresnel blends the water colour (looking down) with reflections (at grazing angles), so the far sea runs into the sky at the horizon. The terrain is drawn mirrored about sea level into a half-resolution HDR texture, with coarser levels of detail and plain material colours; the sea reads it at its own screen position, nudged by the ripples, over the sky cubemap where nothing was drawn.
+- **Depth:** the ground under the sea around the camera is rendered straight down into two depth layers (near and wide), each snapped to its texel grid, giving the water depth at every point. Shallow water is clear turquoise fading to blue-green offshore, with lacy foam where it is under a metre deep; around Ireland, whose sea floor in the DEM is flat, a blurred coast mask still tints kilometres of coastal water.
+- **Light:** the sun or moon glint is GGX specular, dimmed by the cascaded shadows, so headlands shade bays and golden hour and moonlit nights get a glitter path. Fog, night vision and the coastal blend into the terrain apply as before.
+
 ## How light and shadow work
 
 - **Sun and moon:** the sun's position comes from the NOAA solar equations for a local clock time and date at 53.4° N, 8° W, with Irish summer time and refraction, so sunrise directions, sunset times and the noon height are right (60° at midsummer, 13° at midwinter). Its colour and strength come from the same Rayleigh, Mie and ozone model as the sky, so a low sun is warm and dim. As the sun drops below 30°, the air takes on an evening haze (denser, reddening aerosol) that gives a warm glow towards the sun, and the low sun's light is saturated and lifted while the sky light in shade is cooled, so golden hour has warm slopes against blue shade; noon is unaffected. The moon is always full, opposite the sun, and takes over as the light once the sun has set; stars turn about the celestial pole and fade in with the dark, and the sky keeps a dark blue floor of airglow, so night is never black. At night, colours fade and shift towards blue as the eye's rods take over (the Purkinje effect), so moonlit land reads blue-grey.
 - **Sky:** the sky is rendered into a cubemap, which also gives the ambient light (spherical harmonics) and the fog colour. While the sun moves, a second cubemap is rendered one face per frame and its small mip is read back asynchronously for the ambient light, then both are swapped in together, so the sky never causes a frame spike.
 - **Cascaded shadow maps:** four 2048² cascades cover the view from about half the camera's height above the ground out to ten times that height (30–150 km). Each cascade is fitted to the bounding sphere of its slice of the view and snapped to whole texels in world space, so shadows do not shimmer as the camera moves or turns. The depth pass reuses the CDLOD node selection, culled to each cascade and coarser in the outer ones, and clamps casters between a cascade and the sun onto its near plane. Receivers use a 3 × 3 hardware-filtered PCF, a normal offset that grows as the light grazes the surface, and a slope-scaled depth bias, and neighbouring cascades are cross-faded. Shadows dim only direct light, so the sky still lights the shade; they fall on the sea too.
-- **Distant shadows:** beyond the last cascade, each terrain tile (4 km nodes and coarser) carries a horizon map, made on the worker thread when the tile is generated: for every other grid point, the elevation of the horizon in eight compass directions, found by marching outwards over the tile and over a coarser grid of heights reaching two node widths beyond it. The shader interpolates the horizon angle at the light's bearing and compares it with the light's elevation, and the last cascade fades into it. This costs two texture fetches per pixel, about 2 ms more work per coarse tile on the worker and nothing measurable on the GPU; ray-marching the height texture towards the sun would need a dozen or more fetches per pixel every frame and could not see casters past the edge of the node's own tile. The sea gets cascade shadows only; beyond them the haze dominates.
+- **Distant shadows:** beyond the last cascade, each terrain tile (4 km nodes and coarser) carries a horizon map, made on the worker thread when the tile is generated: for every other grid point, the elevation of the horizon in eight compass directions, found by marching outwards over the tile and over a coarser grid of heights reaching two node widths beyond it. The shader interpolates the horizon angle at the light's bearing and compares it with the light's elevation, and the last cascade fades into it. This costs two texture fetches per pixel, about 2 ms more work per coarse tile on the worker and nothing measurable on the GPU; ray-marching the height texture towards the sun would need a dozen or more fetches per pixel every frame and could not see casters past the edge of the node's own tile. The sea gets cascade shadows on its light and glint only; beyond them the haze dominates.
 
 ## Building
 
@@ -129,12 +142,13 @@ Time runs at one minute per second in interactive sessions, and the window title
 ```text
 src/
   core/     window and context, frame timing, application loop, screenshots
-  render/   shaders, atmosphere and sky, shadow maps, camera and view presets, CDLOD terrain, materials, sea
+  render/   shaders, atmosphere and sky, shadow maps, camera and view presets, CDLOD terrain, materials, sea surface, reflections and seabed map
   world/    height field (DEM + procedural islands), noise, solar position, tile streaming and horizon maps
 assets/
   shaders/  GLSL source
   textures/ Ireland heightmap (16-bit, built by tools/make_heightmap.py)
     materials/  CC0 colour and normal maps from ambientCG
+    water/      ripple normal maps (built by tools/make_water_normals.py)
 tools/      data preparation scripts
 external/
   glad/     OpenGL 3.3 core loader (generated with glad2)

@@ -1,7 +1,8 @@
 #version 330 core
 
 // One shared grid drawn per CDLOD node; heights come from the node's streamed tile.
-// With SHADOW_PASS defined it only positions vertices for a shadow cascade's depth pass.
+// With SHADOW_PASS defined it only positions vertices for a depth pass; with REFLECTION_PASS
+// it draws the terrain mirrored in the sea (shaded as usual, positioned through uMirror).
 layout(location = 0) in vec3 aGrid; // grid x, grid z (0..quads), skirt flag
 
 uniform mat4 uView;          // rotation only
@@ -21,6 +22,9 @@ uniform vec2 uMorphRange;      // distance where morphing to the coarser grid st
 #ifdef SHADOW_PASS
 uniform mat4 uShadowViewProj;  // camera-relative position to the cascade's clip space
 #else
+#ifdef REFLECTION_PASS
+uniform mat4 uMirror;          // camera-relative position to its mirror image below sea level
+#endif
 out vec3 vRelPos;    // relative to the camera
 out vec2 vWorldXZ;
 out float vWorldY;
@@ -106,6 +110,10 @@ void main()
     vMorph = morph;
     vNoise = vec4(fbm(vWorldXZ, 24000.0, vec2(0.0)), fbm(vWorldXZ, 6000.0, vec2(17.0)),
                   fbm(vWorldXZ, 2500.0, vec2(5.0)), fbm(vWorldXZ, 40000.0, vec2(3.0)));
+#ifdef REFLECTION_PASS
+    gl_Position = uProjection * uView * uMirror * vec4(vRelPos, 1.0);
+#else
     gl_Position = uProjection * uView * vec4(vRelPos, 1.0);
+#endif
 #endif
 }

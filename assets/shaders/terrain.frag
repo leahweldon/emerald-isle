@@ -241,7 +241,11 @@ void main()
     // Fully fogged (distant islands at the horizon): the fog colour is all that shows.
     float fog = fogAmount(vRelPos);
     if (fog > 0.995) {
+#ifdef REFLECTION_PASS
+        fragColour = vec4(fogColour(vRelPos), 1.0);
+#else
         fragColour = vec4(linearToSrgb(toneMap(fogColour(vRelPos))), 1.0);
+#endif
         return;
     }
 
@@ -279,7 +283,11 @@ void main()
     // Only sample materials that contribute; most pixels need one or two. Past the fade range
     // only the average colour is fetched.
     const float kMinWeight = 0.002;
+#ifdef REFLECTION_PASS
+    float detail = 0.0; // rippled and half resolution: average material colours are enough
+#else
     float detail = 1.0 - smoothstep(kDetailFadeStart, kDetailFadeEnd, length(vRelPos));
+#endif
     vec3 albedo = vec3(0.0);
     vec3 normalSum = vec3(0.0);
     vec3 c, nm;
@@ -352,5 +360,9 @@ void main()
     vec3 colour = nightVision(albedo * (skyAmbient(shadingNormal) + uLightColour * diffuse));
 
     colour = mix(colour, fogColour(vRelPos), fog);
+#ifdef REFLECTION_PASS
+    fragColour = vec4(colour, 1.0); // linear: the sea blends it with Fresnel before tone mapping
+#else
     fragColour = vec4(linearToSrgb(toneMap(colour)), 1.0);
+#endif
 }
