@@ -19,6 +19,7 @@ uniform vec3 uIrradianceSH[9];
 uniform vec3 uAmbientTint; // scale on sky light, cooler at golden hour
 uniform float uNight; // 0 by day, 1 at full night
 uniform float uRain;  // 0 dry, 1 heavy rain: cloud softens what direct light is left
+uniform float uWetness; // 0 dry, 1 soaked
 uniform float uFogDensity;
 uniform float uFogFalloff;
 uniform float uExaggeration;
@@ -80,6 +81,14 @@ const vec3 kHeathTint = vec3(0.22, 0.18, 0.11); // darkens Ground037 towards pea
 const vec3 kGrassTint = vec3(0.70, 1.00, 0.61); // lusher green
 const vec3 kRockTint  = vec3(1.80, 1.35, 0.95); // Rock058 is blue-grey; shift to warm grey-brown
 const vec3 kShallow   = vec3(0.020, 0.160, 0.150); // linear, matches sea.frag
+
+// Wet ground: the fraction of albedo lost as water fills the pores (sand and bare rock darken
+// most, grass least), how much of a water film each surface holds (blades of grass and heather
+// break it up), and the film's GGX roughness from damp slopes to flat, puddled ground.
+const vec4 kWetDarkening = vec4(0.25, 0.45, 0.30, 0.40); // grass, sand, heath, rock
+const vec4 kWetFilm = vec4(0.15, 0.8, 0.25, 0.6);
+const float kWetRoughSlope = 0.5;
+const float kWetRoughFlat = 0.2;
 
 vec3 unpackNormal(vec3 rgb)
 {
@@ -183,6 +192,21 @@ vec3 skyAmbient(vec3 n)
              + uIrradianceSH[6] * 0.315392 * (3.0 * n.z * n.z - 1.0)
              + uIrradianceSH[7] * 1.092548 * n.x * n.z
              + uIrradianceSH[8] * 0.546274 * (n.x * n.x - n.y * n.y), vec3(0.0));
+}
+
+// GGX specular for one light, including n.l, with Schlick Fresnel for a water film (F0 0.02).
+float ggxSpecular(vec3 n, vec3 v, vec3 l, float alpha)
+{
+    vec3 h = normalize(v + l);
+    float nl = max(dot(n, l), 0.0);
+    float nv = max(dot(n, v), 1e-3);
+    float nh = max(dot(n, h), 0.0);
+    float a2 = alpha * alpha;
+    float d = a2 / (3.14159265 * pow(nh * nh * (a2 - 1.0) + 1.0, 2.0));
+    float k = 0.5 * alpha;
+    float vis = 1.0 / ((nl * (1.0 - k) + k) * (nv * (1.0 - k) + k));
+    float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(h, v), 0.0, 1.0), 5.0);
+    return d * fresnel * vis * 0.25 * nl;
 }
 
 // Night vision: as the light fails, colours fade and shift towards blue (the Purkinje effect),
@@ -324,21 +348,47 @@ void main()
     albedo /= max(wGrass * step(kMinWeight, wGrass) + wSand * step(kMinWeight, wSand) +
                   wHeath * step(kMinWeight, wHeath) + wRock * step(kMinWeight, wRock), 1e-4);
     vec3 shadingNormal = normalize(normalSum + n * 1e-4);
+    float weightSum = wGrass + wSand + wHeath + wRock;
+    float wetDarkening = dot(vec4(wGrass, wSand, wHeath, wRock), kWetDarkening) / max(weightSum, 1e-4);
+    float wetFilm = dot(vec4(wGrass, wSand, wHeath, wRock), kWetFilm) / max(weightSum, 1e-4);
 
     // Large-scale colour variation hides repetition across the island.
     float macro = vNoise.w;
     albedo *= mix(vec3(0.70, 0.75, 0.65), vec3(1.23, 1.14, 0.89), macro);
+
+    albedo *= 1.0 - uWetness * wetDarkening;
 
     // Fade the last metres above sea level into shallow water to soften the pixel coastline.
     albedo = mix(kShallow, albedo, smoothstep(0.0, 2.5, metres));
 
     // Shadows dim direct light only; the sky's ambient light reaches into them.
     float diffuse = max(dot(shadingNormal, uLightDir), 0.0);
+    float lit = 0.0;
     if (diffuse > 0.0) {
         float far = dot(vRelPos, uViewForward) > uCascadeStart.w ? horizonVisibility() : 1.0;
-        diffuse *= mix(shadowVisibility(vRelPos, n, max(dot(n, uLightDir), 0.0), far), 1.0, 0.5 * uRain);
+        lit = mix(shadowVisibility(vRelPos, n, max(dot(n, uLightDir), 0.0), far), 1.0, 0.5 * uRain);
+        diffuse *= lit;
     }
-    vec3 colour = nightVision(albedo * (skyAmbient(shadingNormal) + uLightColour * diffuse));
+    vec3 colour = albedo * (skyAmbient(shadingNormal) + uLightColour * diffuse);
+
+    // A film of water on wet ground: glossier on the flat, where it pools. It reflects the sky,
+    // with Fresnel capped by roughness so rough slopes never turn to mirrors at grazing angles,
+    // and catches the sun (or moon) as a soft highlight.
+    // The film is smoother than the material's normal map, so it mostly follows the ground.
+    if (uWetness > 0.0) {
+        float flat_ = smoothstep(0.85, 0.98, n.y);
+        float alpha = mix(kWetRoughSlope, kWetRoughFlat, flat_);
+        vec3 filmNormal = normalize(mix(n, shadingNormal, 0.3));
+        vec3 v = normalize(-vRelPos);
+        float nv = max(dot(filmNormal, v), 1e-3);
+        float fresnel = 0.02 + (1.0 - alpha - 0.02) * pow(1.0 - nv, 5.0);
+        vec3 r = reflect(-v, filmNormal);
+        r.y = abs(r.y);
+        vec3 sheen = fresnel * textureLod(uSkyCube, r, 0.0).rgb +
+                     uLightColour * lit * ggxSpecular(filmNormal, v, uLightDir, alpha);
+        colour += uWetness * wetFilm * mix(0.3, 1.0, flat_) * sheen;
+    }
+    colour = nightVision(colour);
 
     colour = mix(colour, fogColour(vRelPos), fog);
     fragColour = vec4(colour, 1.0); // linear HDR, tone mapped in tonemap.frag
