@@ -309,6 +309,7 @@ void Rain::draw(const glm::mat4& view, const glm::mat4& projection, const glm::v
         shader.set("uProjection", projection);
         shader.set("uViewportSize", viewport);
         shader.set("uPixelAngle", pixelAngle);
+        shader.set("uTanHalfFov", glm::vec2(1.0f / projection[0][0], 1.0f / projection[1][1]));
         shader.set("uCameraVelocity", cameraVelocity);
         shader.set("uStreakTime", kStreakTime);
         shader.set("uOpacity", pass.opacity);

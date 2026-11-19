@@ -29,8 +29,8 @@ struct RainLighting {
 // splash droplets. Both pools are drawn as instanced streaks after the opaque scene.
 class Rain {
 public:
-    static constexpr int kMaxDrops = 1 << 18;
-    static constexpr int kSplashDroplets = 1 << 16;
+    static constexpr int kMaxDrops = 3 << 16;
+    static constexpr int kSplashDroplets = 1 << 15;
     static constexpr int kDropletsPerSplash = 4;
     static constexpr float kHalfWidth = 40.0f;  // metres, box half extent in x and z
     static constexpr float kHalfHeight = 40.0f; // and in y

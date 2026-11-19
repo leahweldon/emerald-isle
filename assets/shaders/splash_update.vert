@@ -34,7 +34,7 @@ void main()
             v.xyz *= vec3(0.5, -0.3, 0.5);
             p = toBox(vec3(rel.x, surface, rel.z));
         }
-    } else {
+    } else if (uGroundValid) { // with no ground in the box, nothing can land
         life = 0.0;
         for (int d = gl_VertexID % uGroups; d < uActiveDrops; d += uGroups) {
             vec4 hit = texelFetch(uDrops, d * 3 + 2);
@@ -50,6 +50,8 @@ void main()
                 break;
             }
         }
+    } else {
+        life = 0.0;
     }
     oPosition = vec4(p, life);
     oVelocity = v;
