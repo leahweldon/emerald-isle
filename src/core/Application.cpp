@@ -3,6 +3,7 @@
 #include "core/Screenshot.hpp"
 #include "render/GpuTimer.hpp"
 #include "render/OffscreenTarget.hpp"
+#include "render/Rain.hpp"
 #include "render/Shader.hpp"
 #include "render/SeaSurface.hpp"
 #include "render/SeabedMap.hpp"
@@ -52,6 +53,8 @@ constexpr GLuint kRippleUnit = 7;
 constexpr GLuint kSeabedUnit = 8;
 constexpr GLuint kReflectionUnit = 9;
 constexpr GLuint kSceneUnit = 10;
+constexpr GLuint kRainGroundUnit = 11;
+constexpr GLuint kRainDropUnit = 12;
 // Packed floats, 32 bits a pixel like RGBA8: unclamped HDR with ~6-bit mantissas, which the
 // tone mapping and dither cannot tell from RGBA16F (at most 3/255 apart, no banding), at a
 // quarter of its frame cost with 4x MSAA (0.1-0.3 ms against 1 ms of GPU time at 2560 x 1440).
@@ -63,6 +66,13 @@ constexpr float kAgxExposure = 1.16f;
 // Eye adaptation: stops of extra exposure at full night (with Atmosphere::night()), so moonlit
 // land stays readable through the tone curve's toe.
 constexpr float kNightAdaptationEv = 1.0f;
+// Rain levels for Shift+R, and the time constant of the ease between intensities (seconds).
+constexpr float kLightRain = 0.3f;
+constexpr float kHeavyRain = 1.0f;
+constexpr float kRainEaseSeconds = 1.2f;
+// Screenshot runs step the rain at this fixed rate, after a warm-up, so captures repeat exactly.
+constexpr float kRainFixedStep = 1.0f / 60.0f;
+constexpr int kRainWarmUpSteps = 90;
 // The reflection is rendered at this fraction of the screen size, and with this level-of-detail
 // scale (< 1 is coarser): rippled and seen at grazing angles, it does not need more.
 constexpr int kReflectionDivisor = 2;
@@ -111,6 +121,7 @@ void printUsage(const char* program)
         "  --frame-log <file>    Write per-frame phase timings (CSV)\n"
         "  --exposure <ev>       Exposure offset in stops (default 0)\n"
         "  --tone-mapper <name>  neutral (default, Khronos PBR Neutral) or agx\n"
+        "  --rain <0-1>          Rain intensity, 0 dry to 1 heavy (default 0)\n"
         "  --gpu-timing          Also measure GPU time per frame (adds ~0.4 ms on macOS)\n"
         "  --validate <tiles>    Check for GL errors and terrain holes, require at least this many\n"
         "                        tiles generated and resident, exit non-zero on failure\n"
@@ -227,6 +238,8 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.validateMinTiles = parsePositive(arg, argv[++i]);
         } else if (std::strcmp(arg, "--exposure") == 0 && hasValue) {
             options.exposureEv = parseFloat(arg, argv[++i], -10.0f, 10.0f);
+        } else if (std::strcmp(arg, "--rain") == 0 && hasValue) {
+            options.rain = parseFloat(arg, argv[++i], 0.0f, 1.0f);
         } else if (std::strcmp(arg, "--tone-mapper") == 0 && hasValue) {
             const std::string name = argv[++i];
             if (name != "neutral" && name != "agx") {
@@ -300,6 +313,12 @@ Application::Application(AppOptions options)
     m_reflectionShader = std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "terrain.frag",
                                                   "#define REFLECTION_PASS\n");
     m_reflection = std::make_unique<ReflectionTarget>();
+    m_rain = std::make_unique<Rain>(shaderDir, kRainGroundUnit, kRainDropUnit);
+    if (m_options.validateMinTiles > 0) {
+        m_rain->enableValidation();
+    }
+    m_rainTarget = m_rainIntensity = m_options.rain;
+    m_rainLevel = m_options.rain > 0.0f ? m_options.rain : kLightRain;
     if (m_options.gpuTiming) {
         m_gpuTimer = std::make_unique<GpuTimer>();
     }
@@ -372,6 +391,7 @@ Application::Application(AppOptions options)
                     static_cast<double>(kAutoflySpeed));
     }
 
+    m_lastCameraPos = m_camera.position;
     warmUp();
 }
 
@@ -499,6 +519,58 @@ void Application::update(float deltaSeconds)
 {
     m_controller->update(m_window, deltaSeconds);
     updateTime(deltaSeconds);
+    updateWeather(deltaSeconds);
+    if (deltaSeconds > 0.0f) {
+        m_cameraVelocity = glm::vec3((m_camera.position - m_lastCameraPos) / static_cast<double>(deltaSeconds));
+    }
+    m_lastCameraPos = m_camera.position;
+    m_deltaSeconds = deltaSeconds;
+}
+
+void Application::updateWeather(float deltaSeconds)
+{
+    const Input& input = m_window.input();
+    if (input.wasPressed(GLFW_KEY_R)) {
+        const bool shift = input.isDown(GLFW_KEY_LEFT_SHIFT) || input.isDown(GLFW_KEY_RIGHT_SHIFT);
+        if (shift) {
+            m_rainLevel = m_rainLevel < kHeavyRain ? kHeavyRain : kLightRain;
+            m_rainTarget = m_rainLevel;
+        } else {
+            m_rainTarget = m_rainTarget > 0.0f ? 0.0f : m_rainLevel;
+        }
+    }
+    const float ease = 1.0f - std::exp(-deltaSeconds / kRainEaseSeconds);
+    m_rainIntensity += (m_rainTarget - m_rainIntensity) * ease;
+    if (std::abs(m_rainTarget - m_rainIntensity) < 1e-3f) {
+        m_rainIntensity = m_rainTarget;
+    }
+}
+
+void Application::renderRain()
+{
+    if (m_rainIntensity <= 0.0f) {
+        return;
+    }
+    const glm::dvec3& eye = m_camera.position;
+    m_rain->updateGround(*m_terrain, *m_shadowShader, kHeightUnit, eye, m_heightField->groundHeight(eye.x, eye.z));
+    const Wind& wind = m_sea->wind();
+    const float bearing = glm::radians(wind.bearing);
+    const glm::vec3 windVelocity = wind.speed * glm::vec3(std::sin(bearing), 0.0f, -std::cos(bearing));
+    if (m_options.screenshotPath.empty()) {
+        m_rain->simulate(m_deltaSeconds, eye, windVelocity, m_rainIntensity);
+        return;
+    }
+    // Screenshots: still until the terrain has loaded, then a fixed-step warm-up so splashes are
+    // under way, then fixed steps, so the same frames are captured every run.
+    if (!m_terrain->settled()) {
+        m_rain->simulate(0.0f, eye, windVelocity, m_rainIntensity);
+        return;
+    }
+    const int steps = m_rainWarmedUp ? 1 : kRainWarmUpSteps;
+    m_rainWarmedUp = true;
+    for (int i = 0; i < steps; ++i) {
+        m_rain->simulate(kRainFixedStep, eye, windVelocity, m_rainIntensity);
+    }
 }
 
 void Application::updateTime(float deltaSeconds)
@@ -552,6 +624,7 @@ void Application::render()
     renderShadows(projection);
     renderSeabed();
     renderReflection(projection);
+    renderRain();
 
     m_terrainShader->use();
     setTerrainUniforms(*m_terrainShader);
@@ -578,8 +651,19 @@ void Application::render()
     glDisable(GL_POLYGON_OFFSET_FILL);
 
     // Skybox last, at the far plane, so it is only shaded where nothing else was drawn.
-    m_sky->drawBackground(glm::inverse(projection * rotationOnly), m_atmosphere,
-                          m_camera.fovY / static_cast<float>(m_window.framebufferHeight()));
+    const float pixelAngle = m_camera.fovY / static_cast<float>(m_window.framebufferHeight());
+    m_sky->drawBackground(glm::inverse(projection * rotationOnly), m_atmosphere, pixelAngle);
+
+    // Rain after everything opaque, blended into the HDR target.
+    if (m_rainIntensity > 0.0f) {
+        RainLighting lighting;
+        lighting.lightDir = m_atmosphere.lightDir();
+        lighting.lightColour = m_atmosphere.lightColour();
+        lighting.ambient = m_sky->averageIrradiance();
+        lighting.night = m_atmosphere.night();
+        m_rain->draw(m_camera.view(), projection, glm::vec2(static_cast<float>(width), static_cast<float>(height)),
+                     pixelAngle, m_cameraVelocity, lighting);
+    }
 
     toneMap();
 }
@@ -827,6 +911,9 @@ bool Application::reportValidation() const
         {"ground under the camera always loaded", m_uncoveredFrames == 0},
         {"enough tiles generated", stats.tilesGenerated >= minTiles},
         {"enough tiles resident", m_peakResidentTiles >= m_options.validateMinTiles},
+        // Only with --rain: every simulation step checked by a query wrote the whole drop pool.
+        {"rain feedback wrote every drop",
+         m_options.rain <= 0.0f || (m_rain->checkedSteps() > 0 && m_rain->failedSteps() == 0)},
     };
     std::printf("Validation (%d frames checked after the initial load): %d GL errors (first 0x%04X), "
                 "%d frames with holes, %d frames without ground under the camera, %llu tiles generated, "
@@ -836,6 +923,10 @@ bool Application::reportValidation() const
                 static_cast<unsigned long long>(stats.tilesGenerated), m_peakResidentTiles,
                 m_options.validateMinTiles, m_shadowFrames, m_shadowCasterFrames, m_shadowGlErrorCount,
                 m_firstShadowGlError);
+    if (m_options.rain > 0.0f) {
+        std::printf("Rain: %d drops drawn; %d simulation steps checked, %d short\n", m_rain->activeDrops(),
+                    m_rain->checkedSteps(), m_rain->failedSteps());
+    }
     bool passed = true;
     for (const Check& check : checks) {
         std::printf("  %s %s\n", check.passed ? "PASS" : "FAIL", check.name);
@@ -886,7 +977,10 @@ void Application::updateTitle()
     if (stats.outstandingTiles > 0) {
         std::snprintf(streaming, sizeof(streaming), " (+%zu streaming)", stats.outstandingTiles);
     }
-    const std::string time = m_options.fixedSun ? "fixed sun" : m_time.label();
+    std::string time = m_options.fixedSun ? "fixed sun" : m_time.label();
+    if (m_rainIntensity > 0.0f) {
+        time += "  |  rain " + std::to_string(static_cast<int>(std::lround(m_rainIntensity * 100.0f))) + "%";
+    }
     char title[320];
     std::snprintf(title, sizeof(title), "%s  |  %s  |  %.0f FPS  |  %.2f ms  |  %.2fM tris  |  %d draws  |  %d tiles%s  |  %s",
                   m_options.window.title.c_str(), time.c_str(), m_timer.framesPerSecond(),

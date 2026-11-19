@@ -28,6 +28,7 @@ class GpuTimer;
 class ShadowMaps;
 class OffscreenTarget;
 class TextureArray;
+class Rain;
 
 struct AppOptions {
     WindowConfig window;
@@ -46,6 +47,8 @@ struct AppOptions {
     float exposureEv = 0.0f;
     // Final tone curve: false for Khronos PBR Neutral, true for AgX.
     bool agx = false;
+    // Starting rain intensity, 0 (dry) to 1 (heavy); R and Shift+R change it while running.
+    float rain = 0.0f;
     // --sun-bearing or --sun-elevation fix the sun in place of the time of day (degrees).
     bool fixedSun = false;
     float sunBearing = 225.0f;
@@ -79,6 +82,8 @@ private:
     void warmUp();
     void update(float deltaSeconds);
     void updateTime(float deltaSeconds);
+    void updateWeather(float deltaSeconds);
+    void renderRain(); // simulation; drawing happens after the opaque scene
     void render();
     void renderShadows(const glm::mat4& projection);
     void renderSeabed();
@@ -117,10 +122,20 @@ private:
     std::unique_ptr<OffscreenTarget> m_offscreen; // --headless only: the final image
     std::unique_ptr<OffscreenTarget> m_scene;     // linear HDR, multisampled
     std::unique_ptr<Shader> m_toneMapShader;
+    std::unique_ptr<Rain> m_rain;
     unsigned m_fullscreenVao = 0; // GL vertex array name
     Camera m_camera;
     std::unique_ptr<CameraController> m_controller;
     Atmosphere m_atmosphere;
+    // Rain intensity eases towards the target over a few seconds; R toggles the target between
+    // 0 and the level, Shift+R switches the level between light and heavy.
+    float m_rainTarget = 0.0f;
+    float m_rainIntensity = 0.0f;
+    float m_rainLevel = 0.0f;
+    float m_deltaSeconds = 0.0f;
+    bool m_rainWarmedUp = false; // screenshot runs: rain settled before the frames counted
+    glm::dvec3 m_lastCameraPos{0.0};
+    glm::vec3 m_cameraVelocity{0.0f};
     int m_frameCount = 0;
     int m_settledFrames = 0; // frames rendered with all wanted terrain tiles loaded
 
