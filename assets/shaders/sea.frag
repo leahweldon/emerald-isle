@@ -5,15 +5,19 @@ in vec2 vWorldXZ;
 out vec4 fragColour;
 
 uniform float uCameraHeight;
-uniform vec3 uSunDir;     // towards the sun, normalised
-uniform vec3 uSunColour;
+uniform vec3 uLightDir;   // towards the sun, or the moon at night
+uniform vec3 uLightColour;
 uniform samplerCube uSkyCube;
 uniform vec3 uIrradianceSH[9];
+uniform vec3 uAmbientTint; // scale on sky light, cooler at golden hour
+uniform float uNight; // 0 by day, 1 at full night
 uniform float uFogDensity;
 uniform float uFogFalloff;
 uniform sampler2D uCoastMask;  // blurred land mask, see TerrainMesh::bindCoastMask
 uniform vec2 uTerrainSize;     // heightmap extent in XZ, metres
 uniform float uSeaRadius;      // nearest edge of the camera-centred plane, metres
+
+#include "shadow.glsl"
 
 // Linear space. Saturated so distant water stays blue-green through the haze.
 const vec3 kSea     = vec3(0.004, 0.055, 0.085);
@@ -38,13 +42,21 @@ vec3 linearToSrgb(vec3 c)
 // Diffuse sky light from order-2 SH (coefficients pre-convolved and divided by pi on the CPU).
 vec3 skyAmbient(vec3 n)
 {
-    return max(uIrradianceSH[0] * 0.282095
+    return uAmbientTint * max(uIrradianceSH[0] * 0.282095
              + uIrradianceSH[1] * 0.488603 * n.y + uIrradianceSH[2] * 0.488603 * n.z
              + uIrradianceSH[3] * 0.488603 * n.x
              + uIrradianceSH[4] * 1.092548 * n.x * n.y + uIrradianceSH[5] * 1.092548 * n.y * n.z
              + uIrradianceSH[6] * 0.315392 * (3.0 * n.z * n.z - 1.0)
              + uIrradianceSH[7] * 1.092548 * n.x * n.z
              + uIrradianceSH[8] * 0.546274 * (n.x * n.x - n.y * n.y), vec3(0.0));
+}
+
+// Night vision: as the light fails, colours fade and shift towards blue (the Purkinje effect),
+// so moonlit land reads blue-grey rather than green.
+vec3 nightVision(vec3 c)
+{
+    float luminance = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    return mix(c, luminance * vec3(0.70, 0.86, 1.25), 0.85 * uNight);
 }
 
 // Fog colour is the sky behind the fragment, so distant terrain and sea meet the skybox exactly.
@@ -74,10 +86,13 @@ void main()
     float coast = texture(uCoastMask, vWorldXZ / uTerrainSize + 0.5).r;
     vec3 water = mix(kSea, kShallow, smoothstep(0.02, 0.5, coast));
 
-    float diffuse = max(dot(n, uSunDir), 0.0);
-    // Blinn-Phong glint from the sun.
-    float specular = pow(max(dot(n, normalize(uSunDir + toCamera)), 0.0), 256.0);
-    vec3 colour = water * (skyAmbient(n) + uSunColour * diffuse) + uSunColour * specular * 0.4;
+    // Terrain shadows on the water (headlands over bays) dim the direct light and its glint.
+    float diffuse = max(dot(n, uLightDir), 0.0);
+    float visibility = diffuse > 0.0 ? shadowVisibility(vRelPos, n, diffuse, 1.0) : 0.0;
+    diffuse *= visibility;
+    // Blinn-Phong glint from the sun or moon.
+    float specular = visibility * pow(max(dot(n, normalize(uLightDir + toCamera)), 0.0), 256.0);
+    vec3 colour = nightVision(water * (skyAmbient(n) + uLightColour * diffuse) + uLightColour * specular * 0.4);
 
     // Same fog as terrain.frag.
     // Ramp fog to exactly 1 at the plane's edge, so the sea reaches the sky's horizon colour

@@ -11,15 +11,34 @@ class Shader;
 glm::vec3 sunDirection(float bearingDegrees, float elevationDegrees);
 
 // Fraction of sunlight reaching sea level along sunDir, from the same Rayleigh + Mie model as
-// sky.frag. Gives the low sun its warm colour.
-glm::vec3 sunTransmittance(const glm::vec3& sunDir);
+// sky.frag, with haze from Atmosphere::haze(). Gives the low sun its warm colour, and fades to
+// zero as the sun sets.
+glm::vec3 sunTransmittance(const glm::vec3& sunDir, float haze);
 
-// Sun and sky parameters shared by every pass, so the visible sun matches the lighting.
+// Sun, moon and sky parameters shared by every pass, so the visible sun matches the lighting.
 // Ambient light and fog colour come from the sky cubemap (see Sky).
 struct Atmosphere {
     glm::vec3 sunDir = sunDirection(225.0f, 22.0f); // south-west, low afternoon sun
-    float sunStrength = 1.0f;   // direct light on terrain = sunStrength * sunTransmittance
+    float sunStrength = 1.4f;   // direct light on terrain = sunStrength * sunTransmittance
     float exposure = 1.3f;      // sky radiance scale into display range
+    glm::mat3 starRotation{1.0f}; // world directions to the celestial sphere, from the time of day
+
+    // Always full, opposite the sun: up at night, down by day.
+    glm::vec3 moonDir() const { return -sunDir; }
+    // 0 by day, 1 from the end of civil twilight (sun 7 degrees down).
+    float night() const;
+    // Evening haze, 0 with the sun above 30 degrees and 1 below 12: denser, reddening aerosol for
+    // a warm low sun and horizon glow, while noon keeps its clear air.
+    float haze() const;
+    // The light that shades and casts shadows: the sun, or the moon once the sun has set.
+    glm::vec3 lightDir() const;
+    glm::vec3 lightColour() const;
+    // Scale on the sky's diffuse light: half while the sun is up, so sunlit ground stands out from
+    // shade even at golden hour, rising to full as it sets (as the eye adapts to the sky).
+    float ambientScale() const;
+    // Moonlight relative to sunlight in the sky model, and the airglow floor (before exposure).
+    float moonSkyIntensity() const;
+    glm::vec3 nightSky() const;
 
     // Height fog: density at sea level (per metre), falling off exponentially with altitude.
     float fogDensity = 1.1e-5f;
@@ -29,7 +48,8 @@ struct Atmosphere {
     float highAltitudeStart = 5000.0f;
     float highAltitudeEnd = 100000.0f;
 
-    // Sets uSunDir, uSunColour, uFogDensity and uFogFalloff.
+    // Sets uLightDir, uLightColour, uAmbientTint (scale, cooled at golden hour), uNight,
+    // uFogDensity and uFogFalloff.
     void apply(Shader& shader, float cameraHeight = 0.0f) const;
 };
 

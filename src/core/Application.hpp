@@ -2,6 +2,7 @@
 
 #include "core/CameraController.hpp"
 #include "core/FrameTimer.hpp"
+#include "core/TimeOfDay.hpp"
 #include "core/Window.hpp"
 #include "render/Atmosphere.hpp"
 #include "render/Camera.hpp"
@@ -22,6 +23,7 @@ class HeightField;
 class SeaPlane;
 class Shader;
 class GpuTimer;
+class ShadowMaps;
 class OffscreenTarget;
 class TextureArray;
 
@@ -33,7 +35,13 @@ struct AppOptions {
     std::string screenshotPath;
     // Fixed camera preset name; empty means the default slow orbit.
     std::string view;
-    // Sun position in degrees (compass bearing, elevation); defaults to the Atmosphere default.
+    // Local clock time and date driving the sun (default 18:00 at midsummer). Time runs in
+    // interactive sessions and is paused for --frames, --screenshot and --autofly runs.
+    int dayOfYear = 172; // 21 June
+    double timeMinutes = 18.0 * 60.0;
+    bool timeRunning = true;
+    // --sun-bearing or --sun-elevation fix the sun in place of the time of day (degrees).
+    bool fixedSun = false;
     float sunBearing = 225.0f;
     float sunElevation = 22.0f;
     // Procedural world seed; the same seed always gives the same islands.
@@ -64,18 +72,23 @@ public:
 private:
     void warmUp();
     void update(float deltaSeconds);
+    void updateTime(float deltaSeconds);
     void render();
+    void renderShadows(const glm::mat4& projection);
     void updateTitle();
     void recordFrameStats(float frameMs, float cpuMs);
     void printRunStats() const;
     void flushFrameLog(bool all);
     void validateFrame();
+    // Reads every pending GL error into count (recording the first), for --validate.
+    static void drainGlErrors(int& count, unsigned& first);
     bool reportValidation() const;
     void setSceneUniforms(Shader& shader);
 
     AppOptions m_options;
     Window m_window;
     FrameTimer m_timer;
+    TimeOfDay m_time;
     std::unique_ptr<Sky> m_sky;
     std::unique_ptr<HeightField> m_heightField;
     std::unique_ptr<Terrain> m_terrain;
@@ -84,6 +97,8 @@ private:
     std::unique_ptr<TextureArray> m_materialNormal;
     std::unique_ptr<SeaPlane> m_sea;
     std::unique_ptr<Shader> m_seaShader;
+    std::unique_ptr<Shader> m_shadowShader;
+    std::unique_ptr<ShadowMaps> m_shadows;
     std::unique_ptr<GpuTimer> m_gpuTimer;
     std::unique_ptr<OffscreenTarget> m_offscreen; // --headless only
     Camera m_camera;
@@ -112,6 +127,10 @@ private:
     unsigned m_firstGlError = 0;
     int m_holeFrames = 0;
     int m_uncoveredFrames = 0;
+    int m_shadowGlErrorCount = 0; // raised inside the shadow passes
+    unsigned m_firstShadowGlError = 0;
+    int m_shadowFrames = 0;       // frames that rendered the shadow passes
+    int m_shadowCasterFrames = 0; // ... and drew at least one caster
 };
 
 } // namespace emerald

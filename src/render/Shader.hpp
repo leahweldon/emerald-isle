@@ -11,9 +11,12 @@ namespace emerald {
 
 // A linked GLSL program built from a vertex and fragment shader on disk.
 // Compile and link errors are reported with the file name and the driver's log.
+// Sources may #include "file" from their own directory; defines (e.g. "#define X\n") are inserted
+// after the #version line of both stages.
 class Shader {
 public:
-    Shader(const std::filesystem::path& vertexPath, const std::filesystem::path& fragmentPath);
+    Shader(const std::filesystem::path& vertexPath, const std::filesystem::path& fragmentPath,
+           const std::string& defines = "");
     ~Shader();
 
     Shader(const Shader&) = delete;
@@ -27,6 +30,8 @@ public:
     void set(const std::string& name, float value);
     void set(const std::string& name, const glm::vec2& value);
     void set(const std::string& name, const glm::vec3& value);
+    void set(const std::string& name, const glm::vec4& value);
+    void set(const std::string& name, const glm::mat3& value);
     void set(const std::string& name, const glm::mat4& value);
 
     GLuint id() const { return m_program; }

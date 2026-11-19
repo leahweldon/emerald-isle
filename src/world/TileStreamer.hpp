@@ -22,6 +22,13 @@ constexpr int kTileQuads = 64;          // grid quads per node side
 constexpr int kTileBorder = 1;          // extra samples each side, for normals
 constexpr int kTileSamples = kTileQuads + 1 + 2 * kTileBorder; // 67
 
+// Horizon maps for distant shadows: for every other grid vertex, the elevation angle of the
+// horizon in 8 compass directions (N, NE, ... NW), as two RGBA8 layers of 33 x 33. Only for nodes
+// at least this coarse; finer ones are always inside the shadow cascades.
+constexpr int kHorizonSize = kTileQuads / 2 + 1; // 33
+constexpr int kHorizonDirections = 8;
+constexpr int kHorizonMinLevel = 2;
+
 inline double nodeSize(int level)
 {
     return kLeafSize * static_cast<double>(1 << level);
@@ -50,6 +57,9 @@ struct TileData {
     std::vector<float> heights; // kTileSamples^2, row-major, first row at the node's -Z edge
     float minY = 0.0f;
     float maxY = 0.0f;
+    // Empty below kHorizonMinLevel. Layer-major (directions 0-3, then 4-7), rows as heights;
+    // each byte is the horizon elevation from 0 (flat) to 255 (90 degrees).
+    std::vector<unsigned char> horizon;
 };
 
 // Generates height tiles on one background thread. The main thread states which tiles it wants

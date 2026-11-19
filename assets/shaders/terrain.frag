@@ -12,10 +12,12 @@ out vec4 fragColour;
 vec3 gWorldPos;
 
 uniform float uCameraHeight;
-uniform vec3 uSunDir;     // towards the sun, normalised
-uniform vec3 uSunColour;
+uniform vec3 uLightDir;   // towards the sun, or the moon at night
+uniform vec3 uLightColour;
 uniform samplerCube uSkyCube;
 uniform vec3 uIrradianceSH[9];
+uniform vec3 uAmbientTint; // scale on sky light, cooler at golden hour
+uniform float uNight; // 0 by day, 1 at full night
 uniform float uFogDensity;
 uniform float uFogFalloff;
 uniform float uExaggeration;
@@ -27,6 +29,32 @@ uniform float uNodeSize;
 
 uniform sampler2DArray uMaterialColour;
 uniform sampler2DArray uMaterialNormal;
+
+#include "shadow.glsl"
+
+uniform sampler2DArray uHorizon; // the node's horizon map: 8 directions in two RGBA layers
+uniform float uTileBorder;
+
+// Soft edge for distant shadows, also hiding the 8-bit angle steps: about a degree.
+const float kHorizonSoftness = 0.018;
+
+// Direct-light visibility beyond the cascades: is the light above the precomputed horizon in its
+// direction? Horizon angles are interpolated between the two nearest of the eight directions.
+float horizonVisibility()
+{
+    vec2 grid = vTileUV * uTileSamples - uTileBorder - 0.5;
+    vec2 uv = (grid * 0.5 + 0.5) / (0.5 * uTileQuads + 1.0);
+    vec4 northToEast = texture(uHorizon, vec3(uv, 0.0));
+    vec4 southToWest = texture(uHorizon, vec3(uv, 1.0));
+    float angles[8] = float[8](northToEast.x, northToEast.y, northToEast.z, northToEast.w,
+                               southToWest.x, southToWest.y, southToWest.z, southToWest.w);
+    float bearing = atan(uLightDir.x, -uLightDir.z); // 0 = north, clockwise
+    float sector = mod(bearing / (3.14159265 / 4.0), 8.0);
+    int i0 = int(sector) % 8;
+    float horizon = mix(angles[i0], angles[(i0 + 1) % 8], fract(sector)) * (3.14159265 / 2.0);
+    float elevation = asin(clamp(uLightDir.y, -1.0, 1.0));
+    return smoothstep(horizon - kHorizonSoftness, horizon + kHorizonSoftness, elevation);
+}
 
 // Layer order matches kMaterials in Application.cpp.
 const float kGrass = 0.0;
@@ -163,13 +191,21 @@ vec3 materialAverage(float layer)
 // Diffuse sky light from order-2 SH (coefficients pre-convolved and divided by pi on the CPU).
 vec3 skyAmbient(vec3 n)
 {
-    return max(uIrradianceSH[0] * 0.282095
+    return uAmbientTint * max(uIrradianceSH[0] * 0.282095
              + uIrradianceSH[1] * 0.488603 * n.y + uIrradianceSH[2] * 0.488603 * n.z
              + uIrradianceSH[3] * 0.488603 * n.x
              + uIrradianceSH[4] * 1.092548 * n.x * n.y + uIrradianceSH[5] * 1.092548 * n.y * n.z
              + uIrradianceSH[6] * 0.315392 * (3.0 * n.z * n.z - 1.0)
              + uIrradianceSH[7] * 1.092548 * n.x * n.z
              + uIrradianceSH[8] * 0.546274 * (n.x * n.x - n.y * n.y), vec3(0.0));
+}
+
+// Night vision: as the light fails, colours fade and shift towards blue (the Purkinje effect),
+// so moonlit land reads blue-grey rather than green.
+vec3 nightVision(vec3 c)
+{
+    float luminance = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    return mix(c, luminance * vec3(0.70, 0.86, 1.25), 0.85 * uNight);
 }
 
 // Fog colour is the sky behind the fragment, so distant terrain and sea meet the skybox exactly.
@@ -225,9 +261,10 @@ void main()
     float sand = 1.0 - smoothstep(0.4 * sandTop, sandTop, metres);
     sand *= 1.0 - smoothstep(0.05, 0.15, slope);
 
-    // Heath follows slope and patch noise; height only nudges it, so summits get heath/grass mixes.
-    float heathScore = 2.2 * slope + 0.8 * (patches - 0.5) + 0.3 * (broad - 0.5) +
-                       0.7 * smoothstep(150.0, 450.0, metres);
+    // Heath follows slope and patch noise; height nudges it, so summits get heath/grass mixes and
+    // gentle lower slopes stay green.
+    float heathScore = 1.8 * slope + 0.8 * (patches - 0.5) + 0.3 * (broad - 0.5) +
+                       0.8 * smoothstep(150.0, 500.0, metres) - 0.04;
     float heath = smoothstep(0.35, 0.65, heathScore);
 
     // Rock only on steep faces.
@@ -306,8 +343,13 @@ void main()
     // Fade the last metres above sea level into shallow water to soften the pixel coastline.
     albedo = mix(kShallow, albedo, smoothstep(0.0, 2.5, metres));
 
-    float diffuse = max(dot(shadingNormal, uSunDir), 0.0);
-    vec3 colour = albedo * (skyAmbient(shadingNormal) + uSunColour * diffuse);
+    // Shadows dim direct light only; the sky's ambient light reaches into them.
+    float diffuse = max(dot(shadingNormal, uLightDir), 0.0);
+    if (diffuse > 0.0) {
+        float far = dot(vRelPos, uViewForward) > uCascadeStart.w ? horizonVisibility() : 1.0;
+        diffuse *= shadowVisibility(vRelPos, n, max(dot(n, uLightDir), 0.0), far);
+    }
+    vec3 colour = nightVision(albedo * (skyAmbient(shadingNormal) + uLightColour * diffuse));
 
     colour = mix(colour, fogColour(vRelPos), fog);
     fragColour = vec4(linearToSrgb(toneMap(colour)), 1.0);

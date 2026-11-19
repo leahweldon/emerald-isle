@@ -8,9 +8,13 @@
 
 namespace emerald {
 
-// Analytic single-scattering sky (sky.frag), cached in a linear HDR cubemap that is re-rendered
-// only when the sun or exposure changes, and drawn as a skybox at the far plane. The cubemap also
-// provides diffuse environment lighting (order-2 spherical harmonics) and the fog colour.
+// Analytic single-scattering sky (sky.frag), cached in a linear HDR cubemap and drawn as a skybox
+// at the far plane. The cubemap also provides diffuse environment lighting (order-2 spherical
+// harmonics) and the fog colour.
+//
+// When the sun moves, the new sky is rendered into a second cubemap one face per frame, its
+// mip level 3 (32 px faces) is read back asynchronously for the SH, and both are swapped in
+// together once the readback is done, so a refresh never stalls a frame.
 class Sky {
 public:
     explicit Sky(const std::filesystem::path& shaderDir, int faceSize = 256);
@@ -19,32 +23,53 @@ public:
     Sky(const Sky&) = delete;
     Sky& operator=(const Sky&) = delete;
 
-    // Re-renders the cubemap if the atmosphere changed. Returns true when it did.
-    bool update(const Atmosphere& atmosphere);
+    // Renders every face and the SH immediately, waiting for the GPU. For startup.
+    void renderNow(const Atmosphere& atmosphere);
+    // Advances an amortised refresh by at most one face if the atmosphere has changed.
+    void update(const Atmosphere& atmosphere);
 
     // Background pass: call after opaque geometry. invViewProjRotation is the inverse of
-    // projection * view with translation removed.
-    void drawBackground(const glm::mat4& invViewProjRotation, const Atmosphere& atmosphere);
+    // projection * view with translation removed; pixelAngle (radians) sizes the stars.
+    void drawBackground(const glm::mat4& invViewProjRotation, const Atmosphere& atmosphere,
+                        float pixelAngle);
 
     void bindCubemap(GLuint unit) const;
 
     // Sets uSkyCube (bound to unit) and uIrradianceSH[9] for terrain and sea shading.
     void applyEnvironment(Shader& shader, GLuint unit) const;
 
+    int refreshes() const { return m_refreshes; } // cubemaps swapped in since startup
+
 private:
+    enum class Stage { Idle, Faces, Readback };
+
+    void renderFace(std::size_t face);
+    void startReadback();
+    // Computes the SH and swaps the cubemaps once the readback is done. Returns false if the
+    // GPU has not finished and wait is false.
+    bool finishReadback(bool wait);
+    void computeIrradiance(const float* texels);
+    std::size_t readbackBytes() const; // six faces of RGB floats at the SH mip level
+
     Shader m_skyShader;
     Shader m_skyboxShader;
     GLuint m_vao = 0;
-    GLuint m_cubemap = 0;
+    std::array<GLuint, 2> m_cubemaps{};
+    std::size_t m_front = 0; // the cubemap being displayed; the other one is being refreshed
     GLuint m_framebuffer = 0;
+    GLuint m_readback = 0;   // pixel pack buffer for the SH faces
+    GLsync m_fence = nullptr;
     int m_faceSize = 0;
+    int m_shSize = 0;        // face size of the mip level read back for the SH
+
+    Stage m_stage = Stage::Idle;
+    std::size_t m_nextFace = 0;
     bool m_valid = false;
-    glm::vec3 m_sunDir{0.0f};
-    float m_exposure = 0.0f;
+    Atmosphere m_shown;      // inputs of the displayed cubemap
+    Atmosphere m_rendering;  // inputs of the cubemap being refreshed
+    int m_refreshes = 0;
     // Diffuse radiance coefficients: evaluate with the SH basis and multiply by albedo.
     std::array<glm::vec3, 9> m_irradianceSH{};
-
-    void computeIrradiance();
 };
 
 } // namespace emerald

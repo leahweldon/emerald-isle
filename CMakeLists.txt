@@ -70,18 +70,21 @@ add_executable(emerald-isle
     src/core/FrameTimer.cpp
     src/core/Input.cpp
     src/core/Screenshot.cpp
+    src/core/TimeOfDay.cpp
     src/render/Atmosphere.cpp
     src/render/Camera.cpp
     src/render/GpuTimer.cpp
     src/render/OffscreenTarget.cpp
     src/render/SeaPlane.cpp
     src/render/Shader.cpp
+    src/render/ShadowMaps.cpp
     src/render/Sky.cpp
     src/render/Terrain.cpp
     src/render/TextureArray.cpp
     src/render/ViewPresets.cpp
     src/world/HeightField.cpp
     src/world/Noise.cpp
+    src/world/SolarPosition.cpp
     src/world/TileStreamer.cpp)
 
 target_include_directories(emerald-isle PRIVATE src)

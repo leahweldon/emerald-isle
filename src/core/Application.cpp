@@ -5,6 +5,7 @@
 #include "render/OffscreenTarget.hpp"
 #include "render/Shader.hpp"
 #include "render/SeaPlane.hpp"
+#include "render/ShadowMaps.hpp"
 #include "render/Sky.hpp"
 #include "render/Terrain.hpp"
 #include "render/TextureArray.hpp"
@@ -12,6 +13,8 @@
 #include "world/HeightField.hpp"
 
 #include <glad/gl.h>
+#include <GLFW/glfw3.h>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -40,6 +43,8 @@ constexpr GLuint kNormalUnit = 1;
 constexpr GLuint kCoastUnit = 2;
 constexpr GLuint kHeightUnit = 3;
 constexpr GLuint kSkyUnit = 4;
+constexpr GLuint kShadowUnit = 5;
+constexpr GLuint kHorizonUnit = 6;
 
 // MSVC deprecates fopen (C4996, an error with warnings as errors); fopen_s is its replacement.
 std::FILE* openForWriting(const std::string& path)
@@ -75,8 +80,10 @@ void printUsage(const char* program)
         "  --frames <n>          Exit after rendering n frames\n"
         "  --screenshot <file>   Save the last frame as a PNG, then exit\n"
         "  --view <name>         Start from a camera preset: %s\n"
-        "  --sun-bearing <deg>   Sun compass bearing, 0 = north (default 225)\n"
-        "  --sun-elevation <deg> Sun elevation above the horizon (default 22)\n"
+        "  --time <HH:MM>        Local clock time, Irish civil time (default 18:00)\n"
+        "  --date <MM-DD>        Date (default 06-21, midsummer)\n"
+        "  --sun-bearing <deg>   Fix the sun at this compass bearing, 0 = north (default 225)\n"
+        "  --sun-elevation <deg> Fix the sun at this elevation (default 22)\n"
         "  --seed <n>            Procedural world seed (default 1)\n"
         "  --autofly <s>         Fly straight ahead for s seconds, print stats, exit\n"
         "  --frame-log <file>    Write per-frame phase timings (CSV)\n"
@@ -95,6 +102,24 @@ float parseFloat(const char* flag, const char* value, float min, float max)
         throw std::invalid_argument(std::string("Invalid value for ") + flag + ": " + value);
     }
     return parsed;
+}
+
+// Two numbers separated by sep, each within its range, e.g. "21:30" or "06-21".
+void parsePair(const char* flag, const char* value, char sep, int maxFirst, int& first, int& second,
+               int minSecond, int maxSecond)
+{
+    char* end = nullptr;
+    const long a = std::strtol(value, &end, 10);
+    if (end == value || *end != sep) {
+        throw std::invalid_argument(std::string("Invalid value for ") + flag + ": " + value);
+    }
+    const char* rest = end + 1;
+    const long b = std::strtol(rest, &end, 10);
+    if (end == rest || *end != '\0' || a < 0 || a > maxFirst || b < minSecond || b > maxSecond) {
+        throw std::invalid_argument(std::string("Invalid value for ") + flag + ": " + value);
+    }
+    first = static_cast<int>(a);
+    second = static_cast<int>(b);
 }
 
 int parsePositive(const char* flag, const char* value)
@@ -151,10 +176,29 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
                 throw std::invalid_argument("Unknown view '" + options.view +
                                             "' (available: " + viewPresetNames() + ")");
             }
+        } else if (std::strcmp(arg, "--time") == 0 && hasValue) {
+            int hours = 0;
+            int minutes = 0;
+            parsePair(arg, argv[++i], ':', 23, hours, minutes, 0, 59);
+            options.timeMinutes = hours * 60.0 + minutes;
+        } else if (std::strcmp(arg, "--date") == 0 && hasValue) {
+            const char* value = argv[++i];
+            int month = 0;
+            int day = 0;
+            parsePair(arg, value, '-', 12, month, day, 1, 31);
+            int checkMonth = 0;
+            int checkDay = 0;
+            monthAndDay(dayOfYear(month, day), checkMonth, checkDay);
+            if (month < 1 || checkMonth != month || checkDay != day) {
+                throw std::invalid_argument(std::string("Invalid value for --date: ") + value);
+            }
+            options.dayOfYear = dayOfYear(month, day);
         } else if (std::strcmp(arg, "--sun-bearing") == 0 && hasValue) {
             options.sunBearing = parseFloat(arg, argv[++i], -360.0f, 360.0f);
+            options.fixedSun = true;
         } else if (std::strcmp(arg, "--sun-elevation") == 0 && hasValue) {
             options.sunElevation = parseFloat(arg, argv[++i], -10.0f, 90.0f);
+            options.fixedSun = true;
         } else if (std::strcmp(arg, "--validate") == 0 && hasValue) {
             options.validateMinTiles = parsePositive(arg, argv[++i]);
         } else if (std::strcmp(arg, "--gpu-timing") == 0) {
@@ -181,6 +225,8 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
     if (!options.screenshotPath.empty() && options.frameLimit == 0) {
         options.frameLimit = 10;
     }
+    // Runs that end by themselves keep the sun still, so they are reproducible.
+    options.timeRunning = options.frameLimit == 0 && options.autoflySeconds <= 0.0f;
     if (options.window.headless) {
         // A hidden window gets no input, so nothing could end the run.
         if (options.frameLimit == 0 && options.autoflySeconds <= 0.0f) {
@@ -195,6 +241,7 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
 Application::Application(AppOptions options)
     : m_options(std::move(options))
     , m_window(m_options.window)
+    , m_time(m_options.dayOfYear, m_options.timeMinutes, m_options.timeRunning)
 {
     if (m_options.window.headless) {
         m_offscreen = std::make_unique<OffscreenTarget>(m_window.framebufferWidth(),
@@ -212,6 +259,9 @@ Application::Application(AppOptions options)
     m_terrainShader =
         std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "terrain.frag");
     m_seaShader = std::make_unique<Shader>(shaderDir / "sea.vert", shaderDir / "sea.frag");
+    m_shadowShader = std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "shadow.frag",
+                                              "#define SHADOW_PASS\n");
+    m_shadows = std::make_unique<ShadowMaps>();
     if (m_options.gpuTiming) {
         m_gpuTimer = std::make_unique<GpuTimer>();
     }
@@ -251,7 +301,14 @@ Application::Application(AppOptions options)
         std::fprintf(m_frameLog, "frame,total_ms,events_ms,update_ms,terrain_ms,render_ms,swap_ms,"
                                  "uploads,outstanding,resident,triangles,draws,x,y,z,focused,gpu_ms\n");
     }
-    m_atmosphere.sunDir = sunDirection(m_options.sunBearing, m_options.sunElevation);
+    if (m_options.fixedSun) {
+        m_atmosphere.sunDir = sunDirection(m_options.sunBearing, m_options.sunElevation);
+    } else {
+        updateTime(0.0f);
+        const SolarAngles sun = m_time.sun();
+        std::printf("Sun: %s, bearing %.1f, elevation %.1f degrees\n", m_time.label().c_str(),
+                    sun.bearing, sun.elevation);
+    }
     m_camera.farPlane = kFarPlane;
     m_controller = std::make_unique<CameraController>(
         m_camera, [this](double x, double z) { return m_heightField->groundHeight(x, z); });
@@ -285,7 +342,7 @@ void Application::warmUp()
     // compilation and the first present. Done here, before the frame loop and its timer start.
     const auto start = std::chrono::steady_clock::now();
     m_window.pollEvents();
-    m_sky->update(m_atmosphere);
+    m_sky->renderNow(m_atmosphere);
     render();
     m_window.swapBuffers();
     glFinish();
@@ -400,11 +457,41 @@ int Application::run()
 void Application::update(float deltaSeconds)
 {
     m_controller->update(m_window, deltaSeconds);
+    updateTime(deltaSeconds);
+}
+
+void Application::updateTime(float deltaSeconds)
+{
+    if (m_options.fixedSun) {
+        return;
+    }
+    const Input& input = m_window.input();
+    if (input.wasPressed(GLFW_KEY_T)) {
+        m_time.toggle();
+    }
+    const bool shift = input.isDown(GLFW_KEY_LEFT_SHIFT) || input.isDown(GLFW_KEY_RIGHT_SHIFT);
+    const double step = shift ? 60.0 : 15.0; // minutes per press
+    if (input.wasPressed(GLFW_KEY_COMMA)) {
+        m_time.step(-step);
+    }
+    if (input.wasPressed(GLFW_KEY_PERIOD)) {
+        m_time.step(step);
+    }
+    m_time.advance(static_cast<double>(deltaSeconds));
+    const SolarAngles sun = m_time.sun();
+    m_atmosphere.sunDir = sunDirection(static_cast<float>(sun.bearing), static_cast<float>(sun.elevation));
+
+    // The stars turn once a sidereal day about the celestial pole (north, at the latitude's
+    // elevation); the year term keeps the same stars from showing at the same clock time all year.
+    const double turns = m_time.minutes() / 1436.07 + m_time.dayOfYear() / 365.25;
+    const glm::vec3 pole = sunDirection(0.0f, static_cast<float>(kIrelandLatitude));
+    m_atmosphere.starRotation = glm::mat3(glm::rotate(glm::mat4(1.0f),
+                                                      static_cast<float>(turns * 2.0 * glm::pi<double>()), pole));
 }
 
 void Application::render()
 {
-    // Re-renders the sky cubemap only when the sun has changed.
+    // Refreshes the sky one cubemap face per frame while the sun moves.
     m_sky->update(m_atmosphere);
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -413,18 +500,21 @@ void Application::render()
     const glm::mat4 projection = m_camera.projection(m_window.aspectRatio());
     const glm::mat4 rotationOnly(glm::mat3(m_camera.view()));
     m_terrain->update(m_camera.position, projection * m_camera.view());
+    renderShadows(projection);
 
     m_terrainShader->use();
     setSceneUniforms(*m_terrainShader);
+    m_shadows->apply(*m_terrainShader, kShadowUnit);
     m_terrainShader->set("uExaggeration", m_heightField->verticalExaggeration());
     m_materialColour->bind(kColourUnit);
     m_materialNormal->bind(kNormalUnit);
     m_sky->applyEnvironment(*m_terrainShader, kSkyUnit);
-    m_terrain->draw(*m_terrainShader, kHeightUnit);
+    m_terrain->draw(*m_terrainShader, kHeightUnit, kHorizonUnit);
 
     // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.
     m_seaShader->use();
     setSceneUniforms(*m_seaShader);
+    m_shadows->apply(*m_seaShader, kShadowUnit);
     m_terrain->bindCoastMask(kCoastUnit);
     m_sky->applyEnvironment(*m_seaShader, kSkyUnit);
     glEnable(GL_POLYGON_OFFSET_FILL);
@@ -433,11 +523,45 @@ void Application::render()
     glDisable(GL_POLYGON_OFFSET_FILL);
 
     // Skybox last, at the far plane, so it is only shaded where nothing else was drawn.
-    m_sky->drawBackground(glm::inverse(projection * rotationOnly), m_atmosphere);
+    m_sky->drawBackground(glm::inverse(projection * rotationOnly), m_atmosphere,
+                          m_camera.fovY / static_cast<float>(m_window.framebufferHeight()));
 
     // Stands in for the resolve a multisampled default framebuffer does on swap.
     if (m_offscreen) {
         m_offscreen->resolve();
+    }
+}
+
+void Application::renderShadows(const glm::mat4& projection)
+{
+    // Twilight has no direct light to shadow; the maps keep their last contents meanwhile.
+    const glm::vec3 light = m_atmosphere.lightColour();
+    if (std::max(light.r, std::max(light.g, light.b)) < 1e-4f) {
+        return;
+    }
+    const glm::dvec3& eye = m_camera.position;
+    const double ground = m_heightField->groundHeight(eye.x, eye.z);
+    m_shadows->update(eye, m_camera.forward(), m_camera.fovY, projection[1][1] / projection[0][0],
+                      static_cast<float>(eye.y - ground), m_atmosphere.lightDir());
+
+    // Errors from earlier in the frame are counted by validateFrame(), not against the shadows.
+    const bool validating = m_options.validateMinTiles > 0;
+    if (validating) {
+        drainGlErrors(m_glErrorCount, m_firstGlError);
+    }
+    m_shadowShader->use();
+    m_shadowShader->set("uCameraHeight", static_cast<float>(eye.y));
+    for (int cascade = 0; cascade < ShadowMaps::kCascades; ++cascade) {
+        m_shadows->begin(cascade);
+        m_shadowShader->set("uShadowViewProj", m_shadows->viewProjection(cascade));
+        m_terrain->drawShadowCasters(*m_shadowShader, kHeightUnit, m_shadows->viewProjection(cascade),
+                                     ShadowMaps::lodScale(cascade));
+    }
+    m_shadows->end();
+    if (validating) {
+        drainGlErrors(m_shadowGlErrorCount, m_firstShadowGlError);
+        ++m_shadowFrames;
+        m_shadowCasterFrames += m_terrain->stats().shadowDrawCalls > 0 ? 1 : 0;
     }
 }
 
@@ -546,13 +670,18 @@ void Application::printRunStats() const
                 static_cast<double>(*std::max_element(terrain.begin(), terrain.end())));
 }
 
-void Application::validateFrame()
+void Application::drainGlErrors(int& count, unsigned& first)
 {
     for (GLenum error = glGetError(); error != GL_NO_ERROR; error = glGetError()) {
-        if (m_glErrorCount++ == 0) {
-            m_firstGlError = error;
+        if (count++ == 0) {
+            first = error;
         }
     }
+}
+
+void Application::validateFrame()
+{
+    drainGlErrors(m_glErrorCount, m_firstGlError);
     const Terrain::Stats& stats = m_terrain->stats();
     m_terrainReady = m_terrainReady || (stats.missingNodes == 0 && stats.cameraCovered);
     if (!m_terrainReady) {
@@ -574,6 +703,8 @@ bool Application::reportValidation() const
     const Check checks[] = {
         {"run completed", m_finished},
         {"no GL errors", m_glErrorCount == 0},
+        {"no GL errors in shadow passes", m_shadowGlErrorCount == 0},
+        {"shadow casters drawn", m_shadowCasterFrames > 0},
         {"initial terrain loaded", m_terrainReady && m_validatedFrames > 0},
         {"no frames with holes in view", m_holeFrames == 0},
         {"ground under the camera always loaded", m_uncoveredFrames == 0},
@@ -582,10 +713,12 @@ bool Application::reportValidation() const
     };
     std::printf("Validation (%d frames checked after the initial load): %d GL errors (first 0x%04X), "
                 "%d frames with holes, %d frames without ground under the camera, %llu tiles generated, "
-                "peak %d resident, minimum %d\n",
+                "peak %d resident, minimum %d; shadow passes in %d frames (%d with casters), "
+                "%d GL errors in them (first 0x%04X)\n",
                 m_validatedFrames, m_glErrorCount, m_firstGlError, m_holeFrames, m_uncoveredFrames,
                 static_cast<unsigned long long>(stats.tilesGenerated), m_peakResidentTiles,
-                m_options.validateMinTiles);
+                m_options.validateMinTiles, m_shadowFrames, m_shadowCasterFrames, m_shadowGlErrorCount,
+                m_firstShadowGlError);
     bool passed = true;
     for (const Check& check : checks) {
         std::printf("  %s %s\n", check.passed ? "PASS" : "FAIL", check.name);
@@ -636,11 +769,12 @@ void Application::updateTitle()
     if (stats.outstandingTiles > 0) {
         std::snprintf(streaming, sizeof(streaming), " (+%zu streaming)", stats.outstandingTiles);
     }
-    char title[256];
-    std::snprintf(title, sizeof(title), "%s  |  %.0f FPS  |  %.2f ms  |  %.2fM tris  |  %d draws  |  %d tiles%s  |  %s",
-                  m_options.window.title.c_str(), m_timer.framesPerSecond(), m_timer.frameTimeMs(),
-                  static_cast<double>(stats.triangles) / 1e6, stats.drawCalls, stats.residentTiles,
-                  streaming, speed);
+    const std::string time = m_options.fixedSun ? "fixed sun" : m_time.label();
+    char title[320];
+    std::snprintf(title, sizeof(title), "%s  |  %s  |  %.0f FPS  |  %.2f ms  |  %.2fM tris  |  %d draws  |  %d tiles%s  |  %s",
+                  m_options.window.title.c_str(), time.c_str(), m_timer.framesPerSecond(),
+                  m_timer.frameTimeMs(), static_cast<double>(stats.triangles) / 1e6, stats.drawCalls,
+                  stats.residentTiles, streaming, speed);
     m_window.setTitle(title);
 }
 
