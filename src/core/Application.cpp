@@ -45,6 +45,7 @@ constexpr GLuint kHeightUnit = 3;
 constexpr GLuint kSkyUnit = 4;
 constexpr GLuint kShadowUnit = 5;
 constexpr GLuint kHorizonUnit = 6;
+constexpr GLuint kRippleUnit = 7;
 
 // MSVC deprecates fopen (C4996, an error with warnings as errors); fopen_s is its replacement.
 std::FILE* openForWriting(const std::string& path)
@@ -273,7 +274,7 @@ Application::Application(AppOptions options)
     std::printf("World: seed %u\n", m_options.seed);
 
     m_terrain = std::make_unique<Terrain>(*m_heightField);
-    m_sea = std::make_unique<SeaSurface>(kSeaRadius, Wind{});
+    m_sea = std::make_unique<SeaSurface>(kSeaRadius, Wind{}, m_options.assetDir / "textures" / "water");
 
     const std::filesystem::path materialDir = m_options.assetDir / "textures" / "materials";
     m_materialColour = std::make_unique<TextureArray>(materialFiles(materialDir, "Color"),
@@ -516,7 +517,7 @@ void Application::render()
     setSceneUniforms(*m_seaShader);
     // Screenshots freeze the waves, so they are reproducible.
     const double waveTime = m_options.screenshotPath.empty() ? m_timer.elapsedSeconds() : 0.0;
-    m_sea->apply(*m_seaShader, m_camera.position, waveTime);
+    m_sea->apply(*m_seaShader, m_camera.position, waveTime, kRippleUnit);
     m_shadows->apply(*m_seaShader, kShadowUnit);
     m_terrain->bindCoastMask(kCoastUnit);
     m_sky->applyEnvironment(*m_seaShader, kSkyUnit);

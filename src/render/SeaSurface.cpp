@@ -27,11 +27,20 @@ constexpr WaveShape kShapes[SeaSurface::kWaves] = {
     {52.0, 0.0, 1.0}, {31.0, 25.0, 0.6}, {19.0, -30.0, 0.45}, {11.0, 50.0, 0.3}};
 constexpr double kSteepness = 0.6; // overall Gerstner sharpness, 0 (sine) to 1 (cusps)
 
+// Ripple maps: tile sizes divide kWavePeriod, so wrapped coordinates never jump. Each drifts at
+// a fraction of the wind speed, turned either side of it so the two patterns slide past.
+constexpr double kRippleTile[2] = {64.0, 16.0};
+constexpr double kRippleDrift[2] = {0.12, 0.07};
+constexpr double kRippleTurn[2] = {-20.0, 25.0};
+constexpr float kReferenceWind = 8.0f; // m/s at which ripples have the strength they were made with
+
 } // namespace
 
-SeaSurface::SeaSurface(float radius, const Wind& wind)
+SeaSurface::SeaSurface(float radius, const Wind& wind, const std::filesystem::path& textureDir)
     : m_radius(radius)
     , m_wind(wind)
+    , m_ripples({textureDir / "water-normal-1.png", textureDir / "water-normal-2.png"},
+                TextureArray::Encoding::Linear)
 {
     // Fully developed sea (Pierson-Moskowitz): significant height ~0.21 U^2 / g; the largest
     // wave takes about a quarter of it.
@@ -108,8 +117,20 @@ SeaSurface::~SeaSurface()
     glDeleteVertexArrays(1, &m_vao);
 }
 
-void SeaSurface::apply(Shader& shader, const glm::dvec3& cameraPos, double time) const
+void SeaSurface::apply(Shader& shader, const glm::dvec3& cameraPos, double time, GLuint rippleUnit) const
 {
+    m_ripples.bind(rippleUnit);
+    shader.set("uRipples", static_cast<int>(rippleUnit));
+    shader.set("uRippleTile", glm::vec2(static_cast<float>(kRippleTile[0]), static_cast<float>(kRippleTile[1])));
+    shader.set("uRippleStrength", m_wind.speed / kReferenceWind);
+    for (int i = 0; i < 2; ++i) {
+        const double bearing = (static_cast<double>(m_wind.bearing) + kRippleTurn[i]) * kPi / 180.0;
+        const double drift = kRippleDrift[i] * static_cast<double>(m_wind.speed) * time;
+        const double tile = kRippleTile[i];
+        const auto wrap = [tile](double v) { return static_cast<float>(v - tile * std::floor(v / tile)); };
+        shader.set("uRippleOffset[" + std::to_string(i) + "]",
+                   glm::vec2(wrap(std::sin(bearing) * drift), wrap(-std::cos(bearing) * drift)));
+    }
     for (int i = 0; i < kWaves; ++i) {
         shader.set("uWaves[" + std::to_string(i) + "]", m_waves[static_cast<std::size_t>(i)]);
     }

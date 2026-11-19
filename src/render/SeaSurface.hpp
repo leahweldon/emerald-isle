@@ -1,9 +1,12 @@
 #pragma once
 
+#include "render/TextureArray.hpp"
+
 #include <glad/gl.h>
 #include <glm/glm.hpp>
 
 #include <array>
+#include <filesystem>
 
 namespace emerald {
 
@@ -18,6 +21,7 @@ struct Wind {
 // Infinite sea: a camera-centred grid of rings whose radii grow geometrically from 1 m to the
 // horizon, so cells stay roughly square at every distance. Gerstner waves displace it in
 // sea.vert near the camera and fade out with distance before the rings get too coarse for them.
+// Two ripple normal maps (tools/make_water_normals.py) drift with the wind for fine detail.
 class SeaSurface {
 public:
     static constexpr int kWaves = 4;
@@ -25,14 +29,15 @@ public:
     // kWavePeriod metres and world positions can be wrapped (in double) before reaching float.
     static constexpr double kWavePeriod = 1536.0;
 
-    SeaSurface(float radius, const Wind& wind);
+    SeaSurface(float radius, const Wind& wind, const std::filesystem::path& textureDir);
     ~SeaSurface();
 
     SeaSurface(const SeaSurface&) = delete;
     SeaSurface& operator=(const SeaSurface&) = delete;
 
-    // Sets uWaves, uWaveSteepness, uWaveOrigin and uWaveTime (seconds).
-    void apply(Shader& shader, const glm::dvec3& cameraPos, double time) const;
+    // Sets the wave uniforms (uWaves, uWaveSteepness, uWaveOrigin, uWaveTime) and binds the
+    // ripple maps to rippleUnit with their offsets, tile sizes and strength. time is in seconds.
+    void apply(Shader& shader, const glm::dvec3& cameraPos, double time, GLuint rippleUnit) const;
     void draw() const;
 
     float radius() const { return m_radius; }
@@ -43,6 +48,7 @@ private:
     Wind m_wind;
     std::array<glm::vec4, kWaves> m_waves{}; // wave vector x, z, amplitude (m), angular frequency
     glm::vec4 m_steepness{0.0f};             // Gerstner Q per wave
+    TextureArray m_ripples;
     GLuint m_vao = 0;
     GLuint m_vbo = 0;
     GLuint m_ebo = 0;
