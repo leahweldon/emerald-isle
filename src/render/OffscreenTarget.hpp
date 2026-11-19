@@ -5,7 +5,7 @@
 namespace emerald {
 
 // Colour and depth to render into instead of the window's default framebuffer: the HDR scene
-// target (RGBA16F, multisampled) and, for --headless, the final image (RGBA8). With samples > 1
+// target (packed float, multisampled) and, for --headless, the final image (RGBA8). With samples > 1
 // the scene is drawn multisampled and resolve() averages it into a single-sample texture, which
 // is what texture() and readFramebuffer() give.
 class OffscreenTarget {
