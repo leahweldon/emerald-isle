@@ -75,6 +75,7 @@ add_executable(emerald-isle
     src/render/Camera.cpp
     src/render/GpuTimer.cpp
     src/render/OffscreenTarget.cpp
+    src/render/ReflectionTarget.cpp
     src/render/SeaSurface.cpp
     src/render/SeabedMap.cpp
     src/render/Shader.cpp

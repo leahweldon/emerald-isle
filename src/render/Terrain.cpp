@@ -428,7 +428,7 @@ void Terrain::selectNode(const TileKey& key, const glm::dvec3& cameraPos, const 
     m_drawList.push_back(DrawNode{key, chosen.texture, chosen.horizon, distance});
 }
 
-void Terrain::selectCaster(const TileKey& key, const glm::vec4 planes[6], double lodScale)
+void Terrain::selectCaster(const TileKey& key, const glm::vec4 planes[6], double lodScale, int skipPlane)
 {
     const int slot = residentSlot(key);
     if (slot < 0) {
@@ -438,8 +438,7 @@ void Terrain::selectCaster(const TileKey& key, const glm::vec4 planes[6], double
     const double size = nodeSize(key.level);
     const glm::dvec3 lo(static_cast<double>(key.x) * size, s.minY, static_cast<double>(key.z) * size);
     const glm::dvec3 hi = lo + glm::dvec3(size, static_cast<double>(s.maxY - s.minY), size);
-    // Plane 4 is the side facing the light: casters beyond it are clamped onto it, not culled.
-    if (!boxVisible(planes, glm::vec3(lo - m_cameraPos), glm::vec3(hi - m_cameraPos), 4)) {
+    if (!boxVisible(planes, glm::vec3(lo - m_cameraPos), glm::vec3(hi - m_cameraPos), skipPlane)) {
         return;
     }
     const double distance = distanceToBox(m_cameraPos, lo, hi);
@@ -452,7 +451,7 @@ void Terrain::selectCaster(const TileKey& key, const glm::vec4 planes[6], double
         }
         if (ready) {
             for (const TileKey& child : children) {
-                selectCaster(child, planes, lodScale);
+                selectCaster(child, planes, lodScale, skipPlane);
             }
             return;
         }
@@ -460,17 +459,33 @@ void Terrain::selectCaster(const TileKey& key, const glm::vec4 planes[6], double
     m_casterList.push_back(DrawNode{key, s.texture, s.horizon, distance});
 }
 
-void Terrain::drawShadowCasters(Shader& shader, GLuint heightTileUnit, const glm::mat4& lightViewProj,
-                                float lodScale)
+void Terrain::selectCasters(const glm::mat4& viewProj, double lodScale, int skipPlane)
 {
     glm::vec4 planes[6];
-    extractPlanes(lightViewProj, planes);
+    extractPlanes(viewProj, planes);
     m_casterList.clear();
     for (std::int64_t dz = -kRootRadius; dz <= kRootRadius; ++dz) {
         for (std::int64_t dx = -kRootRadius; dx <= kRootRadius; ++dx) {
-            selectCaster(TileKey{kMaxLevel, m_rootX + dx, m_rootZ + dz}, planes, lodScale);
+            selectCaster(TileKey{kMaxLevel, m_rootX + dx, m_rootZ + dz}, planes, lodScale, skipPlane);
         }
     }
+}
+
+void Terrain::drawReflection(Shader& shader, GLuint heightTileUnit, GLuint horizonUnit, const glm::mat4& viewProj,
+                             float lodScale)
+{
+    selectCasters(viewProj, lodScale, -1);
+    shader.set("uHorizon", static_cast<int>(horizonUnit));
+    drawNodes(shader, heightTileUnit, static_cast<int>(horizonUnit), m_casterList, m_totalIndexCount);
+    m_stats.reflectionDrawCalls += static_cast<int>(m_casterList.size());
+    m_stats.reflectionTriangles += m_casterList.size() * static_cast<std::size_t>(m_totalIndexCount / 3);
+}
+
+void Terrain::drawShadowCasters(Shader& shader, GLuint heightTileUnit, const glm::mat4& lightViewProj,
+                                float lodScale)
+{
+    // Plane 4 is the side facing the light: casters beyond it are clamped onto it, not culled.
+    selectCasters(lightViewProj, lodScale, 4);
     drawNodes(shader, heightTileUnit, -1, m_casterList, m_gridIndexCount);
     m_stats.shadowDrawCalls += static_cast<int>(m_casterList.size());
     m_stats.shadowTriangles += m_casterList.size() * static_cast<std::size_t>(m_gridIndexCount / 3);

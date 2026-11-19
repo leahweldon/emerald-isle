@@ -32,8 +32,10 @@ public:
         double updateMs = 0.0;            // main-thread cost of update(): uploads and selection
         int missingNodes = 0;             // visible nodes with no tile at any level: holes
         bool cameraCovered = false;       // a tile is loaded for the ground under the camera
-        int shadowDrawCalls = 0;          // all cascades
+        int shadowDrawCalls = 0;          // all depth passes (shadow cascades, seabed)
         std::size_t shadowTriangles = 0;
+        int reflectionDrawCalls = 0;
+        std::size_t reflectionTriangles = 0;
     };
 
     explicit Terrain(const HeightField& heightField);
@@ -55,6 +57,10 @@ public:
     // coarser). Skirts are left out. Only uses tiles already loaded; requests nothing.
     void drawShadowCasters(Shader& shader, GLuint heightTileUnit, const glm::mat4& lightViewProj,
                            float lodScale);
+    // Terrain mirrored in the sea, for the planar reflection: loaded nodes inside the mirrored
+    // view (viewProj includes the mirror), at the view's level of detail scaled by lodScale.
+    void drawReflection(Shader& shader, GLuint heightTileUnit, GLuint horizonUnit, const glm::mat4& viewProj,
+                        float lodScale);
 
     // Blurred land mask over the DEM extent (R8, 1 = land), for shallow-water shading.
     // Row 0 is north (-Z); sample at uv = xz / demSize() + 0.5.
@@ -83,7 +89,9 @@ private:
 
     void selectNode(const TileKey& key, const glm::dvec3& cameraPos, const glm::vec4 planes[6],
                     std::vector<TileStreamer::Request>& wanted);
-    void selectCaster(const TileKey& key, const glm::vec4 planes[6], double lodScale);
+    // Loaded nodes inside planes (skipping plane skipPlane, or none if -1) into m_casterList.
+    void selectCasters(const glm::mat4& viewProj, double lodScale, int skipPlane);
+    void selectCaster(const TileKey& key, const glm::vec4 planes[6], double lodScale, int skipPlane);
     // horizonUnit < 0 skips the horizon maps (depth passes).
     void drawNodes(Shader& shader, GLuint heightTileUnit, int horizonUnit,
                    const std::vector<DrawNode>& nodes, GLsizei indexCount);

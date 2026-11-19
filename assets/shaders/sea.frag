@@ -26,6 +26,8 @@ uniform sampler2DArray uSeabed;  // ground height under the sea, near and wide (
 uniform vec4 uSeabedArea[2];     // x, z offset from the camera, 1 / half size
 uniform float uSeabedRange;      // height at depth 0, world units
 uniform float uExaggeration;
+uniform sampler2D uReflection;   // mirrored terrain, linear colour; alpha 0 where only sky
+uniform vec2 uViewportSize;      // pixels, for screen coordinates
 
 #include "shadow.glsl"
 
@@ -39,6 +41,7 @@ const vec3 kTurquoise = vec3(0.030, 0.260, 0.230);
 const float kClarity = 4.0;       // metres of depth over which the seabed fades out
 const float kFoamDepth = 0.8;     // metres: foam where the water is shallower than this
 const vec3 kFoam = vec3(0.7);     // foam albedo
+const float kReflectionDistortion = 0.03; // screen fraction per unit of ripple slope
 const float kFoamCover = 0.7;     // at most this much of the surface is foam
 
 // Lighting is linear; the default framebuffer expects sRGB.
@@ -178,6 +181,10 @@ void main()
     vec3 r = reflect(-v, n);
     r.y = abs(r.y); // a ripple tilted past the view reflects the sky on its other side
     vec3 reflection = texture(uSkyCube, r).rgb;
+    // Mirrored terrain where it was drawn, nudged by the ripples, over the sky behind it.
+    vec2 screen = gl_FragCoord.xy / uViewportSize + n.xz * kReflectionDistortion;
+    vec4 mirrored = texture(uReflection, clamp(screen, vec2(0.0), vec2(1.0)));
+    reflection = mix(reflection, mirrored.rgb, mirrored.a);
     float fresnel = schlick(dot(n, v));
     float alpha = sqrt(kGlintRoughness * kGlintRoughness + slopeVariance);
     vec3 glint = uLightColour * visibility * ggxSpecular(n, v, uLightDir, alpha);
