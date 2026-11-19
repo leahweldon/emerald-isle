@@ -143,22 +143,6 @@ void sampleTriplanar(float layer, vec3 n, vec3 dPdx, vec3 dPdy, out vec3 colour,
              textureGrad(uMaterialColour, uvZ, gxZ, gyZ).rgb * w.z;
 }
 
-// Lighting is linear; the default framebuffer expects sRGB.
-// Display transform shared by every pass that writes to the screen: linear below 0.8, then a
-// smooth shoulder to 1 so the bright sky around the sun compresses instead of clipping.
-vec3 toneMap(vec3 c)
-{
-    const float knee = 0.8;
-    vec3 over = max(c - knee, 0.0);
-    return min(c, vec3(knee)) + (1.0 - knee) * (1.0 - exp(-over / (1.0 - knee)));
-}
-
-vec3 linearToSrgb(vec3 c)
-{
-    c = max(c, vec3(0.0));
-    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
-}
-
 float tileHeight(vec2 uv)
 {
     return textureLod(uHeightTile, uv, 0.0).r;
@@ -241,11 +225,7 @@ void main()
     // Fully fogged (distant islands at the horizon): the fog colour is all that shows.
     float fog = fogAmount(vRelPos);
     if (fog > 0.995) {
-#ifdef REFLECTION_PASS
         fragColour = vec4(fogColour(vRelPos), 1.0);
-#else
-        fragColour = vec4(linearToSrgb(toneMap(fogColour(vRelPos))), 1.0);
-#endif
         return;
     }
 
@@ -360,9 +340,5 @@ void main()
     vec3 colour = nightVision(albedo * (skyAmbient(shadingNormal) + uLightColour * diffuse));
 
     colour = mix(colour, fogColour(vRelPos), fog);
-#ifdef REFLECTION_PASS
-    fragColour = vec4(colour, 1.0); // linear: the sea blends it with Fresnel before tone mapping
-#else
-    fragColour = vec4(linearToSrgb(toneMap(colour)), 1.0);
-#endif
+    fragColour = vec4(colour, 1.0); // linear HDR, tone mapped in tonemap.frag
 }

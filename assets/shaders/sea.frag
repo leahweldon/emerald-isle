@@ -45,22 +45,6 @@ const vec3 kFoam = vec3(0.7);     // foam albedo
 const float kReflectionDistortion = 0.03; // screen fraction per unit of ripple slope
 const float kFoamCover = 0.7;     // at most this much of the surface is foam
 
-// Lighting is linear; the default framebuffer expects sRGB.
-// Display transform shared by every pass that writes to the screen: linear below 0.8, then a
-// smooth shoulder to 1 so the bright sky around the sun compresses instead of clipping.
-vec3 toneMap(vec3 c)
-{
-    const float knee = 0.8;
-    vec3 over = max(c - knee, 0.0);
-    return min(c, vec3(knee)) + (1.0 - knee) * (1.0 - exp(-over / (1.0 - knee)));
-}
-
-vec3 linearToSrgb(vec3 c)
-{
-    c = max(c, vec3(0.0));
-    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
-}
-
 // Diffuse sky light from order-2 SH (coefficients pre-convolved and divided by pi on the CPU).
 vec3 skyAmbient(vec3 n)
 {
@@ -205,5 +189,5 @@ void main()
     float edge = smoothstep(0.0, 1.0, clamp((1.0 / nearEdge - 1.0 / d) /
                                             (1.0 / nearEdge - 1.0 / uSeaRadius), 0.0, 1.0));
     colour = mix(colour, fogColour(vRelPos), max(fogAmount(vRelPos), edge));
-    fragColour = vec4(linearToSrgb(toneMap(colour)), 1.0);
+    fragColour = vec4(colour, 1.0); // linear HDR, tone mapped in tonemap.frag
 }
