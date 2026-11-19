@@ -56,9 +56,10 @@ constexpr GLuint kSceneUnit = 10;
 // tone mapping and dither cannot tell from RGBA16F (at most 3/255 apart, no banding), at a
 // quarter of its frame cost with 4x MSAA (0.1-0.3 ms against 1 ms of GPU time at 2560 x 1440).
 constexpr GLenum kSceneFormat = GL_R11F_G11F_B10F;
-// Linear scale before AgX at --exposure 0, fitted so mid-tones at noon match the earlier
-// renderer's display curve (linear up to 0.8) as closely as AgX allows.
-constexpr float kBaseExposure = 1.16f;
+// Linear scale before each tone curve at --exposure 0, fitted so noon terrain, sea and sky match
+// the earlier display transform (linear up to 0.8) as closely as the curve allows.
+constexpr float kNeutralExposure = 1.18f;
+constexpr float kAgxExposure = 1.16f;
 // The reflection is rendered at this fraction of the screen size, and with this level-of-detail
 // scale (< 1 is coarser): rippled and seen at grazing angles, it does not need more.
 constexpr int kReflectionDivisor = 2;
@@ -106,6 +107,7 @@ void printUsage(const char* program)
         "  --autofly <s>         Fly straight ahead for s seconds, print stats, exit\n"
         "  --frame-log <file>    Write per-frame phase timings (CSV)\n"
         "  --exposure <ev>       Exposure offset in stops (default 0)\n"
+        "  --tone-mapper <name>  neutral (default, Khronos PBR Neutral) or agx\n"
         "  --gpu-timing          Also measure GPU time per frame (adds ~0.4 ms on macOS)\n"
         "  --validate <tiles>    Check for GL errors and terrain holes, require at least this many\n"
         "                        tiles generated and resident, exit non-zero on failure\n"
@@ -222,6 +224,12 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.validateMinTiles = parsePositive(arg, argv[++i]);
         } else if (std::strcmp(arg, "--exposure") == 0 && hasValue) {
             options.exposureEv = parseFloat(arg, argv[++i], -10.0f, 10.0f);
+        } else if (std::strcmp(arg, "--tone-mapper") == 0 && hasValue) {
+            const std::string name = argv[++i];
+            if (name != "neutral" && name != "agx") {
+                throw std::invalid_argument("Invalid value for --tone-mapper: " + name + " (neutral or agx)");
+            }
+            options.agx = name == "agx";
         } else if (std::strcmp(arg, "--gpu-timing") == 0) {
             options.gpuTiming = true;
         } else if (std::strcmp(arg, "--frame-log") == 0 && hasValue) {
@@ -586,7 +594,9 @@ void Application::toneMap()
     m_toneMapShader->use();
     m_scene->bindTexture(kSceneUnit);
     m_toneMapShader->set("uScene", static_cast<int>(kSceneUnit));
-    m_toneMapShader->set("uExposure", kBaseExposure * std::exp2(m_options.exposureEv));
+    const float base = m_options.agx ? kAgxExposure : kNeutralExposure;
+    m_toneMapShader->set("uExposure", base * std::exp2(m_options.exposureEv));
+    m_toneMapShader->set("uToneMapper", m_options.agx ? 1 : 0);
     glBindVertexArray(m_fullscreenVao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindVertexArray(0);

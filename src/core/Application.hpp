@@ -44,6 +44,8 @@ struct AppOptions {
     bool timeRunning = true;
     // Exposure offset in stops (EV) on top of the default, for the final tone mapping.
     float exposureEv = 0.0f;
+    // Final tone curve: false for Khronos PBR Neutral, true for AgX.
+    bool agx = false;
     // --sun-bearing or --sun-elevation fix the sun in place of the time of day (degrees).
     bool fixedSun = false;
     float sunBearing = 225.0f;

@@ -1,15 +1,19 @@
 #version 330 core
 
-// Final pass: the linear HDR scene to the display. Exposure, then the AgX filmic curve (Troy
-// Sobotka's, with the polynomial sigmoid fit used by Blender and three.js) and a mild contrast
-// and saturation look, then sRGB encoding with a little dither against banding in sky gradients.
-// AgX bends bright colours smoothly towards white, so a glow around a low sun stays a gradient.
+// Final pass: the linear HDR scene to the display. Exposure, then a tone curve, then sRGB
+// encoding with a little dither against banding in sky gradients. Both curves roll highlights
+// off smoothly, so a glow around a low sun stays a gradient instead of clipping:
+//   0: Khronos PBR Neutral (default): linear up to 0.76 like the earlier display transform, then
+//      compressed keeping hue, desaturating to white only gradually, so warm glows stay warm.
+//   1: AgX (Troy Sobotka's, with the polynomial sigmoid fit used by Blender and three.js) with a
+//      mild contrast and saturation look: filmic, bending bright colours towards white sooner.
 
 in vec2 vUv;
 out vec4 fragColour;
 
 uniform sampler2D uScene;   // resolved, linear, Rec. 709 primaries
 uniform float uExposure;    // linear scale
+uniform int uToneMapper;    // 0 neutral, 1 AgX
 
 const mat3 kSrgbToRec2020 = mat3(vec3(0.6274, 0.0691, 0.0164), vec3(0.3293, 0.9195, 0.0880),
                                  vec3(0.0433, 0.0113, 0.8956));
@@ -47,6 +51,24 @@ vec3 agx(vec3 colour)
     return clamp(kRec2020ToSrgb * colour, 0.0, 1.0);
 }
 
+vec3 neutral(vec3 colour)
+{
+    const float startCompression = 0.8 - 0.04;
+    const float desaturation = 0.15;
+    float x = min(colour.r, min(colour.g, colour.b));
+    float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    colour -= offset;
+    float peak = max(colour.r, max(colour.g, colour.b));
+    if (peak < startCompression) {
+        return colour;
+    }
+    const float d = 1.0 - startCompression;
+    float newPeak = 1.0 - d * d / (peak + d - startCompression);
+    colour *= newPeak / peak;
+    float g = 1.0 - 1.0 / (desaturation * (peak - newPeak) + 1.0);
+    return mix(colour, vec3(newPeak), g);
+}
+
 vec3 linearToSrgb(vec3 c)
 {
     return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
@@ -63,6 +85,7 @@ float dither()
 
 void main()
 {
-    vec3 colour = agx(texture(uScene, vUv).rgb * uExposure);
+    vec3 scene = texture(uScene, vUv).rgb * uExposure;
+    vec3 colour = uToneMapper == 1 ? agx(scene) : neutral(scene);
     fragColour = vec4(linearToSrgb(colour) + dither(), 1.0);
 }
