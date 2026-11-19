@@ -2,6 +2,8 @@
 
 in vec3 vRelPos;   // relative to the camera
 in vec2 vWorldXZ;
+in vec2 vWaveXZ;
+in vec3 vWaveNormal;
 out vec4 fragColour;
 
 uniform float uCameraHeight;
@@ -79,7 +81,7 @@ float fogAmount(vec3 relPos)
 
 void main()
 {
-    const vec3 n = vec3(0.0, 1.0, 0.0);
+    vec3 n = normalize(vWaveNormal);
     vec3 toCamera = normalize(-vRelPos);
 
     // Shallower-looking water near land. No bathymetry, so distance to coast stands in for depth.

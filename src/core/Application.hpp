@@ -20,7 +20,7 @@ namespace emerald {
 class Sky;
 class Terrain;
 class HeightField;
-class SeaPlane;
+class SeaSurface;
 class Shader;
 class GpuTimer;
 class ShadowMaps;
@@ -95,7 +95,7 @@ private:
     std::unique_ptr<Shader> m_terrainShader;
     std::unique_ptr<TextureArray> m_materialColour;
     std::unique_ptr<TextureArray> m_materialNormal;
-    std::unique_ptr<SeaPlane> m_sea;
+    std::unique_ptr<SeaSurface> m_sea;
     std::unique_ptr<Shader> m_seaShader;
     std::unique_ptr<Shader> m_shadowShader;
     std::unique_ptr<ShadowMaps> m_shadows;

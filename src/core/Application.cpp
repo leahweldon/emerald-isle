@@ -4,7 +4,7 @@
 #include "render/GpuTimer.hpp"
 #include "render/OffscreenTarget.hpp"
 #include "render/Shader.hpp"
-#include "render/SeaPlane.hpp"
+#include "render/SeaSurface.hpp"
 #include "render/ShadowMaps.hpp"
 #include "render/Sky.hpp"
 #include "render/Terrain.hpp"
@@ -31,9 +31,9 @@ namespace emerald {
 namespace {
 
 
-// Metres. The sea plane reaches the far plane (corners at ~0.99x far) so it meets the horizon.
+// Metres. The sea reaches almost to the far plane, so it meets the horizon.
 constexpr float kFarPlane = 15000e3f;
-constexpr float kSeaHalfSize = 0.7f * kFarPlane;
+constexpr float kSeaRadius = 0.99f * kFarPlane;
 constexpr float kAutoflySpeed = 2500.0f; // metres per second, ~150 km a minute
 
 // Material layers, in the order terrain.frag indexes them (kGrass, kSand, kHeath, kRock).
@@ -273,7 +273,7 @@ Application::Application(AppOptions options)
     std::printf("World: seed %u\n", m_options.seed);
 
     m_terrain = std::make_unique<Terrain>(*m_heightField);
-    m_sea = std::make_unique<SeaPlane>(kSeaHalfSize);
+    m_sea = std::make_unique<SeaSurface>(kSeaRadius, Wind{});
 
     const std::filesystem::path materialDir = m_options.assetDir / "textures" / "materials";
     m_materialColour = std::make_unique<TextureArray>(materialFiles(materialDir, "Color"),
@@ -291,7 +291,7 @@ Application::Application(AppOptions options)
     m_seaShader->use();
     m_seaShader->set("uCoastMask", static_cast<int>(kCoastUnit));
     m_seaShader->set("uTerrainSize", m_terrain->demSize());
-    m_seaShader->set("uSeaRadius", kSeaHalfSize);
+    m_seaShader->set("uSeaRadius", kSeaRadius);
 
     if (!m_options.frameLogPath.empty()) {
         m_frameLog = openForWriting(m_options.frameLogPath);
@@ -514,6 +514,9 @@ void Application::render()
     // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.
     m_seaShader->use();
     setSceneUniforms(*m_seaShader);
+    // Screenshots freeze the waves, so they are reproducible.
+    const double waveTime = m_options.screenshotPath.empty() ? m_timer.elapsedSeconds() : 0.0;
+    m_sea->apply(*m_seaShader, m_camera.position, waveTime);
     m_shadows->apply(*m_seaShader, kShadowUnit);
     m_terrain->bindCoastMask(kCoastUnit);
     m_sky->applyEnvironment(*m_seaShader, kSkyUnit);
