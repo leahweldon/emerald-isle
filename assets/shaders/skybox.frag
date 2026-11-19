@@ -14,7 +14,7 @@ uniform mat3 uStarRotation;        // world directions to the rotating celestial
 uniform float uPixelAngle;         // radians per pixel, so stars stay about a pixel wide
 
 const float kSunAngularRadius = 0.0047;  // matches sky.frag
-const float kMoonAngularRadius = 0.0045;
+const float kMoonAngularRadius = 0.008; // drawn larger than the real 0.0045, as the eye sees it
 const float kStarCells = 150.0;          // star grid cells per unit of direction
 const float kStarDensity = 0.035;        // fraction of cells holding a star
 
@@ -77,7 +77,7 @@ void main()
 
     // Full moon: a grey disc with darker patches standing in for the maria, and a faint halo.
     float m = acos(clamp(dot(ray, uMoonDir), -1.0, 1.0)) / kMoonAngularRadius;
-    if (m < 8.0) {
+    if (m < 12.0) {
         vec3 side = normalize(cross(uMoonDir, vec3(0.0, 1.0, 0.0)));
         vec3 upward = cross(side, uMoonDir);
         vec2 local = vec2(dot(ray, side), dot(ray, upward)) / kMoonAngularRadius;
@@ -86,7 +86,8 @@ void main()
                       smoothstep(0.25, 0.0, length(local - vec2(-0.05, -0.35))) * 0.25;
         float medge = fwidth(m);
         float disc = 1.0 - smoothstep(1.0 - medge, 1.0 + medge, m);
-        colour += uMoonDiscColour * ((1.0 - maria) * disc + 0.01 * exp(-m * m / 6.0));
+        float halo = 0.04 * exp(-m * m / 8.0) + 0.008 * exp(-m * m / 40.0);
+        colour += uMoonDiscColour * ((1.0 - maria) * disc + halo);
     }
 
     fragColour = vec4(linearToSrgb(toneMap(colour)), 1.0);

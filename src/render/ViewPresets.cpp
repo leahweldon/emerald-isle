@@ -23,9 +23,10 @@ const std::array<ViewPreset, 7> kPresets = {{
     // The same archipelago closer in, looking north-north-east along ridges and valleys: an evening
     // sun from the west-north-west throws long shadows across the valley floors.
     {"ridges", glm::vec3(-1012e3f, 300.0f, -258e3f), -0.3f, 0.3f, 22e3f},
-    // Kerry from the north, looking south over the Reeks to the Kenmare River and the Atlantic,
-    // where the full moon stands at midsummer midnight.
-    {"kerry-south", glm::vec3(-116e3f, 600.0f, 170e3f), 3.14159f, 0.12f, 45e3f},
+    // Kerry from the north, looking south-south-east over the Reeks to the Kenmare River. At
+    // midsummer midnight the full moon stands due south, 30 degrees right of the view, so slopes
+    // and the bay catch it from the side.
+    {"kerry-south", glm::vec3(-116e3f, 600.0f, 170e3f), 3.66f, 0.10f, 45e3f},
 }};
 
 } // namespace

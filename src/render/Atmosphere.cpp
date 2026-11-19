@@ -15,6 +15,8 @@ constexpr float kScaleHeightRayleigh = 7994.0f;
 constexpr float kScaleHeightMie = 1200.0f;
 const glm::vec3 kBetaRayleigh(5.8e-6f, 13.5e-6f, 33.1e-6f);
 constexpr float kBetaMie = 3e-6f;
+// Evening aerosol: denser, and scattering short wavelengths more (Angstrom exponent ~1.3).
+const glm::vec3 kBetaMieHazy = 2e-5f * glm::vec3(0.76f, 1.0f, 1.34f);
 const glm::vec3 kBetaOzone(0.650e-6f, 1.881e-6f, 0.085e-6f);
 constexpr float kOzoneCentre = 25e3f;    // ozone layer, a tent profile
 constexpr float kOzoneHalfWidth = 15e3f;
@@ -22,10 +24,14 @@ constexpr int kSamples = 32;
 
 // Moonlight overhead in full darkness. Far brighter than real moonlight, as if the eye had
 // adapted, so the landscape stays readable; the sky model uses the same ratio to sunlight.
-const glm::vec3 kMoonLight(0.090f, 0.120f, 0.200f);
+const glm::vec3 kMoonLight(0.135f, 0.180f, 0.300f);
 constexpr float kMoonSky = 0.004f;
 // Airglow and starlight: keeps the night sky (and so the ambient light) a dark blue.
-const glm::vec3 kNightSky(0.0025f, 0.0045f, 0.0110f);
+const glm::vec3 kNightSky(0.00375f, 0.00675f, 0.0165f);
+constexpr float kGoldenSaturation = 0.7f; // extra saturation of a low sun's light
+constexpr float kGoldenBoost = 0.4f;      // extra strength of a low sun's light
+// Shade at golden hour is lit by the blue sky overhead rather than the warm horizon.
+const glm::vec3 kGoldenShade(0.80f, 0.93f, 1.25f);
 constexpr float kSunsetY = -0.02f; // sun about 1 degree down: the moon takes over as the light
 
 } // namespace
@@ -41,8 +47,9 @@ glm::vec3 sunDirection(float bearingDegrees, float elevationDegrees)
                                     -horizontal * std::cos(bearing)));
 }
 
-glm::vec3 sunTransmittance(const glm::vec3& sunDir)
+glm::vec3 sunTransmittance(const glm::vec3& sunDir, float haze)
 {
+    const glm::vec3 betaMie = glm::mix(glm::vec3(kBetaMie), kBetaMieHazy, haze);
     const glm::vec3 origin(0.0f, kEarthRadius + kObserverHeight, 0.0f);
     const glm::vec3 dir = glm::normalize(sunDir);
     // The sea horizon hides the sun as its disc (~0.5 degrees) sets.
@@ -65,8 +72,12 @@ glm::vec3 sunTransmittance(const glm::vec3& sunDir)
         depthM += std::exp(-h / kScaleHeightMie) * step;
         depthO += std::max(1.0f - std::abs(h - kOzoneCentre) / kOzoneHalfWidth, 0.0f) * step;
     }
-    return visible * glm::exp(-(kBetaRayleigh * depthR + kBetaOzone * depthO +
-                                glm::vec3(kBetaMie * 1.1f * depthM)));
+    return visible * glm::exp(-(kBetaRayleigh * depthR + kBetaOzone * depthO + betaMie * 1.1f * depthM));
+}
+
+float Atmosphere::haze() const
+{
+    return glm::smoothstep(0.5f, 0.208f, sunDir.y);
 }
 
 float Atmosphere::night() const
@@ -82,16 +93,22 @@ glm::vec3 Atmosphere::lightDir() const
 glm::vec3 Atmosphere::lightColour() const
 {
     if (sunDir.y > kSunsetY) {
-        return sunStrength * sunTransmittance(sunDir);
+        // Golden hour: the low sun's colour is saturated and lifted beyond the transmittance,
+        // so lit slopes glow orange against the blue shade, as a photograph exposes for them.
+        const glm::vec3 sun = sunTransmittance(sunDir, haze());
+        const float luminance = glm::dot(sun, glm::vec3(0.2126f, 0.7152f, 0.0722f));
+        const glm::vec3 golden = glm::max(glm::vec3(luminance) + (sun - luminance) * (1.0f + kGoldenSaturation * haze()),
+                                          glm::vec3(0.0f));
+        return sunStrength * (1.0f + kGoldenBoost * haze()) * golden;
     }
     // A low moon is dimmed and warmed by the air like the sun; kMoonLight is its overhead value.
-    const glm::vec3 overhead = sunTransmittance(glm::vec3(0.0f, 1.0f, 0.0f));
-    return night() * kMoonLight * sunTransmittance(moonDir()) / overhead;
+    const glm::vec3 overhead = sunTransmittance(glm::vec3(0.0f, 1.0f, 0.0f), haze());
+    return night() * kMoonLight * sunTransmittance(moonDir(), haze()) / overhead;
 }
 
 float Atmosphere::ambientScale() const
 {
-    return glm::mix(1.0f, 0.5f, glm::smoothstep(0.0f, 0.17f, sunDir.y));
+    return glm::mix(1.0f, 0.5f, glm::smoothstep(-0.02f, 0.05f, sunDir.y));
 }
 
 float Atmosphere::moonSkyIntensity() const
@@ -108,7 +125,8 @@ void Atmosphere::apply(Shader& shader, float cameraHeight) const
 {
     shader.set("uLightDir", lightDir());
     shader.set("uLightColour", lightColour());
-    shader.set("uAmbientScale", ambientScale());
+    shader.set("uAmbientTint", ambientScale() * glm::mix(glm::vec3(1.0f), kGoldenShade, haze() * (1.0f - night())));
+    shader.set("uNight", night());
     const float t = glm::smoothstep(highAltitudeStart, highAltitudeEnd, cameraHeight);
     shader.set("uFogDensity", fogDensity * glm::mix(1.0f, highAltitudeFogScale, t));
     shader.set("uFogFalloff", 1.0f / fogScaleHeight);

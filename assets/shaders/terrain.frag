@@ -16,7 +16,8 @@ uniform vec3 uLightDir;   // towards the sun, or the moon at night
 uniform vec3 uLightColour;
 uniform samplerCube uSkyCube;
 uniform vec3 uIrradianceSH[9];
-uniform float uAmbientScale;
+uniform vec3 uAmbientTint; // scale on sky light, cooler at golden hour
+uniform float uNight; // 0 by day, 1 at full night
 uniform float uFogDensity;
 uniform float uFogFalloff;
 uniform float uExaggeration;
@@ -190,13 +191,21 @@ vec3 materialAverage(float layer)
 // Diffuse sky light from order-2 SH (coefficients pre-convolved and divided by pi on the CPU).
 vec3 skyAmbient(vec3 n)
 {
-    return uAmbientScale * max(uIrradianceSH[0] * 0.282095
+    return uAmbientTint * max(uIrradianceSH[0] * 0.282095
              + uIrradianceSH[1] * 0.488603 * n.y + uIrradianceSH[2] * 0.488603 * n.z
              + uIrradianceSH[3] * 0.488603 * n.x
              + uIrradianceSH[4] * 1.092548 * n.x * n.y + uIrradianceSH[5] * 1.092548 * n.y * n.z
              + uIrradianceSH[6] * 0.315392 * (3.0 * n.z * n.z - 1.0)
              + uIrradianceSH[7] * 1.092548 * n.x * n.z
              + uIrradianceSH[8] * 0.546274 * (n.x * n.x - n.y * n.y), vec3(0.0));
+}
+
+// Night vision: as the light fails, colours fade and shift towards blue (the Purkinje effect),
+// so moonlit land reads blue-grey rather than green.
+vec3 nightVision(vec3 c)
+{
+    float luminance = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    return mix(c, luminance * vec3(0.70, 0.86, 1.25), 0.85 * uNight);
 }
 
 // Fog colour is the sky behind the fragment, so distant terrain and sea meet the skybox exactly.
@@ -252,9 +261,10 @@ void main()
     float sand = 1.0 - smoothstep(0.4 * sandTop, sandTop, metres);
     sand *= 1.0 - smoothstep(0.05, 0.15, slope);
 
-    // Heath follows slope and patch noise; height only nudges it, so summits get heath/grass mixes.
-    float heathScore = 2.2 * slope + 0.8 * (patches - 0.5) + 0.3 * (broad - 0.5) +
-                       0.7 * smoothstep(150.0, 450.0, metres);
+    // Heath follows slope and patch noise; height nudges it, so summits get heath/grass mixes and
+    // gentle lower slopes stay green.
+    float heathScore = 1.8 * slope + 0.8 * (patches - 0.5) + 0.3 * (broad - 0.5) +
+                       0.8 * smoothstep(150.0, 500.0, metres) - 0.04;
     float heath = smoothstep(0.35, 0.65, heathScore);
 
     // Rock only on steep faces.
@@ -339,7 +349,7 @@ void main()
         float far = dot(vRelPos, uViewForward) > uCascadeStart.w ? horizonVisibility() : 1.0;
         diffuse *= shadowVisibility(vRelPos, n, max(dot(n, uLightDir), 0.0), far);
     }
-    vec3 colour = albedo * (skyAmbient(shadingNormal) + uLightColour * diffuse);
+    vec3 colour = nightVision(albedo * (skyAmbient(shadingNormal) + uLightColour * diffuse));
 
     colour = mix(colour, fogColour(vRelPos), fog);
     fragColour = vec4(linearToSrgb(toneMap(colour)), 1.0);

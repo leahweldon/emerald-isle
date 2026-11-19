@@ -6,7 +6,7 @@ A real-time terrain renderer of Ireland, written in C++17 and modern shader-base
 
 > **Work in progress.** This is a ground-up rebuild of my Year 4 Computer Graphics final project at Trinity College Dublin, *Toward a Futuristic Emerald Isle*. The original used legacy fixed-function OpenGL; this version is built on a programmable pipeline, runs on macOS, Windows and Linux, and implements the features the original only approximated.
 
-![MacGillycuddy's Reeks, Kerry, from the east, with blended materials, sky lighting and height fog: the renderer at milestone 5](docs/images/hero.png)
+![Golden hour over the procedural archipelago: low sun on the ridges, long shadows across the valleys and cool blue shade (--view ridges --time 21:00)](docs/images/milestone-06.png)
 
 ## Roadmap
 
@@ -23,11 +23,9 @@ A real-time terrain renderer of Ireland, written in C++17 and modern shader-base
 
 ## Screenshots
 
-The milestone 6 images are reproducible with `--view <name> --screenshot <file>` plus the options shown. Earlier images show the renderer as it was at that milestone; lighting has changed since, so they no longer reproduce exactly.
+The image at the top is milestone 6 at golden hour. Milestone 6 images are reproducible with `--view <name> --screenshot <file>` plus the options shown (rendered at 2560 × 1440 and downscaled). Earlier images show the renderer as it was at that milestone; lighting has changed since, so they no longer reproduce exactly.
 
-![Milestone 6, shadows and day/night: golden hour over the procedural archipelago, with long shadows across the valleys (--view ridges --time 20:30)](docs/images/milestone-06.png)
-
-![Milestone 6, shadows and day/night: midsummer night over Kerry, with the full moon low in the south and stars (--view kerry-south --time 01:30)](docs/images/milestone-06-night.png)
+![Milestone 6, shadows and day/night: midsummer night over Kerry, with the full moon low in the south, stars and blue-grey moonlit land (--view kerry-south --time 01:30)](docs/images/milestone-06-night.png)
 
 ![Milestone 5, infinite world: procedural archipelago about 1,000 km west of Ireland, streamed around the camera](docs/images/milestone-05.png)
 
@@ -54,7 +52,7 @@ flowchart LR
 
 ## How light and shadow work
 
-- **Sun and moon:** the sun's position comes from the NOAA solar equations for a local clock time and date at 53.4° N, 8° W, with Irish summer time and refraction, so sunrise directions, sunset times and the noon height are right (60° at midsummer, 13° at midwinter). Its colour and strength come from the same Rayleigh, Mie and ozone model as the sky, so a low sun is warm and dim. The moon is always full, opposite the sun, and takes over as the light once the sun has set; stars turn about the celestial pole and fade in with the dark, and the sky keeps a dark blue floor of airglow, so night is never black.
+- **Sun and moon:** the sun's position comes from the NOAA solar equations for a local clock time and date at 53.4° N, 8° W, with Irish summer time and refraction, so sunrise directions, sunset times and the noon height are right (60° at midsummer, 13° at midwinter). Its colour and strength come from the same Rayleigh, Mie and ozone model as the sky, so a low sun is warm and dim. As the sun drops below 30°, the air takes on an evening haze (denser, reddening aerosol) that gives a warm glow towards the sun, and the low sun's light is saturated and lifted while the sky light in shade is cooled, so golden hour has warm slopes against blue shade; noon is unaffected. The moon is always full, opposite the sun, and takes over as the light once the sun has set; stars turn about the celestial pole and fade in with the dark, and the sky keeps a dark blue floor of airglow, so night is never black. At night, colours fade and shift towards blue as the eye's rods take over (the Purkinje effect), so moonlit land reads blue-grey.
 - **Sky:** the sky is rendered into a cubemap, which also gives the ambient light (spherical harmonics) and the fog colour. While the sun moves, a second cubemap is rendered one face per frame and its small mip is read back asynchronously for the ambient light, then both are swapped in together, so the sky never causes a frame spike.
 - **Cascaded shadow maps:** four 2048² cascades cover the view from about half the camera's height above the ground out to ten times that height (30–150 km). Each cascade is fitted to the bounding sphere of its slice of the view and snapped to whole texels in world space, so shadows do not shimmer as the camera moves or turns. The depth pass reuses the CDLOD node selection, culled to each cascade and coarser in the outer ones, and clamps casters between a cascade and the sun onto its near plane. Receivers use a 3 × 3 hardware-filtered PCF, a normal offset that grows as the light grazes the surface, and a slope-scaled depth bias, and neighbouring cascades are cross-faded. Shadows dim only direct light, so the sky still lights the shade; they fall on the sea too.
 - **Distant shadows:** beyond the last cascade, each terrain tile (4 km nodes and coarser) carries a horizon map, made on the worker thread when the tile is generated: for every other grid point, the elevation of the horizon in eight compass directions, found by marching outwards over the tile and over a coarser grid of heights reaching two node widths beyond it. The shader interpolates the horizon angle at the light's bearing and compares it with the light's elevation, and the last cascade fades into it. This costs two texture fetches per pixel, about 2 ms more work per coarse tile on the worker and nothing measurable on the GPU; ray-marching the height texture towards the sun would need a dozen or more fetches per pixel every frame and could not see casters past the edge of the node's own tile. The sea gets cascade shadows only; beyond them the haze dominates.

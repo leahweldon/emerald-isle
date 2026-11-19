@@ -13,6 +13,7 @@ uniform vec3 uSunDir;              // towards the sun, normalised
 uniform vec3 uMoonDir;             // towards the moon, normalised
 uniform float uMoonIntensity;      // moonlight relative to sunlight; 0 by day
 uniform vec3 uNightSky;            // airglow and starlight, before exposure
+uniform float uHaze;               // evening haze, 0 to 1 (see Atmosphere::haze)
 uniform float uExposure;           // scales radiance into display range
 uniform bool uEncodeSrgb;          // true when drawing to the screen
 
@@ -22,6 +23,8 @@ const float kAtmosphereRadius = 6420e3;
 const float kObserverHeight = 200.0;
 const vec3 kBetaRayleigh = vec3(5.8e-6, 13.5e-6, 33.1e-6);
 const float kBetaMie = 3e-6;
+// Evening aerosol: denser, and scattering short wavelengths more (Angstrom exponent ~1.3).
+const vec3 kBetaMieHazy = 2e-5 * vec3(0.76, 1.0, 1.34);
 // Ozone absorbs orange/red along long paths. It sits in a layer around 25 km, which the grazing
 // light of twilight crosses, so the sky stays blue after sunset.
 const vec3 kBetaOzone = vec3(0.650e-6, 1.881e-6, 0.085e-6);
@@ -61,9 +64,11 @@ vec3 densities(float h)
                 max(1.0 - abs(h - kOzoneCentre) / kOzoneHalfWidth, 0.0));
 }
 
+vec3 gBetaMie; // set in main() from uHaze
+
 vec3 extinction(vec3 depth)
 {
-    return exp(-(kBetaRayleigh * depth.x + kBetaMie * 1.1 * depth.y + kBetaOzone * depth.z));
+    return exp(-(kBetaRayleigh * depth.x + gBetaMie * 1.1 * depth.y + kBetaOzone * depth.z));
 }
 
 // Optical depth from p to the top of the atmosphere towards dir; false where the planet blocks it.
@@ -108,6 +113,12 @@ void main()
 
     vec3 origin = vec3(0.0, kEarthRadius + kObserverHeight, 0.0);
     float step_ = raySphereFar(origin, dir, kAtmosphereRadius) / float(kViewSamples);
+    gBetaMie = mix(vec3(kBetaMie), kBetaMieHazy, uHaze);
+    // With a low sun, single scattering strips the blue from long near-horizontal paths and the
+    // horizon turns green; multiple scattering would refill it. The Rayleigh (blue sky) light is
+    // attenuated along a shortened view path instead. The Mie glow towards the sun keeps its
+    // full path, so it stays warm.
+    float rayleighView = mix(1.0, 0.5, uHaze);
     bool moonUp = uMoonIntensity > 0.0;
 
     // In-scattered Rayleigh and Mie light from the sun and the moon.
@@ -119,21 +130,19 @@ void main()
         depth += d;
         vec3 toLight;
         if (lightDepth(p, uSunDir, toLight)) {
-            vec3 attenuation = extinction(depth + toLight);
-            sunR += attenuation * d.x;
-            sunM += attenuation * d.y;
+            sunR += extinction(depth * rayleighView + toLight) * d.x;
+            sunM += extinction(depth + toLight) * d.y;
         }
         if (moonUp && lightDepth(p, uMoonDir, toLight)) {
-            vec3 attenuation = extinction(depth + toLight);
-            moonR += attenuation * d.x;
-            moonM += attenuation * d.y;
+            moonR += extinction(depth * rayleighView + toLight) * d.x;
+            moonM += extinction(depth + toLight) * d.y;
         }
     }
     vec2 sunPhase = phases(dot(dir, uSunDir));
     vec2 moonPhase = phases(dot(dir, uMoonDir));
-    vec3 colour = kSunIntensity * (sunR * kBetaRayleigh * sunPhase.x + sunM * kBetaMie * sunPhase.y);
+    vec3 colour = kSunIntensity * (sunR * kBetaRayleigh * sunPhase.x + sunM * gBetaMie * sunPhase.y);
     colour += kSunIntensity * uMoonIntensity *
-              (moonR * kBetaRayleigh * moonPhase.x + moonM * kBetaMie * moonPhase.y);
+              (moonR * kBetaRayleigh * moonPhase.x + moonM * gBetaMie * moonPhase.y);
 
     // Soft halo around the sun, wide enough to survive the cubemap resolution.
     vec3 transmittance = extinction(depth);

@@ -11,8 +11,9 @@ class Shader;
 glm::vec3 sunDirection(float bearingDegrees, float elevationDegrees);
 
 // Fraction of sunlight reaching sea level along sunDir, from the same Rayleigh + Mie model as
-// sky.frag. Gives the low sun its warm colour, and fades to zero as the sun sets.
-glm::vec3 sunTransmittance(const glm::vec3& sunDir);
+// sky.frag, with haze from Atmosphere::haze(). Gives the low sun its warm colour, and fades to
+// zero as the sun sets.
+glm::vec3 sunTransmittance(const glm::vec3& sunDir, float haze);
 
 // Sun, moon and sky parameters shared by every pass, so the visible sun matches the lighting.
 // Ambient light and fog colour come from the sky cubemap (see Sky).
@@ -26,11 +27,14 @@ struct Atmosphere {
     glm::vec3 moonDir() const { return -sunDir; }
     // 0 by day, 1 from the end of civil twilight (sun 7 degrees down).
     float night() const;
+    // Evening haze, 0 with the sun above 30 degrees and 1 below 12: denser, reddening aerosol for
+    // a warm low sun and horizon glow, while noon keeps its clear air.
+    float haze() const;
     // The light that shades and casts shadows: the sun, or the moon once the sun has set.
     glm::vec3 lightDir() const;
     glm::vec3 lightColour() const;
-    // Scale on the sky's diffuse light: half while the sun is well up, so sunlit ground stands
-    // out from shade, rising to full as it sets (as the eye adapts to the sky).
+    // Scale on the sky's diffuse light: half while the sun is up, so sunlit ground stands out from
+    // shade even at golden hour, rising to full as it sets (as the eye adapts to the sky).
     float ambientScale() const;
     // Moonlight relative to sunlight in the sky model, and the airglow floor (before exposure).
     float moonSkyIntensity() const;
@@ -44,7 +48,8 @@ struct Atmosphere {
     float highAltitudeStart = 5000.0f;
     float highAltitudeEnd = 100000.0f;
 
-    // Sets uLightDir, uLightColour, uAmbientScale, uFogDensity and uFogFalloff.
+    // Sets uLightDir, uLightColour, uAmbientTint (scale, cooled at golden hour), uNight,
+    // uFogDensity and uFogFalloff.
     void apply(Shader& shader, float cameraHeight = 0.0f) const;
 };
 
