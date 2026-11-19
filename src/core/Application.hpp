@@ -21,6 +21,7 @@ class Sky;
 class Terrain;
 class HeightField;
 class SeaSurface;
+class SeabedMap;
 class Shader;
 class GpuTimer;
 class ShadowMaps;
@@ -75,6 +76,7 @@ private:
     void updateTime(float deltaSeconds);
     void render();
     void renderShadows(const glm::mat4& projection);
+    void renderSeabed();
     void updateTitle();
     void recordFrameStats(float frameMs, float cpuMs);
     void printRunStats() const;
@@ -99,6 +101,7 @@ private:
     std::unique_ptr<Shader> m_seaShader;
     std::unique_ptr<Shader> m_shadowShader;
     std::unique_ptr<ShadowMaps> m_shadows;
+    std::unique_ptr<SeabedMap> m_seabed;
     std::unique_ptr<GpuTimer> m_gpuTimer;
     std::unique_ptr<OffscreenTarget> m_offscreen; // --headless only
     Camera m_camera;

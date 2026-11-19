@@ -22,6 +22,10 @@ uniform sampler2DArray uRipples; // two tileable ripple normal maps (see SeaSurf
 uniform vec2 uRippleTile;        // metres per repeat of each map
 uniform vec2 uRippleOffset[2];   // wind drift, wrapped to each tile
 uniform float uRippleStrength;   // with the wind speed
+uniform sampler2DArray uSeabed;  // ground height under the sea, near and wide (see SeabedMap)
+uniform vec4 uSeabedArea[2];     // x, z offset from the camera, 1 / half size
+uniform float uSeabedRange;      // height at depth 0, world units
+uniform float uExaggeration;
 
 #include "shadow.glsl"
 
@@ -30,6 +34,12 @@ const vec3 kSea     = vec3(0.004, 0.055, 0.085);
 const vec3 kShallow = vec3(0.020, 0.160, 0.150); // matches terrain.frag
 const float kWaterF0 = 0.02;      // reflectance looking straight down (index of refraction 1.33)
 const float kGlintRoughness = 0.04; // GGX alpha of a single ripple facet: a tight sun glint
+// Shallow water lets the bright seabed through: turquoise fading to the open-sea colour with depth.
+const vec3 kTurquoise = vec3(0.030, 0.260, 0.230);
+const float kClarity = 4.0;       // metres of depth over which the seabed fades out
+const float kFoamDepth = 0.8;     // metres: foam where the water is shallower than this
+const vec3 kFoam = vec3(0.7);     // foam albedo
+const float kFoamCover = 0.7;     // at most this much of the surface is foam
 
 // Lighting is linear; the default framebuffer expects sRGB.
 // Display transform shared by every pass that writes to the screen: linear below 0.8, then a
@@ -101,6 +111,19 @@ vec3 rippleNormal(vec3 waveNormal, out float slopeVariance)
                           waveNormal.z + slope.y * waveNormal.y));
 }
 
+// Depth of water in metres, from the nearer seabed layer that covers this point; -1 if neither.
+float waterDepth()
+{
+    for (int i = 0; i < 2; ++i) {
+        vec2 uv = (vRelPos.xz + uSeabedArea[i].xy) * uSeabedArea[i].z * 0.5 + 0.5;
+        if (all(greaterThan(uv, vec2(0.01))) && all(lessThan(uv, vec2(0.99)))) {
+            float height = (0.5 - texture(uSeabed, vec3(uv, float(i))).r) * 2.0 * uSeabedRange;
+            return max(-height, 0.0) / uExaggeration;
+        }
+    }
+    return -1.0;
+}
+
 float schlick(float cosine)
 {
     return kWaterF0 + (1.0 - kWaterF0) * pow(1.0 - clamp(cosine, 0.0, 1.0), 5.0);
@@ -128,14 +151,27 @@ void main()
     // Seen edge-on, a ripple can face away from the camera; keep the shading normal visible.
     n = normalize(n + vec3(0.0, max(0.05 - dot(n, v), 0.0), 0.0));
 
-    // Shallower-looking water near land: distance to the coast stands in for depth offshore.
+    // Shallower-looking water near land: around Ireland the blurred coast mask tints kilometres
+    // of coastal water, then the seabed depth adds clear turquoise shallows and foam at the shore.
     float coast = texture(uCoastMask, vWorldXZ / uTerrainSize + 0.5).r;
     vec3 water = mix(kSea, kShallow, smoothstep(0.02, 0.5, coast));
+    float depth = waterDepth();
+    float foam = 0.0;
+    if (depth >= 0.0) {
+        water = mix(water, kTurquoise, exp(-depth / kClarity));
+        // Broken by the ripples, so the foam line is lacy rather than a solid band. Far away the
+        // lace averages out, so the line thins to a faint edge instead of a white stripe.
+        float lace = texture(uRipples, vec3(vWaveXZ / uRippleTile.y, 1.0)).r;
+        float distanceFade = mix(1.0, 0.3, smoothstep(3e3, 25e3, length(vRelPos)));
+        foam = kFoamCover * distanceFade * smoothstep(kFoamDepth, 0.1, depth) *
+               smoothstep(0.4, 0.65, lace + 0.3 * (1.0 - depth / kFoamDepth));
+    }
 
     // Terrain shadows on the water (headlands over bays) dim the direct light and its glint.
     float diffuse = max(dot(n, uLightDir), 0.0);
     float visibility = uLightDir.y > 0.0 ? shadowVisibility(vRelPos, vec3(0.0, 1.0, 0.0), uLightDir.y, 1.0) : 0.0;
-    vec3 body = water * (skyAmbient(n) + uLightColour * diffuse * visibility);
+    vec3 lightOnSurface = skyAmbient(n) + uLightColour * diffuse * visibility;
+    vec3 body = water * lightOnSurface;
 
     // Mirror reflection of the sky, weighted by Fresnel: mostly water colour looking down, mostly
     // sky at grazing angles, so the far sea runs into the horizon.
@@ -145,7 +181,8 @@ void main()
     float fresnel = schlick(dot(n, v));
     float alpha = sqrt(kGlintRoughness * kGlintRoughness + slopeVariance);
     vec3 glint = uLightColour * visibility * ggxSpecular(n, v, uLightDir, alpha);
-    vec3 colour = nightVision(mix(body, reflection, fresnel) + glint);
+    vec3 colour = mix(mix(body, reflection, fresnel) + glint, kFoam * lightOnSurface, foam);
+    colour = nightVision(colour);
 
     // Same fog as terrain.frag.
     // Ramp fog to exactly 1 at the plane's edge, so the sea reaches the sky's horizon colour

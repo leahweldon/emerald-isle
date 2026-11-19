@@ -5,6 +5,7 @@
 #include "render/OffscreenTarget.hpp"
 #include "render/Shader.hpp"
 #include "render/SeaSurface.hpp"
+#include "render/SeabedMap.hpp"
 #include "render/ShadowMaps.hpp"
 #include "render/Sky.hpp"
 #include "render/Terrain.hpp"
@@ -46,6 +47,7 @@ constexpr GLuint kSkyUnit = 4;
 constexpr GLuint kShadowUnit = 5;
 constexpr GLuint kHorizonUnit = 6;
 constexpr GLuint kRippleUnit = 7;
+constexpr GLuint kSeabedUnit = 8;
 
 // MSVC deprecates fopen (C4996, an error with warnings as errors); fopen_s is its replacement.
 std::FILE* openForWriting(const std::string& path)
@@ -263,6 +265,7 @@ Application::Application(AppOptions options)
     m_shadowShader = std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "shadow.frag",
                                               "#define SHADOW_PASS\n");
     m_shadows = std::make_unique<ShadowMaps>();
+    m_seabed = std::make_unique<SeabedMap>();
     if (m_options.gpuTiming) {
         m_gpuTimer = std::make_unique<GpuTimer>();
     }
@@ -502,6 +505,7 @@ void Application::render()
     const glm::mat4 rotationOnly(glm::mat3(m_camera.view()));
     m_terrain->update(m_camera.position, projection * m_camera.view());
     renderShadows(projection);
+    renderSeabed();
 
     m_terrainShader->use();
     setSceneUniforms(*m_terrainShader);
@@ -518,6 +522,8 @@ void Application::render()
     // Screenshots freeze the waves, so they are reproducible.
     const double waveTime = m_options.screenshotPath.empty() ? m_timer.elapsedSeconds() : 0.0;
     m_sea->apply(*m_seaShader, m_camera.position, waveTime, kRippleUnit);
+    m_seabed->apply(*m_seaShader, kSeabedUnit);
+    m_seaShader->set("uExaggeration", m_heightField->verticalExaggeration());
     m_shadows->apply(*m_seaShader, kShadowUnit);
     m_terrain->bindCoastMask(kCoastUnit);
     m_sky->applyEnvironment(*m_seaShader, kSkyUnit);
@@ -567,6 +573,20 @@ void Application::renderShadows(const glm::mat4& projection)
         ++m_shadowFrames;
         m_shadowCasterFrames += m_terrain->stats().shadowDrawCalls > 0 ? 1 : 0;
     }
+}
+
+void Application::renderSeabed()
+{
+    m_seabed->update(m_camera.position);
+    m_shadowShader->use();
+    m_shadowShader->set("uCameraHeight", static_cast<float>(m_camera.position.y));
+    for (int layer = 0; layer < SeabedMap::kLayers; ++layer) {
+        m_seabed->begin(layer);
+        m_shadowShader->set("uShadowViewProj", m_seabed->viewProjection(layer));
+        m_terrain->drawShadowCasters(*m_shadowShader, kHeightUnit, m_seabed->viewProjection(layer),
+                                     SeabedMap::lodScale(layer));
+    }
+    m_seabed->end();
 }
 
 void Application::setSceneUniforms(Shader& shader)
