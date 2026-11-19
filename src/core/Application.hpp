@@ -42,6 +42,10 @@ struct AppOptions {
     int dayOfYear = 172; // 21 June
     double timeMinutes = 18.0 * 60.0;
     bool timeRunning = true;
+    // Exposure offset in stops (EV) on top of the default, for the final tone mapping.
+    float exposureEv = 0.0f;
+    // Final tone curve: false for Khronos PBR Neutral, true for AgX.
+    bool agx = false;
     // --sun-bearing or --sun-elevation fix the sun in place of the time of day (degrees).
     bool fixedSun = false;
     float sunBearing = 225.0f;
@@ -79,6 +83,8 @@ private:
     void renderShadows(const glm::mat4& projection);
     void renderSeabed();
     void renderReflection(const glm::mat4& projection);
+    // Resolves the HDR scene and tone maps it into the window (or the headless target).
+    void toneMap();
     void setTerrainUniforms(Shader& shader);
     void updateTitle();
     void recordFrameStats(float frameMs, float cpuMs);
@@ -108,7 +114,10 @@ private:
     std::unique_ptr<Shader> m_reflectionShader;
     std::unique_ptr<ReflectionTarget> m_reflection;
     std::unique_ptr<GpuTimer> m_gpuTimer;
-    std::unique_ptr<OffscreenTarget> m_offscreen; // --headless only
+    std::unique_ptr<OffscreenTarget> m_offscreen; // --headless only: the final image
+    std::unique_ptr<OffscreenTarget> m_scene;     // linear HDR, multisampled
+    std::unique_ptr<Shader> m_toneMapShader;
+    unsigned m_fullscreenVao = 0; // GL vertex array name
     Camera m_camera;
     std::unique_ptr<CameraController> m_controller;
     Atmosphere m_atmosphere;

@@ -18,21 +18,6 @@ const float kMoonAngularRadius = 0.008; // drawn larger than the real 0.0045, as
 const float kStarCells = 150.0;          // star grid cells per unit of direction
 const float kStarDensity = 0.035;        // fraction of cells holding a star
 
-// Display transform shared by every pass that writes to the screen: linear below 0.8, then a
-// smooth shoulder to 1 so the bright sky around the sun compresses instead of clipping.
-vec3 toneMap(vec3 c)
-{
-    const float knee = 0.8;
-    vec3 over = max(c - knee, 0.0);
-    return min(c, vec3(knee)) + (1.0 - knee) * (1.0 - exp(-over / (1.0 - knee)));
-}
-
-vec3 linearToSrgb(vec3 c)
-{
-    c = max(c, vec3(0.0));
-    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
-}
-
 vec3 hash3(vec3 p)
 {
     p = fract(p * vec3(0.1031, 0.1030, 0.0973));
@@ -90,5 +75,5 @@ void main()
         colour += uMoonDiscColour * ((1.0 - maria) * disc + halo);
     }
 
-    fragColour = vec4(linearToSrgb(toneMap(colour)), 1.0);
+    fragColour = vec4(colour, 1.0); // linear HDR, tone mapped in tonemap.frag
 }

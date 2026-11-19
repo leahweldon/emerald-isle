@@ -13,8 +13,8 @@ struct WindowConfig {
     int height = 720;
     std::string title = "Emerald Isle";
     bool vsync = true;
-    int samples = 4; // MSAA samples, for the default framebuffer or the headless target
-    // Hidden window that never takes focus; the app renders into an OffscreenTarget instead.
+    int samples = 4; // MSAA samples of the HDR scene target
+    // Hidden window that never takes focus; the final image goes to an OffscreenTarget instead.
     // The framebuffer size is then width x height exactly, with no HiDPI scaling.
     bool headless = false;
 };

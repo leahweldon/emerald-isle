@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -50,6 +51,18 @@ constexpr GLuint kHorizonUnit = 6;
 constexpr GLuint kRippleUnit = 7;
 constexpr GLuint kSeabedUnit = 8;
 constexpr GLuint kReflectionUnit = 9;
+constexpr GLuint kSceneUnit = 10;
+// Packed floats, 32 bits a pixel like RGBA8: unclamped HDR with ~6-bit mantissas, which the
+// tone mapping and dither cannot tell from RGBA16F (at most 3/255 apart, no banding), at a
+// quarter of its frame cost with 4x MSAA (0.1-0.3 ms against 1 ms of GPU time at 2560 x 1440).
+constexpr GLenum kSceneFormat = GL_R11F_G11F_B10F;
+// Linear scale before each tone curve at --exposure 0, fitted so noon terrain, sea and sky match
+// the earlier display transform (linear up to 0.8) as closely as the curve allows.
+constexpr float kNeutralExposure = 1.18f;
+constexpr float kAgxExposure = 1.16f;
+// Eye adaptation: stops of extra exposure at full night (with Atmosphere::night()), so moonlit
+// land stays readable through the tone curve's toe.
+constexpr float kNightAdaptationEv = 1.0f;
 // The reflection is rendered at this fraction of the screen size, and with this level-of-detail
 // scale (< 1 is coarser): rippled and seen at grazing angles, it does not need more.
 constexpr int kReflectionDivisor = 2;
@@ -96,6 +109,8 @@ void printUsage(const char* program)
         "  --seed <n>            Procedural world seed (default 1)\n"
         "  --autofly <s>         Fly straight ahead for s seconds, print stats, exit\n"
         "  --frame-log <file>    Write per-frame phase timings (CSV)\n"
+        "  --exposure <ev>       Exposure offset in stops (default 0)\n"
+        "  --tone-mapper <name>  neutral (default, Khronos PBR Neutral) or agx\n"
         "  --gpu-timing          Also measure GPU time per frame (adds ~0.4 ms on macOS)\n"
         "  --validate <tiles>    Check for GL errors and terrain holes, require at least this many\n"
         "                        tiles generated and resident, exit non-zero on failure\n"
@@ -210,6 +225,14 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.fixedSun = true;
         } else if (std::strcmp(arg, "--validate") == 0 && hasValue) {
             options.validateMinTiles = parsePositive(arg, argv[++i]);
+        } else if (std::strcmp(arg, "--exposure") == 0 && hasValue) {
+            options.exposureEv = parseFloat(arg, argv[++i], -10.0f, 10.0f);
+        } else if (std::strcmp(arg, "--tone-mapper") == 0 && hasValue) {
+            const std::string name = argv[++i];
+            if (name != "neutral" && name != "agx") {
+                throw std::invalid_argument("Invalid value for --tone-mapper: " + name + " (neutral or agx)");
+            }
+            options.agx = name == "agx";
         } else if (std::strcmp(arg, "--gpu-timing") == 0) {
             options.gpuTiming = true;
         } else if (std::strcmp(arg, "--frame-log") == 0 && hasValue) {
@@ -253,9 +276,9 @@ Application::Application(AppOptions options)
     , m_time(m_options.dayOfYear, m_options.timeMinutes, m_options.timeRunning)
 {
     if (m_options.window.headless) {
+        // The final image only: multisampling happens in the scene target.
         m_offscreen = std::make_unique<OffscreenTarget>(m_window.framebufferWidth(),
-                                                        m_window.framebufferHeight(),
-                                                        m_options.window.samples);
+                                                        m_window.framebufferHeight(), 0);
     } else {
         glViewport(0, 0, m_window.framebufferWidth(), m_window.framebufferHeight());
     }
@@ -265,6 +288,8 @@ Application::Application(AppOptions options)
 
     const std::filesystem::path shaderDir = m_options.assetDir / "shaders";
     m_sky = std::make_unique<Sky>(shaderDir);
+    m_toneMapShader = std::make_unique<Shader>(shaderDir / "fullscreen.vert", shaderDir / "tonemap.frag");
+    glGenVertexArrays(1, &m_fullscreenVao); // the full-screen triangle comes from gl_VertexID
     m_terrainShader =
         std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "terrain.frag");
     m_seaShader = std::make_unique<Shader>(shaderDir / "sea.vert", shaderDir / "sea.frag");
@@ -367,6 +392,7 @@ void Application::warmUp()
 
 Application::~Application()
 {
+    glDeleteVertexArrays(1, &m_fullscreenVao);
     flushFrameLog(true);
     if (m_frameLog) {
         std::fclose(m_frameLog);
@@ -506,6 +532,14 @@ void Application::updateTime(float deltaSeconds)
 
 void Application::render()
 {
+    // The scene goes into a linear HDR target that follows the drawable size.
+    const int width = m_window.framebufferWidth();
+    const int height = m_window.framebufferHeight();
+    if (!m_scene || m_scene->width() != width || m_scene->height() != height) {
+        m_scene = std::make_unique<OffscreenTarget>(width, height, m_options.window.samples, kSceneFormat);
+    }
+    m_scene->bind();
+
     // Refreshes the sky one cubemap face per frame while the sun moves.
     m_sky->update(m_atmosphere);
 
@@ -547,10 +581,30 @@ void Application::render()
     m_sky->drawBackground(glm::inverse(projection * rotationOnly), m_atmosphere,
                           m_camera.fovY / static_cast<float>(m_window.framebufferHeight()));
 
-    // Stands in for the resolve a multisampled default framebuffer does on swap.
+    toneMap();
+}
+
+void Application::toneMap()
+{
+    m_scene->resolve();
     if (m_offscreen) {
-        m_offscreen->resolve();
+        m_offscreen->bind();
+    } else {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, m_window.framebufferWidth(), m_window.framebufferHeight());
     }
+    glDisable(GL_DEPTH_TEST);
+    m_toneMapShader->use();
+    m_scene->bindTexture(kSceneUnit);
+    m_toneMapShader->set("uScene", static_cast<int>(kSceneUnit));
+    const float base = m_options.agx ? kAgxExposure : kNeutralExposure;
+    const float ev = m_options.exposureEv + kNightAdaptationEv * m_atmosphere.night();
+    m_toneMapShader->set("uExposure", base * std::exp2(ev));
+    m_toneMapShader->set("uToneMapper", m_options.agx ? 1 : 0);
+    glBindVertexArray(m_fullscreenVao);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+    glEnable(GL_DEPTH_TEST);
 }
 
 void Application::renderShadows(const glm::mat4& projection)

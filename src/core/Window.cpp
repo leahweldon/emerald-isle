@@ -34,14 +34,13 @@ Window::Window(const WindowConfig& config)
     // macOS only exposes core profiles through a forward-compatible context.
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 #endif
+    // The scene is drawn (multisampled) into an HDR target and only the tone-mapped image reaches
+    // the default framebuffer, so it needs neither MSAA nor depth.
+    glfwWindowHint(GLFW_SAMPLES, 0);
+    glfwWindowHint(GLFW_DEPTH_BITS, 0);
     if (config.headless) {
-        // The default framebuffer is never shown, so it needs no MSAA or depth.
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
         glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
-        glfwWindowHint(GLFW_SAMPLES, 0);
-        glfwWindowHint(GLFW_DEPTH_BITS, 0);
-    } else {
-        glfwWindowHint(GLFW_SAMPLES, config.samples);
     }
 
     m_handle = glfwCreateWindow(config.width, config.height, config.title.c_str(), nullptr, nullptr);
