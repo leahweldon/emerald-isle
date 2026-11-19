@@ -22,6 +22,7 @@ uniform sampler2DArray uRipples; // two tileable ripple normal maps (see SeaSurf
 uniform vec2 uRippleTile;        // metres per repeat of each map
 uniform vec2 uRippleOffset[2];   // wind drift, wrapped to each tile
 uniform float uRippleStrength;   // with the wind speed
+uniform float uWindSpeed;        // metres per second
 uniform sampler2DArray uSeabed;  // ground height under the sea, near and wide (see SeabedMap)
 uniform vec4 uSeabedArea[2];     // x, z offset from the camera, 1 / half size
 uniform float uSeabedRange;      // height at depth 0, world units
@@ -186,7 +187,11 @@ void main()
     vec4 mirrored = texture(uReflection, clamp(screen, vec2(0.0), vec2(1.0)));
     reflection = mix(reflection, mirrored.rgb, mirrored.a);
     float fresnel = schlick(dot(n, v));
-    float alpha = sqrt(kGlintRoughness * kGlintRoughness + slopeVariance);
+    // Waves too small for the ripple maps still tilt the surface (Cox and Munk: slope variance
+    // 0.003 + 0.00512 per m/s of wind). They count once the ripples stop being resolved, which
+    // widens the distant glint into a glitter path.
+    float unresolved = (0.003 + 0.00512 * uWindSpeed) * smoothstep(50.0, 3000.0, length(vRelPos));
+    float alpha = sqrt(kGlintRoughness * kGlintRoughness + max(slopeVariance, unresolved));
     vec3 glint = uLightColour * visibility * ggxSpecular(n, v, uLightDir, alpha);
     vec3 colour = mix(mix(body, reflection, fresnel) + glint, kFoam * lightOnSurface, foam);
     colour = nightVision(colour);

@@ -123,6 +123,7 @@ void SeaSurface::apply(Shader& shader, const glm::dvec3& cameraPos, double time,
     shader.set("uRipples", static_cast<int>(rippleUnit));
     shader.set("uRippleTile", glm::vec2(static_cast<float>(kRippleTile[0]), static_cast<float>(kRippleTile[1])));
     shader.set("uRippleStrength", m_wind.speed / kReferenceWind);
+    shader.set("uWindSpeed", m_wind.speed);
     for (int i = 0; i < 2; ++i) {
         const double bearing = (static_cast<double>(m_wind.bearing) + kRippleTurn[i]) * kPi / 180.0;
         const double drift = kRippleDrift[i] * static_cast<double>(m_wind.speed) * time;
