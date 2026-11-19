@@ -22,6 +22,10 @@ struct Atmosphere {
     float sunStrength = 1.4f;   // direct light on terrain = sunStrength * sunTransmittance
     float exposure = 1.3f;      // sky radiance scale into display range
     glm::mat3 starRotation{1.0f}; // world directions to the celestial sphere, from the time of day
+    // Weather, both eased over a few seconds by the caller: rain intensity (0 dry, 1 heavy), which
+    // also sets the cloud cover, and how wet the ground is (it dries more slowly than rain stops).
+    float rain = 0.0f;
+    float wetness = 0.0f;
 
     // Always full, opposite the sun: up at night, down by day.
     glm::vec3 moonDir() const { return -sunDir; }
@@ -39,6 +43,10 @@ struct Atmosphere {
     // Moonlight relative to sunlight in the sky model, and the airglow floor (before exposure).
     float moonSkyIntensity() const;
     glm::vec3 nightSky() const;
+    // Cloud cover over the sky, 0 to 1 (full from moderate rain), and the overcast sky's zenith
+    // radiance (before exposure), which follows the sun's height behind the cloud.
+    float overcast() const;
+    glm::vec3 overcastSky() const;
 
     // Height fog: density at sea level (per metre), falling off exponentially with altitude.
     float fogDensity = 1.1e-5f;
@@ -49,7 +57,7 @@ struct Atmosphere {
     float highAltitudeEnd = 100000.0f;
 
     // Sets uLightDir, uLightColour, uAmbientTint (scale, cooled at golden hour), uNight,
-    // uFogDensity and uFogFalloff.
+    // uFogDensity, uFogFalloff, uRain, uOvercast and uWetness.
     void apply(Shader& shader, float cameraHeight = 0.0f) const;
 };
 

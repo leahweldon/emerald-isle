@@ -13,6 +13,8 @@ uniform samplerCube uSkyCube;
 uniform vec3 uIrradianceSH[9];
 uniform vec3 uAmbientTint; // scale on sky light, cooler at golden hour
 uniform float uNight; // 0 by day, 1 at full night
+uniform float uRain;  // 0 dry, 1 heavy rain
+uniform float uOvercast; // cloud cover: no sharp glint once the sun is hidden
 uniform float uFogDensity;
 uniform float uFogFalloff;
 uniform sampler2D uCoastMask;  // blurred land mask, see TerrainMesh::bindCoastMask
@@ -158,6 +160,7 @@ void main()
     // Terrain shadows on the water (headlands over bays) dim the direct light and its glint.
     float diffuse = max(dot(n, uLightDir), 0.0);
     float visibility = uLightDir.y > 0.0 ? shadowVisibility(vRelPos, vec3(0.0, 1.0, 0.0), uLightDir.y, 1.0) : 0.0;
+    visibility = mix(visibility, 1.0, 0.5 * uRain); // cloud softens what direct light is left
     vec3 lightOnSurface = skyAmbient(n) + uLightColour * diffuse * visibility;
     vec3 body = water * lightOnSurface;
 
@@ -176,7 +179,7 @@ void main()
     // widens the distant glint into a glitter path.
     float unresolved = (0.003 + 0.00512 * uWindSpeed) * smoothstep(50.0, 3000.0, length(vRelPos));
     float alpha = sqrt(kGlintRoughness * kGlintRoughness + max(slopeVariance, unresolved));
-    vec3 glint = uLightColour * visibility * ggxSpecular(n, v, uLightDir, alpha);
+    vec3 glint = uLightColour * visibility * ggxSpecular(n, v, uLightDir, alpha) * (1.0 - uOvercast);
     vec3 colour = mix(mix(body, reflection, fresnel) + glint, kFoam * lightOnSurface, foam);
     colour = nightVision(colour);
 

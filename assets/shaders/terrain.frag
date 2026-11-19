@@ -18,6 +18,7 @@ uniform samplerCube uSkyCube;
 uniform vec3 uIrradianceSH[9];
 uniform vec3 uAmbientTint; // scale on sky light, cooler at golden hour
 uniform float uNight; // 0 by day, 1 at full night
+uniform float uRain;  // 0 dry, 1 heavy rain: cloud softens what direct light is left
 uniform float uFogDensity;
 uniform float uFogFalloff;
 uniform float uExaggeration;
@@ -335,7 +336,7 @@ void main()
     float diffuse = max(dot(shadingNormal, uLightDir), 0.0);
     if (diffuse > 0.0) {
         float far = dot(vRelPos, uViewForward) > uCascadeStart.w ? horizonVisibility() : 1.0;
-        diffuse *= shadowVisibility(vRelPos, n, max(dot(n, uLightDir), 0.0), far);
+        diffuse *= mix(shadowVisibility(vRelPos, n, max(dot(n, uLightDir), 0.0), far), 1.0, 0.5 * uRain);
     }
     vec3 colour = nightVision(albedo * (skyAmbient(shadingNormal) + uLightColour * diffuse));
 

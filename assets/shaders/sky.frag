@@ -16,6 +16,8 @@ uniform vec3 uNightSky;            // airglow and starlight, before exposure
 uniform float uHaze;               // evening haze, 0 to 1 (see Atmosphere::haze)
 uniform float uExposure;           // scales radiance into display range
 uniform bool uEncodeSrgb;          // true when drawing to the screen
+uniform float uOvercast;           // cloud cover, 0 to 1
+uniform vec3 uOvercastSky;         // overcast zenith radiance, before exposure
 
 const float PI = 3.14159265;
 const float kEarthRadius = 6360e3;
@@ -157,6 +159,12 @@ void main()
 
     // Airglow and starlight, brighter towards the horizon, so the night sky is never black.
     colour += uNightSky * (1.0 + 0.6 * (1.0 - dir.y));
+
+    // Cloud: a uniform overcast, brightest overhead and a third as bright at the horizon (the CIE
+    // overcast sky), slightly lighter on the sun's side; it hides the clear sky as it thickens.
+    float sunSide = 0.15 * max(dot(dir, uSunDir), 0.0);
+    vec3 cloud = uOvercastSky * ((1.0 + 2.0 * dir.y) / 3.0 + sunSide);
+    colour = mix(colour, cloud, uOvercast);
 
     colour *= uExposure;
     fragColour = vec4(uEncodeSrgb ? linearToSrgb(colour) : colour, 1.0);

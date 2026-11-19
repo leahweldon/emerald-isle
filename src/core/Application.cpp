@@ -66,10 +66,15 @@ constexpr float kAgxExposure = 1.16f;
 // Eye adaptation: stops of extra exposure at full night (with Atmosphere::night()), so moonlit
 // land stays readable through the tone curve's toe.
 constexpr float kNightAdaptationEv = 1.0f;
+// And under full cloud, which is darker than clear sky with the sun out.
+constexpr float kOvercastAdaptationEv = 0.5f;
 // Rain levels for Shift+R, and the time constant of the ease between intensities (seconds).
 constexpr float kLightRain = 0.3f;
 constexpr float kHeavyRain = 1.0f;
 constexpr float kRainEaseSeconds = 1.2f;
+// The ground is soaked by light rain already; it wets over a couple of seconds, dries more slowly.
+constexpr float kWettingSeconds = 2.0f;
+constexpr float kDryingSeconds = 6.0f;
 // Screenshot runs step the rain at this fixed rate, after a warm-up, so captures repeat exactly.
 constexpr float kRainFixedStep = 1.0f / 60.0f;
 constexpr int kRainWarmUpSteps = 90;
@@ -318,6 +323,9 @@ Application::Application(AppOptions options)
         m_rain->enableValidation();
     }
     m_rainTarget = m_rainIntensity = m_options.rain;
+    m_wetness = std::min(m_options.rain / kLightRain, 1.0f);
+    m_atmosphere.rain = m_rainIntensity;
+    m_atmosphere.wetness = m_wetness;
     m_rainLevel = m_options.rain > 0.0f ? m_options.rain : kLightRain;
     if (m_options.gpuTiming) {
         m_gpuTimer = std::make_unique<GpuTimer>();
@@ -544,6 +552,14 @@ void Application::updateWeather(float deltaSeconds)
     if (std::abs(m_rainTarget - m_rainIntensity) < 1e-3f) {
         m_rainIntensity = m_rainTarget;
     }
+    const float wetTarget = std::min(m_rainIntensity / kLightRain, 1.0f);
+    const float wetEase = 1.0f - std::exp(-deltaSeconds / (wetTarget > m_wetness ? kWettingSeconds : kDryingSeconds));
+    m_wetness += (wetTarget - m_wetness) * wetEase;
+    if (std::abs(wetTarget - m_wetness) < 1e-3f) {
+        m_wetness = wetTarget;
+    }
+    m_atmosphere.rain = m_rainIntensity;
+    m_atmosphere.wetness = m_wetness;
 }
 
 void Application::renderRain()
@@ -661,6 +677,7 @@ void Application::render()
         lighting.lightColour = m_atmosphere.lightColour();
         lighting.ambient = m_sky->averageIrradiance();
         lighting.night = m_atmosphere.night();
+        lighting.overcast = m_atmosphere.overcast();
         m_rain->draw(m_camera.view(), projection, glm::vec2(static_cast<float>(width), static_cast<float>(height)),
                      pixelAngle, m_cameraVelocity, lighting);
     }
@@ -682,7 +699,8 @@ void Application::toneMap()
     m_scene->bindTexture(kSceneUnit);
     m_toneMapShader->set("uScene", static_cast<int>(kSceneUnit));
     const float base = m_options.agx ? kAgxExposure : kNeutralExposure;
-    const float ev = m_options.exposureEv + kNightAdaptationEv * m_atmosphere.night();
+    const float ev = m_options.exposureEv + kNightAdaptationEv * m_atmosphere.night() +
+                     kOvercastAdaptationEv * m_atmosphere.overcast() * (1.0f - m_atmosphere.night());
     m_toneMapShader->set("uExposure", base * std::exp2(ev));
     m_toneMapShader->set("uToneMapper", m_options.agx ? 1 : 0);
     glBindVertexArray(m_fullscreenVao);

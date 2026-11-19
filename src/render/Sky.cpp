@@ -66,7 +66,7 @@ constexpr int kShMipLevel = 3;
 // The sky shader's inputs: a refresh starts when any of these change.
 bool sameSky(const Atmosphere& a, const Atmosphere& b)
 {
-    return a.sunDir == b.sunDir && a.exposure == b.exposure; // the moon follows the sun
+    return a.sunDir == b.sunDir && a.exposure == b.exposure && a.rain == b.rain; // the moon follows the sun
 }
 
 } // namespace
@@ -189,6 +189,8 @@ void Sky::renderFace(std::size_t face)
     m_skyShader.set("uHaze", m_rendering.haze());
     m_skyShader.set("uExposure", m_rendering.exposure);
     m_skyShader.set("uEncodeSrgb", 0);
+    m_skyShader.set("uOvercast", m_rendering.overcast());
+    m_skyShader.set("uOvercastSky", m_rendering.overcastSky());
     const glm::mat4 projection = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 10.0f);
     const glm::mat4 view = glm::lookAt(glm::vec3(0.0f), kFaces[face].forward, kFaces[face].up);
     m_skyShader.set("uInvViewProjRotation", glm::inverse(projection * view));
@@ -308,16 +310,18 @@ void Sky::drawBackground(const glm::mat4& invViewProjRotation, const Atmosphere&
     m_skyboxShader.use();
     m_skyboxShader.set("uInvViewProjRotation", invViewProjRotation);
     m_skyboxShader.set("uSunDir", atmosphere.sunDir);
-    m_skyboxShader.set("uSunDiscColour", kSunDiscIntensity * atmosphere.exposure *
+    // Cloud hides the sun, moon and stars as it thickens.
+    const float clear = 1.0f - atmosphere.overcast();
+    m_skyboxShader.set("uSunDiscColour", clear * clear * kSunDiscIntensity * atmosphere.exposure *
                                              sunTransmittance(atmosphere.sunDir, atmosphere.haze()));
     m_skyboxShader.set("uMoonDir", atmosphere.moonDir());
     // Silver-white: the air dims a low moon but its colour is kept close to neutral.
     const glm::vec3 moonAir = sunTransmittance(atmosphere.moonDir(), atmosphere.haze());
     const float moonDim = 0.6f + 0.4f * glm::dot(moonAir, glm::vec3(0.2126f, 0.7152f, 0.0722f));
-    m_skyboxShader.set("uMoonDiscColour", kMoonDiscIntensity * atmosphere.exposure * moonDim *
+    m_skyboxShader.set("uMoonDiscColour", clear * clear * kMoonDiscIntensity * atmosphere.exposure * moonDim *
                                               glm::vec3(0.93f, 0.96f, 1.0f));
     // Stars come out after the sun is 4 degrees down, fully by the end of nautical twilight.
-    m_skyboxShader.set("uStarBrightness", glm::smoothstep(-0.07f, -0.2f, atmosphere.sunDir.y));
+    m_skyboxShader.set("uStarBrightness", clear * glm::smoothstep(-0.07f, -0.2f, atmosphere.sunDir.y));
     m_skyboxShader.set("uStarRotation", atmosphere.starRotation);
     m_skyboxShader.set("uPixelAngle", pixelAngle);
     m_skyboxShader.set("uSkyCube", 0);

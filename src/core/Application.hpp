@@ -132,6 +132,7 @@ private:
     float m_rainTarget = 0.0f;
     float m_rainIntensity = 0.0f;
     float m_rainLevel = 0.0f;
+    float m_wetness = 0.0f;
     float m_deltaSeconds = 0.0f;
     bool m_rainWarmedUp = false; // screenshot runs: rain settled before the frames counted
     glm::dvec3 m_lastCameraPos{0.0};

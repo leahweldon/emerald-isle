@@ -25,6 +25,7 @@ uniform vec3 uLightDir;
 uniform vec3 uLightColour;
 uniform vec3 uAmbient;       // sky irradiance around the drops
 uniform float uNight;
+uniform float uOvercast;     // no forward glow once cloud hides the sun or moon
 
 #include "rain_common.glsl"
 
@@ -84,7 +85,7 @@ void main()
 
     // Drops refract the sky around them, and glow when the light is behind them.
     float forward = pow(max(dot(normalize(rel), uLightDir), 0.0), 8.0);
-    vec3 colour = 1.5 * uAmbient + uLightColour * (0.15 + 0.8 * forward);
+    vec3 colour = 1.5 * uAmbient + uLightColour * (0.15 + 0.8 * forward * (1.0 - uOvercast));
     float luminance = dot(colour, vec3(0.2126, 0.7152, 0.0722));
     vColour = mix(colour, luminance * vec3(0.70, 0.86, 1.25), 0.85 * uNight); // as terrain.frag
     vAcross = s;
