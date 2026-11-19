@@ -93,7 +93,28 @@ Shader::Shader(const std::filesystem::path& vertexPath, const std::filesystem::p
     glLinkProgram(m_program);
     glDeleteShader(vertex);
     glDeleteShader(fragment);
+    checkLink(vertexPath.string() + " + " + fragmentPath.string());
+}
 
+Shader::Shader(const std::filesystem::path& vertexPath, const std::vector<std::string>& feedbackVaryings,
+               const std::string& defines)
+{
+    const GLuint vertex = compileStage(GL_VERTEX_SHADER, vertexPath, defines);
+    m_program = glCreateProgram();
+    glAttachShader(m_program, vertex);
+    std::vector<const char*> names;
+    for (const std::string& name : feedbackVaryings) {
+        names.push_back(name.c_str());
+    }
+    glTransformFeedbackVaryings(m_program, static_cast<GLsizei>(names.size()), names.data(),
+                                GL_INTERLEAVED_ATTRIBS);
+    glLinkProgram(m_program);
+    glDeleteShader(vertex);
+    checkLink(vertexPath.string());
+}
+
+void Shader::checkLink(const std::string& name)
+{
     GLint ok = GL_FALSE;
     glGetProgramiv(m_program, GL_LINK_STATUS, &ok);
     if (ok != GL_TRUE) {
@@ -102,8 +123,8 @@ Shader::Shader(const std::filesystem::path& vertexPath, const std::filesystem::p
         std::string log(static_cast<std::size_t>(length > 1 ? length : 1), '\0');
         glGetProgramInfoLog(m_program, length, nullptr, log.data());
         glDeleteProgram(m_program);
-        throw std::runtime_error("Failed to link " + vertexPath.string() + " + " +
-                                 fragmentPath.string() + ":\n" + log);
+        m_program = 0;
+        throw std::runtime_error("Failed to link " + name + ":\n" + log);
     }
 }
 

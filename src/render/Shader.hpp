@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace emerald {
 
@@ -16,6 +17,10 @@ namespace emerald {
 class Shader {
 public:
     Shader(const std::filesystem::path& vertexPath, const std::filesystem::path& fragmentPath,
+           const std::string& defines = "");
+    // Vertex-only program for transform feedback: the named outputs are captured, interleaved
+    // in this order. Draw it with GL_RASTERIZER_DISCARD enabled.
+    Shader(const std::filesystem::path& vertexPath, const std::vector<std::string>& feedbackVaryings,
            const std::string& defines = "");
     ~Shader();
 
@@ -41,6 +46,7 @@ public:
 
 private:
     GLint location(const std::string& name);
+    void checkLink(const std::string& name); // throws with the driver's log on failure
 
     GLuint m_program = 0;
     std::unordered_map<std::string, GLint> m_locations;
