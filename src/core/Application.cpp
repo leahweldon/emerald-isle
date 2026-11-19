@@ -60,6 +60,9 @@ constexpr GLenum kSceneFormat = GL_R11F_G11F_B10F;
 // the earlier display transform (linear up to 0.8) as closely as the curve allows.
 constexpr float kNeutralExposure = 1.18f;
 constexpr float kAgxExposure = 1.16f;
+// Eye adaptation: stops of extra exposure at full night (with Atmosphere::night()), so moonlit
+// land stays readable through the tone curve's toe.
+constexpr float kNightAdaptationEv = 1.0f;
 // The reflection is rendered at this fraction of the screen size, and with this level-of-detail
 // scale (< 1 is coarser): rippled and seen at grazing angles, it does not need more.
 constexpr int kReflectionDivisor = 2;
@@ -595,7 +598,8 @@ void Application::toneMap()
     m_scene->bindTexture(kSceneUnit);
     m_toneMapShader->set("uScene", static_cast<int>(kSceneUnit));
     const float base = m_options.agx ? kAgxExposure : kNeutralExposure;
-    m_toneMapShader->set("uExposure", base * std::exp2(m_options.exposureEv));
+    const float ev = m_options.exposureEv + kNightAdaptationEv * m_atmosphere.night();
+    m_toneMapShader->set("uExposure", base * std::exp2(ev));
     m_toneMapShader->set("uToneMapper", m_options.agx ? 1 : 0);
     glBindVertexArray(m_fullscreenVao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
