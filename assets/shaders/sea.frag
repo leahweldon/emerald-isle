@@ -123,6 +123,14 @@ vec3 rippleNormal(vec3 waveNormal, out float slopeVariance)
                           waveNormal.z + slope.y * waveNormal.y));
 }
 
+// Shallow water under cloud: no sun to light the sand through it, so turquoise turns grey-green.
+// Matches terrain.frag, so the coastline blend still meets the sea.
+vec3 overcastWater(vec3 c)
+{
+    float luminance = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    return mix(c, luminance * kOvercastWater, kOvercastDesaturation * uOvercast);
+}
+
 vec3 hash3(vec2 p)
 {
     vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
@@ -224,6 +232,9 @@ void main()
         float distanceFade = mix(1.0, 0.3, smoothstep(3e3, 25e3, length(vRelPos)));
         foam = kFoamCover * distanceFade * smoothstep(kFoamDepth, 0.1, depth) *
                smoothstep(0.4, 0.65, lace + 0.3 * (1.0 - depth / kFoamDepth));
+    }
+    if (uOvercast > 0.0) {
+        water = overcastWater(water);
     }
 
     // Terrain shadows on the water (headlands over bays) dim the direct light and its glint.

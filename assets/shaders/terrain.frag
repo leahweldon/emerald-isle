@@ -20,6 +20,7 @@ uniform vec3 uAmbientTint; // scale on sky light, cooler at golden hour
 uniform float uNight; // 0 by day, 1 at full night
 uniform float uRain;  // 0 dry, 1 heavy rain: cloud softens what direct light is left
 uniform float uWetness; // 0 dry, 1 soaked
+uniform float uOvercast; // cloud cover, 0 to 1
 uniform float uFogDensity;
 uniform float uFogFalloff;
 uniform float uExaggeration;
@@ -359,7 +360,13 @@ void main()
     albedo *= 1.0 - uWetness * wetDarkening;
 
     // Fade the last metres above sea level into shallow water to soften the pixel coastline.
-    albedo = mix(kShallow, albedo, smoothstep(0.0, 2.5, metres));
+    // Under cloud the shallows turn grey-green, as in sea.frag.
+    vec3 shallow = kShallow;
+    if (uOvercast > 0.0) {
+        float shallowLuminance = dot(shallow, vec3(0.2126, 0.7152, 0.0722));
+        shallow = mix(shallow, shallowLuminance * vec3(0.85, 1.05, 0.95), 0.7 * uOvercast);
+    }
+    albedo = mix(shallow, albedo, smoothstep(0.0, 2.5, metres));
 
     // Shadows dim direct light only; the sky's ambient light reaches into them.
     float diffuse = max(dot(shadingNormal, uLightDir), 0.0);
