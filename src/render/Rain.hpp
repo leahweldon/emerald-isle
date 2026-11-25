@@ -19,6 +19,7 @@ struct RainLighting {
     glm::vec3 ambient{0.0f};
     float night = 0.0f;
     float overcast = 0.0f;
+    int skyUnit = 0; // texture unit holding the sky cubemap
 };
 
 // GPU rain in a box around the camera. Drops and splash droplets live in vertex buffers advanced

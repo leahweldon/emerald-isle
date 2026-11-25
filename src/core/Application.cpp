@@ -678,6 +678,8 @@ void Application::render()
         lighting.ambient = m_sky->averageIrradiance();
         lighting.night = m_atmosphere.night();
         lighting.overcast = m_atmosphere.overcast();
+        lighting.skyUnit = static_cast<int>(kSkyUnit);
+        m_sky->bindCubemap(kSkyUnit);
         m_rain->draw(m_camera.view(), projection, glm::vec2(static_cast<float>(width), static_cast<float>(height)),
                      pixelAngle, m_cameraVelocity, lighting);
     }

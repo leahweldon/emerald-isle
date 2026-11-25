@@ -28,6 +28,7 @@ uniform vec3 uLightColour;
 uniform vec3 uAmbient;       // sky irradiance around the drops
 uniform float uNight;
 uniform float uOvercast;     // no forward glow once cloud hides the sun or moon
+uniform samplerCube uSkyCube; // linear sky radiance
 
 #include "rain_common.glsl"
 
@@ -36,6 +37,8 @@ const float kNearCull = 0.3;   // metres: closer drops would fill the screen
 const float kMaxStreak = 4.0;  // metres, when flying fast
 const float kSplashDiameter = 0.002; // each droplet stands for a little spray
 const float kCoverageBoost = 25.0;
+const float kRefracted = 0.5;  // share of the surrounding sky light a drop passes on
+const float kForwardSky = 0.4; // share of the light from the sky behind it
 const float kFaceFade = 6.0;   // metres, at the top and bottom of the box
 
 // All four corners at one point outside the view: nothing is rasterised.
@@ -113,9 +116,14 @@ void main()
     vec2 offset = (side * s + dir * (atHead ? 1.0 : -1.0)) * 0.5 * drawn;
     gl_Position = clip + vec4(offset / halfViewport * clip.w, 0.0, 0.0);
 
-    // Drops refract the sky around them, and glow when the light is behind them.
-    float forward = pow(max(dot(normalize(rel), uLightDir), 0.0), 8.0);
-    vec3 colour = 1.5 * uAmbient + uLightColour * (0.15 + 0.8 * forward * (1.0 - uOvercast));
+    // Light the drop passes on to the eye, added to the scene (streaks never darken it): the sky
+    // refracted from all around, and forward scattering of whatever bright light is behind it,
+    // the sky just above the line of sight and the sun or moon when they are behind the drop.
+    vec3 view = normalize(rel);
+    vec3 behind = texture(uSkyCube, normalize(view + vec3(0.0, 0.25, 0.0))).rgb;
+    float forward = pow(max(dot(view, uLightDir), 0.0), 8.0);
+    vec3 colour = kRefracted * uAmbient + kForwardSky * behind +
+                  uLightColour * (0.05 + 0.8 * forward * (1.0 - uOvercast));
     float luminance = dot(colour, vec3(0.2126, 0.7152, 0.0722));
     vColour = mix(colour, luminance * vec3(0.70, 0.86, 1.25), 0.85 * uNight); // as terrain.frag
     vAcross = s;

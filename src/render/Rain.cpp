@@ -286,7 +286,7 @@ void Rain::draw(const glm::mat4& view, const glm::mat4& projection, const glm::v
         return;
     }
     glEnable(GL_BLEND);
-    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); // premultiplied
+    glBlendFunc(GL_ONE, GL_ONE); // drops pass light on to the eye; they never darken the scene
     glDepthMask(GL_FALSE);
     // Drops nearer than the scene's near plane (often hundreds of metres from a high camera) are
     // clamped onto it rather than clipped, so they pass the depth test in front of everything.
@@ -318,6 +318,7 @@ void Rain::draw(const glm::mat4& view, const glm::mat4& projection, const glm::v
         shader.set("uAmbient", lighting.ambient);
         shader.set("uNight", lighting.night);
         shader.set("uOvercast", lighting.overcast);
+        shader.set("uSkyCube", lighting.skyUnit);
         glBindVertexArray(pass.vao);
         glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, pass.count);
     }
