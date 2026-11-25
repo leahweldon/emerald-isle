@@ -39,7 +39,9 @@ const float kSplashDiameter = 0.002; // each droplet stands for a little spray
 const float kCoverageBoost = 25.0;
 const float kRefracted = 0.5;  // share of the surrounding sky light a drop passes on
 const float kForwardSky = 0.4; // share of the light from the sky behind it
-const float kFaceFade = 6.0;   // metres, at the top and bottom of the box
+const float kFaceFade = 6.0;
+const float kNearSoft = 1.5;   // metres: drops nearer than about four times this are softened
+const float kFarFaint = 8.0;   // metres: drops fade from here to the edge of the box   // metres, at the top and bottom of the box
 
 // All four corners at one point outside the view: nothing is rasterised.
 void cull()
@@ -67,8 +69,14 @@ void main()
         return;
     }
 #endif
+    // Each particle's own width, opacity and streak length, so the rain is not a uniform overlay.
+    uint seed = uint(gl_InstanceID) * 2654435761u;
+    float widthScale = mix(0.7, 1.4, random(seed));
+    float opacityScale = mix(0.55, 1.15, random(seed));
+    float lengthScale = mix(0.6, 1.4, random(seed));
+
     vec3 rel = wrapToBox(aPosition.xyz);
-    vec3 streak = (aVelocity.xyz - uCameraVelocity) * uStreakTime;
+    vec3 streak = (aVelocity.xyz - uCameraVelocity) * uStreakTime * lengthScale;
     float length_ = length(streak);
     if (length_ > kMaxStreak) {
         streak *= kMaxStreak / length_;
@@ -88,6 +96,12 @@ void main()
     float diameter = aPosition.w * 0.001;
     float alpha = uOpacity;
 #endif
+    // Near drops are drawn a little wider and softer, far ones thinner and fainter.
+    float distance_ = -head.z;
+    float near = 1.0 - smoothstep(kNearSoft, kNearSoft * 4.0, distance_);
+    float far = smoothstep(kFarFaint, uHalfSize.x, distance_);
+    diameter *= widthScale * (1.0 + 0.6 * near);
+    alpha *= opacityScale * (1.0 - 0.4 * near) * (1.0 - 0.55 * far);
     // The box reads as a cylinder: drops fade out before its sides, top and bottom.
     vec3 fromCentre = rel - uBoxCentre;
     alpha *= 1.0 - smoothstep(0.7 * uHalfSize.x, uHalfSize.x, length(rel.xz));
@@ -106,7 +120,7 @@ void main()
     vec2 side = vec2(-dir.y, dir.x);
 
     float width = diameter / (-head.z * uPixelAngle);
-    float drawn = max(width, max(kMinWidth / uPixelAngle, 1.0));
+    float drawn = max(width, max(kMinWidth * (1.0 - 0.25 * far) / uPixelAngle, 1.0));
     alpha *= min(width * kCoverageBoost, drawn) / drawn;
 
     // Strip order: tail left, tail right, head left, head right.
