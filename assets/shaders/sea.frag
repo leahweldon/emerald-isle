@@ -58,7 +58,16 @@ const float kRingSlope = 0.6;     // peak slope of a fresh ring
 const float kRingHighlight = 0.6; // brightening of fresh crests (and the splash at the centre)
 const float kRingFadeStart = 40.0;
 const float kRingFadeEnd = 220.0;
-const float kRainRoughness = 0.012; // slope variance added by heavy rain
+const float kRainRoughness = 0.03;  // slope variance added by heavy rain, everywhere
+// Rain-roughened water smears reflections, mostly vertically (each facet tilts the mirror image
+// up or down the screen); screen fractions at heavy rain. Mirrored detail also loses contrast
+// towards the sky, and the rougher surface reflects a little less at grazing angles.
+const vec2 kRainSmear = vec2(0.004, 0.03);
+const float kRainMirrorLoss = 0.5;
+const float kRainFresnelLoss = 0.25;
+// Under cloud, shallow water loses its turquoise to a grey-green.
+const vec3 kOvercastWater = vec3(0.85, 1.05, 0.95);
+const float kOvercastDesaturation = 0.7;
 
 // Diffuse sky light from order-2 SH (coefficients pre-convolved and divided by pi on the CPU).
 vec3 skyAmbient(vec3 n)
@@ -231,9 +240,26 @@ void main()
     vec3 reflection = texture(uSkyCube, r).rgb;
     // Mirrored terrain where it was drawn, nudged by the ripples, over the sky behind it.
     vec2 screen = gl_FragCoord.xy / uViewportSize + n.xz * kReflectionDistortion;
-    vec4 mirrored = texture(uReflection, clamp(screen, vec2(0.0), vec2(1.0)));
+    vec4 mirrored;
+    if (uRain > 0.0) {
+        // Seven taps along a short, mostly vertical line, rotated per pixel to hide the steps.
+        vec2 smear = kRainSmear * uRain;
+        float jitter = hash3(gl_FragCoord.xy).x - 0.5;
+        mirrored = vec4(0.0);
+        for (int i = -3; i <= 3; ++i) {
+            vec2 tap = screen + smear * ((float(i) + jitter) / 3.0) * vec2(jitter * 2.0, 1.0);
+            mirrored += texture(uReflection, clamp(tap, vec2(0.0), vec2(1.0)));
+        }
+        mirrored /= 7.0;
+        mirrored.a *= 1.0 - kRainMirrorLoss * uRain;
+    } else {
+        mirrored = texture(uReflection, clamp(screen, vec2(0.0), vec2(1.0)));
+    }
     reflection = mix(reflection, mirrored.rgb, mirrored.a);
     float fresnel = schlick(dot(n, v));
+    if (uRain > 0.0) {
+        fresnel *= 1.0 - kRainFresnelLoss * uRain;
+    }
     // Waves too small for the ripple maps still tilt the surface (Cox and Munk: slope variance
     // 0.003 + 0.00512 per m/s of wind). They count once the ripples stop being resolved, which
     // widens the distant glint into a glitter path.
