@@ -82,6 +82,7 @@ find_package(Threads REQUIRED)
 # ---------------------------------------------------------------------------
 add_executable(emerald-isle
     src/main.cpp
+    src/platform/Gl.cpp
     src/core/Application.cpp
     src/core/Panel.cpp
     src/core/CameraController.cpp

@@ -230,9 +230,7 @@ void Terrain::buildCoastMask(const HeightField& heightField)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     // Outside the DEM is open sea as far as the mask is concerned: border 0, not repeated edges.
     const GLfloat border[] = {0.0f, 0.0f, 0.0f, 0.0f};
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
+    gl::clampToBorder(GL_TEXTURE_2D, border); // the DEM's own edges are sea, so edge texels are 0 too
     glBindTexture(GL_TEXTURE_2D, 0);
     m_demSize = glm::vec2(2.0 * heightField.demHalfWidth(), 2.0 * heightField.demHalfDepth());
 }

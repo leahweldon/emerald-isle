@@ -1,6 +1,6 @@
 #include "core/Window.hpp"
 
-#include <glad/gl.h>
+#include "platform/Gl.hpp"
 #include <GLFW/glfw3.h>
 
 #include <cstdio>
@@ -57,6 +57,7 @@ Window::Window(const WindowConfig& config)
         glfwTerminate();
         throw std::runtime_error("Failed to load OpenGL functions");
     }
+    gl::initCaps();
 
     if (config.headless) {
         m_framebufferWidth = config.width;

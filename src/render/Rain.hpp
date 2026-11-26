@@ -2,7 +2,7 @@
 
 #include "render/Shader.hpp"
 
-#include <glad/gl.h>
+#include "platform/Gl.hpp"
 #include <glm/glm.hpp>
 
 #include <array>

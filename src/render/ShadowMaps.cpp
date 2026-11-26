@@ -36,9 +36,7 @@ ShadowMaps::ShadowMaps()
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
     // Outside a cascade is lit.
     const GLfloat border[] = {1.0f, 1.0f, 1.0f, 1.0f};
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    glTexParameterfv(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BORDER_COLOR, border);
+    gl::clampToBorder(GL_TEXTURE_2D_ARRAY, border);
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
 
     GLint previous = 0;
@@ -46,8 +44,7 @@ ShadowMaps::ShadowMaps()
     glGenFramebuffers(1, &m_framebuffer);
     glBindFramebuffer(GL_FRAMEBUFFER, m_framebuffer);
     glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_texture, 0, 0);
-    glDrawBuffer(GL_NONE);
-    glReadBuffer(GL_NONE);
+    gl::noColourBuffers();
     const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
         glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous));
@@ -146,7 +143,7 @@ void ShadowMaps::begin(int cascade)
     glClear(GL_DEPTH_BUFFER_BIT);
     // Both faces: a heightfield seen from the light shows its back on slopes facing away.
     glDisable(GL_CULL_FACE);
-    glEnable(GL_DEPTH_CLAMP);
+    gl::setDepthClamp(true);
     glEnable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(kSlopeBias, kConstantBias);
 }
@@ -154,7 +151,7 @@ void ShadowMaps::begin(int cascade)
 void ShadowMaps::end()
 {
     glDisable(GL_POLYGON_OFFSET_FILL);
-    glDisable(GL_DEPTH_CLAMP);
+    gl::setDepthClamp(false);
     glEnable(GL_CULL_FACE);
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(m_savedFramebuffer));
     glViewport(m_savedViewport[0], m_savedViewport[1], m_savedViewport[2], m_savedViewport[3]);

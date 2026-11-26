@@ -23,7 +23,8 @@ std::string readFile(const std::filesystem::path& path)
 }
 
 // Replaces each line of the form #include "name" with that file from the same directory (one
-// level, no guards), and inserts the defines after the #version line.
+// level, no guards), and replaces the #version line with the platform's prelude (the same line on
+// desktop; GLSL ES with precisions and feature defines on WebGL), followed by the defines.
 std::string preprocess(const std::filesystem::path& path, const std::string& defines)
 {
     std::istringstream in(readFile(path));
@@ -41,19 +42,20 @@ std::string preprocess(const std::filesystem::path& path, const std::string& def
             out += '\n';
             continue;
         }
-        out += line;
-        out += '\n';
         if (!versionSeen && line.compare(0, 8, "#version") == 0) {
             versionSeen = true;
+            out += gl::shaderPrelude();
             out += defines;
+            continue;
         }
+        out += line;
+        out += '\n';
     }
     return out;
 }
 
-GLuint compileStage(GLenum stage, const std::filesystem::path& path, const std::string& defines)
+GLuint compileSource(GLenum stage, const std::string& source, const std::string& name)
 {
-    const std::string source = preprocess(path, defines);
     const char* sourcePtr = source.c_str();
 
     const GLuint shader = glCreateShader(stage);
@@ -68,9 +70,14 @@ GLuint compileStage(GLenum stage, const std::filesystem::path& path, const std::
         std::string log(static_cast<std::size_t>(length > 1 ? length : 1), '\0');
         glGetShaderInfoLog(shader, length, nullptr, log.data());
         glDeleteShader(shader);
-        throw std::runtime_error("Failed to compile " + path.string() + ":\n" + log);
+        throw std::runtime_error("Failed to compile " + name + ":\n" + log);
     }
     return shader;
+}
+
+GLuint compileStage(GLenum stage, const std::filesystem::path& path, const std::string& defines)
+{
+    return compileSource(stage, preprocess(path, defines), path.string());
 }
 
 } // namespace
@@ -102,6 +109,14 @@ Shader::Shader(const std::filesystem::path& vertexPath, const std::vector<std::s
     const GLuint vertex = compileStage(GL_VERTEX_SHADER, vertexPath, defines);
     m_program = glCreateProgram();
     glAttachShader(m_program, vertex);
+    // WebGL links no program without a fragment shader, even with rasterisation off.
+    GLuint fragment = 0;
+    if (gl::kGles) {
+        fragment = compileSource(GL_FRAGMENT_SHADER,
+                                 gl::shaderPrelude() + "out vec4 fragColour;\nvoid main() { fragColour = vec4(0.0); }\n",
+                                 "transform feedback stub");
+        glAttachShader(m_program, fragment);
+    }
     std::vector<const char*> names;
     for (const std::string& name : feedbackVaryings) {
         names.push_back(name.c_str());
@@ -110,6 +125,9 @@ Shader::Shader(const std::filesystem::path& vertexPath, const std::vector<std::s
                                 GL_INTERLEAVED_ATTRIBS);
     glLinkProgram(m_program);
     glDeleteShader(vertex);
+    if (fragment != 0) {
+        glDeleteShader(fragment);
+    }
     checkLink(vertexPath.string());
 }
 

@@ -71,7 +71,7 @@ TextureArray::TextureArray(const std::vector<std::filesystem::path>& layers, Enc
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
     // Core in GL 4.6, otherwise an ARB or EXT extension; skipped if neither is present.
-    if (GLAD_GL_ARB_texture_filter_anisotropic || GLAD_GL_EXT_texture_filter_anisotropic) {
+    if (gl::caps().anisotropy) {
         GLfloat supported = 1.0f;
         glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &supported);
         glTexParameterf(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_ANISOTROPY,

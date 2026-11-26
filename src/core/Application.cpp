@@ -17,7 +17,7 @@
 #include "ui/Ui.hpp"
 #include "world/HeightField.hpp"
 
-#include <glad/gl.h>
+#include "platform/Gl.hpp"
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -318,7 +318,7 @@ Application::Application(AppOptions options)
     } else {
         glViewport(0, 0, m_window.framebufferWidth(), m_window.framebufferHeight());
     }
-    glEnable(GL_MULTISAMPLE);
+    gl::enableMultisample();
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
 
@@ -690,7 +690,7 @@ void Application::render()
     m_terrainShader->set("uDebugView", m_debug.view);
     m_terrainShader->set("uTileBorders", m_debug.tileBorders ? 1 : 0);
     if (m_debug.wireframe) {
-        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        gl::setWireframe(true);
     }
     m_terrain->draw(*m_terrainShader, kHeightUnit, kHorizonUnit);
 
@@ -714,7 +714,7 @@ void Application::render()
     glPolygonOffset(1.0f, 1.0f);
     m_sea->draw();
     glDisable(GL_POLYGON_OFFSET_FILL);
-    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    gl::setWireframe(false);
 
     // Skybox last, at the far plane, so it is only shaded where nothing else was drawn.
     const float pixelAngle = m_camera.fovY / static_cast<float>(m_window.framebufferHeight());

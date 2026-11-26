@@ -110,8 +110,7 @@ Rain::Rain(const std::filesystem::path& shaderDir, GLuint groundUnit, GLuint dro
     glGenFramebuffers(1, &m_groundFramebuffer);
     glBindFramebuffer(GL_FRAMEBUFFER, m_groundFramebuffer);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_groundTexture, 0);
-    glDrawBuffer(GL_NONE);
-    glReadBuffer(GL_NONE);
+    gl::noColourBuffers();
     const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous));
     if (status != GL_FRAMEBUFFER_COMPLETE) {
@@ -187,12 +186,12 @@ void Rain::updateGround(Terrain& terrain, Shader& depthShader, GLuint heightTile
     glViewport(0, 0, kGroundResolution, kGroundResolution);
     glClear(GL_DEPTH_BUFFER_BIT);
     glDisable(GL_CULL_FACE);
-    glEnable(GL_DEPTH_CLAMP); // ground above or below the range clamps to its ends
+    gl::setDepthClamp(true); // ground above or below the range clamps to its ends
     depthShader.use();
     depthShader.set("uCameraHeight", static_cast<float>(cameraPos.y));
     depthShader.set("uShadowViewProj", viewProj);
     terrain.drawShadowCasters(depthShader, heightTileUnit, viewProj, 1.0f);
-    glDisable(GL_DEPTH_CLAMP);
+    gl::setDepthClamp(false);
     glEnable(GL_CULL_FACE);
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous));
     glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
@@ -292,7 +291,7 @@ void Rain::draw(const glm::mat4& view, const glm::mat4& projection, const glm::v
     glDepthMask(GL_FALSE);
     // Drops nearer than the scene's near plane (often hundreds of metres from a high camera) are
     // clamped onto it rather than clipped, so they pass the depth test in front of everything.
-    glEnable(GL_DEPTH_CLAMP);
+    gl::setDepthClamp(true);
     glDisable(GL_CULL_FACE);
 
     struct Pass {
@@ -327,7 +326,7 @@ void Rain::draw(const glm::mat4& view, const glm::mat4& projection, const glm::v
     glBindVertexArray(0);
 
     glEnable(GL_CULL_FACE);
-    glDisable(GL_DEPTH_CLAMP);
+    gl::setDepthClamp(false);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
 }
