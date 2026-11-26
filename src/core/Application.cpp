@@ -131,6 +131,8 @@ void printUsage(const char* program)
         "  --tone-mapper <name>  neutral (default, Khronos PBR Neutral) or agx\n"
         "  --rain <0-1>          Rain intensity, 0 dry to 1 heavy (default 0)\n"
         "  --ui                  Show the panel from the start (F1 toggles it)\n"
+        "  --orbit               With --view, orbit its target until the first key, click or scroll\n"
+        "  --paused              Start with the time of day paused (T resumes it)\n"
         "  --quality <level>     low, medium or high (default high; medium on the web)\n"
         "  --debug <view>        Debug view: lod, cascades, tiles or wireframe (repeatable)\n"
         "  --gpu-timing          Also measure GPU time per frame (adds ~0.4 ms on macOS)\n"
@@ -259,6 +261,10 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             if (options.quality < 0) {
                 throw std::invalid_argument("Invalid value for --quality: " + name + " (low, medium or high)");
             }
+        } else if (std::strcmp(arg, "--orbit") == 0) {
+            options.orbit = true;
+        } else if (std::strcmp(arg, "--paused") == 0) {
+            options.paused = true;
         } else if (std::strcmp(arg, "--ui") == 0) {
             options.ui = true;
         } else if (std::strcmp(arg, "--debug") == 0 && hasValue) {
@@ -306,7 +312,7 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
         options.frameLimit = 10;
     }
     // Runs that end by themselves keep the sun still, so they are reproducible.
-    options.timeRunning = options.frameLimit == 0 && options.autoflySeconds <= 0.0f;
+    options.timeRunning = options.frameLimit == 0 && options.autoflySeconds <= 0.0f && !options.paused;
     if (options.window.headless) {
         // A hidden window gets no input, so nothing could end the run.
         if (options.frameLimit == 0 && options.autoflySeconds <= 0.0f) {
@@ -411,11 +417,17 @@ Application::Application(AppOptions options)
         m_camera, [this](double x, double z) { return m_heightField->groundHeight(x, z); });
 
     // No --view: slow orbit from the overview. With --view: free-fly from that pose, still
-    // until there is input, so screenshots are reproducible.
+    // until there is input, so screenshots are reproducible; with --orbit as well, a slow orbit
+    // from that pose until the first input, then free-fly from wherever it has got to.
     if (m_options.view.empty()) {
         const ViewPreset& overview = *findViewPreset("overview");
         m_controller->startOrbit(overview.target, overview.azimuth, overview.elevation,
                                  overview.distance, true);
+    } else if (m_options.orbit) {
+        const ViewPreset& preset = *findViewPreset(m_options.view);
+        applyViewPreset(preset, m_camera);
+        m_controller->startOrbit(glm::dvec3(preset.target), preset.azimuth, preset.elevation, preset.distance, true);
+        m_orbitingUntilInput = true;
     } else {
         applyViewPreset(*findViewPreset(m_options.view), m_camera);
         m_controller->startFreeFly();
@@ -437,7 +449,8 @@ Application::Application(AppOptions options)
     m_ui = std::make_unique<Ui>(m_window.native(), m_options.window.headless, m_window.framebufferHeight(),
                                 m_options.assetDir / "fonts" / "Roboto-Medium.ttf");
     const bool selfEnding = m_options.frameLimit > 0 || m_options.autoflySeconds > 0.0f;
-    m_ui->setVisible(m_options.ui || (!m_options.window.headless && !selfEnding));
+    // In the browser it starts closed, out of the first view; F1 or the page's button opens it.
+    m_ui->setVisible(m_options.ui || (!m_options.window.headless && !selfEnding && !gl::kGles));
     applyQuality(m_options.quality);
     warmUp();
 }
@@ -587,6 +600,15 @@ int Application::finish()
 
 void Application::update(float deltaSeconds)
 {
+    Input& input = m_window.input();
+    if (m_orbitingUntilInput && input.anyActivity()) {
+        m_orbitingUntilInput = false;
+        m_controller->startFreeFly();
+    }
+    // In the browser, a click on the scene captures the pointer for mouse look (Escape frees it).
+    if (m_options.window.clickToCapture && input.mousePressed(GLFW_MOUSE_BUTTON_LEFT) && !m_window.cursorCaptured()) {
+        m_window.setCursorCaptured(true);
+    }
     m_controller->update(m_window, deltaSeconds);
     updateTime(deltaSeconds);
     updateWeather(deltaSeconds);
@@ -595,6 +617,11 @@ void Application::update(float deltaSeconds)
     }
     m_lastCameraPos = m_camera.position;
     m_deltaSeconds = deltaSeconds;
+}
+
+void Application::toggleUi()
+{
+    m_ui->toggle();
 }
 
 void Application::updateWeather(float deltaSeconds)

@@ -16,6 +16,9 @@ public:
     bool isDown(int key) const;
     bool wasPressed(int key) const; // went down since the last beginFrame()
     bool isMouseDown(int button) const;
+    bool mousePressed(int button) const; // went down since the last beginFrame()
+    // Any key or button pressed, or any scroll, this frame (pointer movement alone does not count).
+    bool anyActivity() const;
     glm::vec2 mouseDelta() const { return m_mouseBlocked ? glm::vec2(0.0f) : m_mouseDelta; } // pixels
     // Wheel notches or trackpad scroll units: x horizontal, y vertical (GLFW's sign convention).
     glm::vec2 scrollDelta() const { return m_mouseBlocked ? glm::vec2(0.0f) : m_scrollDelta; }
@@ -42,6 +45,7 @@ private:
     std::array<bool, kKeyCount> m_down{};
     std::array<bool, kKeyCount> m_pressed{};
     std::array<bool, kButtonCount> m_buttons{};
+    std::array<bool, kButtonCount> m_buttonPressed{};
     glm::vec2 m_mouseDelta{0.0f};
     glm::dvec2 m_lastCursor{0.0};
     bool m_haveCursor = false;

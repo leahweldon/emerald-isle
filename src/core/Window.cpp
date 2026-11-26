@@ -164,9 +164,17 @@ void Window::onFramebufferResize(GLFWwindow* handle, int width, int height)
     glViewport(0, 0, width, height);
 }
 
+bool Window::cursorCaptured() const
+{
+    if (gl::kGles) {
+        return glfwGetInputMode(m_handle, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
+    }
+    return m_cursorCaptured;
+}
+
 void Window::setCursorCaptured(bool captured)
 {
-    if (captured == m_cursorCaptured) {
+    if (captured == cursorCaptured()) {
         return;
     }
     m_cursorCaptured = captured;

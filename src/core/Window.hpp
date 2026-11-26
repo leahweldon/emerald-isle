@@ -17,6 +17,8 @@ struct WindowConfig {
     // Hidden window that never takes focus; the final image goes to an OffscreenTarget instead.
     // The framebuffer size is then width x height exactly, with no HiDPI scaling.
     bool headless = false;
+    // A left click captures the pointer for mouse look (the web build, where Tab moves focus).
+    bool clickToCapture = false;
 };
 
 // Owns the GLFW window and its OpenGL 3.3 core context.
@@ -53,7 +55,8 @@ public:
 
     // Hides the cursor and reports unbounded (raw where supported) motion for mouse look.
     void setCursorCaptured(bool captured);
-    bool cursorCaptured() const { return m_cursorCaptured; }
+    // In a browser the pointer lock can also end without us (Escape), so this asks GLFW there.
+    bool cursorCaptured() const;
 
 private:
     static void onFramebufferResize(GLFWwindow* handle, int width, int height);

@@ -62,6 +62,8 @@ struct AppOptions {
     bool ui = false;
     // Web build: use every WebGL fallback even where the browser has the feature, to test them.
     bool webglFallbacks = false;
+    bool orbit = false;  // --orbit: orbit the --view target until the first input
+    bool paused = false; // --paused: time of day starts paused
     // Index into kQualities: High on desktop, Medium on the web.
     int quality = EMERALD_DEFAULT_QUALITY;
     // --debug: terrain colouring (0 off, 1 level of detail, 2 shadow cascades), node outlines and
@@ -104,6 +106,8 @@ public:
     void frame();
     // Prints the run's statistics and validation; returns the exit code.
     int finish();
+    // Shows or hides the panel (F1 does the same), for the web page's button.
+    void toggleUi();
 
 private:
     // Rain levels for Shift+R and the panel's buttons.
@@ -210,7 +214,8 @@ private:
     float m_rainLevel = 0.0f;
     float m_wetness = 0.0f;
     float m_deltaSeconds = 0.0f;
-    bool m_rainWarmedUp = false; // screenshot runs: rain settled before the frames counted
+    bool m_rainWarmedUp = false;
+    bool m_orbitingUntilInput = false; // screenshot runs: rain settled before the frames counted
     glm::dvec3 m_lastCameraPos{0.0};
     glm::vec3 m_cameraVelocity{0.0f};
     int m_frameCount = 0;
