@@ -137,6 +137,7 @@ void printUsage(const char* program)
         "  --touch               Touch screen: Low quality unless --quality is given, gesture input\n"
         "  --quality <level>     low, medium or high (default high; medium on the web)\n"
         "  --debug <view>        Debug view: lod, cascades, tiles or wireframe (repeatable)\n"
+        "  --fxaa <on|off>       FXAA (default: on when the quality has no MSAA)\n"
         "  --gpu-timing          Also measure GPU time per frame (adds ~0.4 ms on macOS)\n"
         "  --validate <tiles>    Check for GL errors and terrain holes, require at least this many\n"
         "                        tiles generated and resident, exit non-zero on failure\n"
@@ -293,6 +294,12 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
                 throw std::invalid_argument("Invalid value for --tone-mapper: " + name + " (neutral or agx)");
             }
             options.agx = name == "agx";
+        } else if (std::strcmp(arg, "--fxaa") == 0 && hasValue) {
+            const std::string value = argv[++i];
+            if (value != "on" && value != "off") {
+                throw std::invalid_argument("Invalid value for --fxaa: " + value + " (on or off)");
+            }
+            options.fxaa = value == "on" ? 1 : 0;
         } else if (std::strcmp(arg, "--gpu-timing") == 0) {
             options.gpuTiming = true;
         } else if (std::strcmp(arg, "--frame-log") == 0 && hasValue) {
@@ -946,10 +953,19 @@ void Application::toneMap()
     m_toneMapShader->set("uScene", static_cast<int>(kSceneUnit));
     m_toneMapShader->set("uExposure", displayExposure());
     m_toneMapShader->set("uToneMapper", m_options.agx ? 1 : 0);
+    m_toneMapShader->set("uFxaa", fxaaEnabled() ? 1 : 0);
     glBindVertexArray(m_fullscreenVao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindVertexArray(0);
     glEnable(GL_DEPTH_TEST);
+}
+
+bool Application::fxaaEnabled() const
+{
+    if (m_options.fxaa >= 0) {
+        return m_options.fxaa == 1;
+    }
+    return !m_scene || m_scene->samples() <= 1;
 }
 
 void Application::applyQuality(int quality)

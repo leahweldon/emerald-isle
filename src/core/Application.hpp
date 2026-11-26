@@ -57,6 +57,8 @@ struct AppOptions {
     float exposureEv = 0.0f;
     // Final tone curve: false for Khronos PBR Neutral, true for AgX.
     bool agx = false;
+    // FXAA in the tone mapping: -1 whenever the scene has no MSAA, 0 off, 1 on.
+    int fxaa = -1;
     // Show the panel from the start. Otherwise it starts open only in interactive sessions (not
     // in runs that end by themselves); F1 toggles it.
     bool ui = false;
@@ -212,6 +214,7 @@ private:
     bool m_passTiming = false;
     bool m_splitScenePass = false;
     int m_quality = 0;
+    bool fxaaEnabled() const;
     float m_maxPixelRatio = 16.0f;
     int m_reflectionDivisor = 2; // time terrain, sea, sky and rain drops separately
     GpuPassTimer::Times m_passMs{}; // smoothed for display
