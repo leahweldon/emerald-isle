@@ -67,6 +67,9 @@ public:
     void bindCoastMask(GLuint unit) const;
     glm::vec2 demSize() const { return m_demSize; }
 
+    // Main-thread time per frame for generating tiles when there is no worker thread (the web).
+    void setGenerationBudget(double ms) { m_generationBudgetMs = ms; }
+
     // True when everything the last update() wanted is loaded and nothing is queued.
     bool settled() const { return m_settled; }
     const Stats& stats() const { return m_stats; }
@@ -128,6 +131,7 @@ private:
     std::int64_t m_rootX = 0; // root cell under the camera
     std::int64_t m_rootZ = 0;
     bool m_settled = false;
+    double m_generationBudgetMs = 4.0;
     Stats m_stats;
 };
 

@@ -15,6 +15,11 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 option(EMERALD_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+# Off on the web: threads there need cross-origin isolation headers that static hosts cannot send.
+option(EMERALD_THREADS "Generate terrain tiles on a worker thread" ON)
+if(EMSCRIPTEN)
+    set(EMERALD_THREADS OFF CACHE BOOL "" FORCE)
+endif()
 
 # ---------------------------------------------------------------------------
 # Dependencies (fetched at configure time, so no manual installs are needed)
@@ -116,6 +121,7 @@ target_include_directories(emerald-isle PRIVATE src)
 target_link_libraries(emerald-isle PRIVATE glfw glad glm::glm stb imgui OpenGL::GL Threads::Threads)
 target_compile_definitions(emerald-isle PRIVATE
     GLFW_INCLUDE_NONE
+    EMERALD_THREADS=$<BOOL:${EMERALD_THREADS}>
     EMERALD_VERSION="${PROJECT_VERSION}")
 
 if(MSVC)

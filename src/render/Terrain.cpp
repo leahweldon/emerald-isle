@@ -342,6 +342,7 @@ void Terrain::update(const glm::dvec3& cameraPos, const glm::mat4& viewProjectio
         }
     }
     m_streamer->setRequests(wanted);
+    m_streamer->pump(m_generationBudgetMs); // only without a worker thread
     // A loaded root means the ground under the camera can be drawn at some level.
     m_stats.cameraCovered = m_lookup.count(TileKey{kMaxLevel, cx, cz}) != 0;
 
