@@ -70,9 +70,7 @@ constexpr float kAgxExposure = 1.16f;
 constexpr float kNightAdaptationEv = 1.0f;
 // And under full cloud, which is darker than clear sky with the sun out.
 constexpr float kOvercastAdaptationEv = 0.5f;
-// Rain levels for Shift+R, and the time constant of the ease between intensities (seconds).
-constexpr float kLightRain = 0.3f;
-constexpr float kHeavyRain = 1.0f;
+// Time constant of the ease between rain intensities (seconds).
 constexpr float kRainEaseSeconds = 1.2f;
 // The ground is soaked by light rain already; it wets over a couple of seconds, dries more slowly.
 constexpr float kWettingSeconds = 2.0f;

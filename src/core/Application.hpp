@@ -85,6 +85,10 @@ public:
     int run();
 
 private:
+    // Rain levels for Shift+R and the panel's buttons.
+    static constexpr float kLightRain = 0.3f;
+    static constexpr float kHeavyRain = 1.0f;
+
     void warmUp();
     void update(float deltaSeconds);
     void updateTime(float deltaSeconds);
@@ -106,6 +110,8 @@ private:
     void updateUi();
     void buildPanel();
     void panelPerformance();
+    void panelTime();
+    void panelWeather();
     // Starts a GPU timing segment for pass while the panel is open.
     void markPass(GpuPassTimer::Pass pass);
     void collectPassTimes();

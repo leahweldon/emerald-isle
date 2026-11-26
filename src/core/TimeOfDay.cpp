@@ -25,8 +25,19 @@ TimeOfDay::TimeOfDay(int dayOfYear, double minutes, bool running)
 void TimeOfDay::advance(double realSeconds)
 {
     if (m_running) {
-        step(realSeconds * kRate / 60.0);
+        step(realSeconds * kRate * m_speed / 60.0);
     }
+}
+
+void TimeOfDay::setMinutes(double minutes)
+{
+    m_minutes = 0.0;
+    step(minutes);
+}
+
+void TimeOfDay::setDayOfYear(int day)
+{
+    m_day = ((day - 1) % kDaysPerYear + kDaysPerYear) % kDaysPerYear + 1;
 }
 
 void TimeOfDay::step(double minutes)
