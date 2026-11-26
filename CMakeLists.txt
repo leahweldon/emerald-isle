@@ -83,6 +83,7 @@ find_package(Threads REQUIRED)
 add_executable(emerald-isle
     src/main.cpp
     src/core/Application.cpp
+    src/core/Panel.cpp
     src/core/CameraController.cpp
     src/core/Window.cpp
     src/core/FrameTimer.cpp
@@ -103,6 +104,7 @@ add_executable(emerald-isle
     src/render/Terrain.cpp
     src/render/TextureArray.cpp
     src/render/ViewPresets.cpp
+    src/ui/Ui.cpp
     src/world/HeightField.cpp
     src/world/Noise.cpp
     src/world/SolarPosition.cpp

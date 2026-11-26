@@ -29,6 +29,7 @@ class ShadowMaps;
 class OffscreenTarget;
 class TextureArray;
 class Rain;
+class Ui;
 
 struct AppOptions {
     WindowConfig window;
@@ -47,6 +48,9 @@ struct AppOptions {
     float exposureEv = 0.0f;
     // Final tone curve: false for Khronos PBR Neutral, true for AgX.
     bool agx = false;
+    // Show the panel from the start. Otherwise it starts open only in interactive sessions (not
+    // in runs that end by themselves); F1 toggles it.
+    bool ui = false;
     // Starting rain intensity, 0 (dry) to 1 (heavy); R and Shift+R change it while running.
     float rain = 0.0f;
     // --sun-bearing or --sun-elevation fix the sun in place of the time of day (degrees).
@@ -96,6 +100,9 @@ private:
     void printRunStats() const;
     void flushFrameLog(bool all);
     void validateFrame();
+    // Starts the UI frame and builds the panel (Panel.cpp), and keeps its input from the camera.
+    void updateUi();
+    void buildPanel();
     // Reads every pending GL error into count (recording the first), for --validate.
     static void drainGlErrors(int& count, unsigned& first);
     bool reportValidation() const;
@@ -123,6 +130,7 @@ private:
     std::unique_ptr<OffscreenTarget> m_scene;     // linear HDR, multisampled
     std::unique_ptr<Shader> m_toneMapShader;
     std::unique_ptr<Rain> m_rain;
+    std::unique_ptr<Ui> m_ui;
     unsigned m_fullscreenVao = 0; // GL vertex array name
     Camera m_camera;
     std::unique_ptr<CameraController> m_controller;

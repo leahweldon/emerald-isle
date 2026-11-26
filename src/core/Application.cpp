@@ -13,6 +13,7 @@
 #include "render/Terrain.hpp"
 #include "render/TextureArray.hpp"
 #include "render/ViewPresets.hpp"
+#include "ui/Ui.hpp"
 #include "world/HeightField.hpp"
 
 #include <glad/gl.h>
@@ -127,6 +128,7 @@ void printUsage(const char* program)
         "  --exposure <ev>       Exposure offset in stops (default 0)\n"
         "  --tone-mapper <name>  neutral (default, Khronos PBR Neutral) or agx\n"
         "  --rain <0-1>          Rain intensity, 0 dry to 1 heavy (default 0)\n"
+        "  --ui                  Show the panel from the start (F1 toggles it)\n"
         "  --gpu-timing          Also measure GPU time per frame (adds ~0.4 ms on macOS)\n"
         "  --validate <tiles>    Check for GL errors and terrain holes, require at least this many\n"
         "                        tiles generated and resident, exit non-zero on failure\n"
@@ -245,6 +247,8 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.exposureEv = parseFloat(arg, argv[++i], -10.0f, 10.0f);
         } else if (std::strcmp(arg, "--rain") == 0 && hasValue) {
             options.rain = parseFloat(arg, argv[++i], 0.0f, 1.0f);
+        } else if (std::strcmp(arg, "--ui") == 0) {
+            options.ui = true;
         } else if (std::strcmp(arg, "--tone-mapper") == 0 && hasValue) {
             const std::string name = argv[++i];
             if (name != "neutral" && name != "agx") {
@@ -400,6 +404,10 @@ Application::Application(AppOptions options)
     }
 
     m_lastCameraPos = m_camera.position;
+    m_ui = std::make_unique<Ui>(m_window.native(), m_options.window.headless, m_window.framebufferHeight(),
+                                m_options.assetDir / "fonts" / "Roboto-Medium.ttf");
+    const bool selfEnding = m_options.frameLimit > 0 || m_options.autoflySeconds > 0.0f;
+    m_ui->setVisible(m_options.ui || (!m_options.window.headless && !selfEnding));
     warmUp();
 }
 
@@ -440,6 +448,7 @@ int Application::run()
         m_window.input().beginFrame();
         m_window.pollEvents();
         const auto afterEvents = Clock::now();
+        updateUi();
         update(delta);
         const auto afterUpdate = Clock::now();
         ++m_frameCount;
@@ -685,6 +694,7 @@ void Application::render()
     }
 
     toneMap();
+    m_ui->draw(); // into the final framebuffer, after tone mapping
 }
 
 void Application::toneMap()

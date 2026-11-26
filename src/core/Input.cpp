@@ -22,17 +22,17 @@ void Input::beginFrame()
 
 bool Input::isDown(int key) const
 {
-    return inRange(key, kKeyCount) && m_down[static_cast<std::size_t>(key)];
+    return !m_keyboardBlocked && inRange(key, kKeyCount) && m_down[static_cast<std::size_t>(key)];
 }
 
 bool Input::wasPressed(int key) const
 {
-    return inRange(key, kKeyCount) && m_pressed[static_cast<std::size_t>(key)];
+    return !m_keyboardBlocked && inRange(key, kKeyCount) && m_pressed[static_cast<std::size_t>(key)];
 }
 
 bool Input::isMouseDown(int button) const
 {
-    return inRange(button, kButtonCount) && m_buttons[static_cast<std::size_t>(button)];
+    return !m_mouseBlocked && inRange(button, kButtonCount) && m_buttons[static_cast<std::size_t>(button)];
 }
 
 void Input::onKey(int key, int action)
