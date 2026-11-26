@@ -154,6 +154,9 @@ The [live demo](https://leahweldon.github.io/emerald-isle/) is the same C++ sour
   | Safari 26.6 | 60 FPS | 60 FPS | not available | median 2 ms, max 6 ms |
 
   Every run held the display's rate. Safari draws at most 60 frames a second by default (its "Prefer page rendering updates near 60 fps" setting), and only Chrome offers GPU timer queries. Firefox and Safari report time to the millisecond only. Tile generation never took more than 5 ms of a frame, even flying at 2.5 km/s.
+- **Phones and tablets:** on a touch screen (a coarse main pointer, or touch without a mouse or trackpad), the page passes `--touch`: Low quality unless the address sets another, no pointer lock, and touch input instead of the keyboard. While orbiting, one finger drags the view around the target, a pinch moves closer or further and two fingers move the target; the automatic rotation stops at the first touch. In free flight, one finger looks around, a pinch moves forward or back and two fingers move sideways and up or down. Three large buttons replace the panel: **View** (eight views, each orbiting slowly), **Time** (golden hour, noon, night) and **Weather** (dry, light rain, heavy rain). The page blocks scrolling, zoom and pull-to-refresh over the scene and keeps clear of the notch and home indicator, in portrait and landscape.
+
+  On an iPhone (iOS 18.7, Safari, Low quality, 1,800 frames of the first view), the demo held 60 FPS, Safari's limit, with no frame over 16.7 ms (app work per frame: median 5 ms, max 11 ms). It ran on the half-float terrain fallback, as iOS Safari lacks `OES_texture_float_linear`. Terrain fills in slowly there: single-threaded WebAssembly on a phone generates tiles much more slowly than on a Mac (16 tiles in 30 s, against more than 200 on desktop browsers), so distant land stays coarse for longer.
 - **Options in the address:** any option can be passed as a URL parameter, for example [`?view=shore&rain=1&time=13:30`](https://leahweldon.github.io/emerald-isle/?view=shore&rain=1&time=13:30). Without any, the demo opens on golden hour over Dingle Bay, orbiting slowly until you press a key, click or scroll.
 
 ## Building
@@ -240,6 +243,7 @@ On a MacBook's ProMotion display, GLFW with OpenGL presents at 120 Hz (measured 
 | Print pose as a `--view` preset line | **P** | **P** |
 | Show / hide the panel | **H**, **`** or **F1** (not while typing into a panel field) | **H**, **`** or **F1** |
 | Look around (web build) | Click the scene to capture the pointer, **Esc** to release it | Click, then move the mouse |
+| Touch screens (web build) | One finger drags the view, pinch moves, two fingers pan; **View**, **Time** and **Weather** buttons | |
 | Quit | **Esc** | **Esc** |
 
 Flying speed follows your height above the ground, like a map viewer: about 50 m/s skimming the hills at 30 m, about 2.4 km/s at a 1.5 km cruising height (Kerry to the edge of the DEM in about 12 s), and faster still from orbit. The multiplier keys scale that, and the window title shows the current speed (or "orbit"). Without `--view` the app starts in a slow orbit of the island; press **C** to take control. The camera stays at least 30 m above the ground and sea.
