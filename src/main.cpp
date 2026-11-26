@@ -61,6 +61,13 @@ int main(int argc, char** argv)
         emscripten_set_main_loop(
             [] {
                 g_app->frame();
+                // A run that ends by itself (--frames, --autofly) prints its statistics and stops.
+                if (g_app->done()) {
+                    g_app->finish();
+                    emscripten_cancel_main_loop();
+                    emscripten_run_script("if (window.emeraldFinished) emeraldFinished();");
+                    return;
+                }
                 // The page hides its loading screen once the first frame is on screen.
                 static bool first = true;
                 if (first) {

@@ -106,6 +106,8 @@ public:
     void frame();
     // Prints the run's statistics and validation; returns the exit code.
     int finish();
+    // True once a run that ends by itself (--frames, --autofly) has finished.
+    bool done() const;
     // Shows or hides the panel (F1 does the same), for the web page's button.
     void toggleUi();
 

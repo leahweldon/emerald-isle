@@ -619,6 +619,11 @@ void Application::update(float deltaSeconds)
     m_deltaSeconds = deltaSeconds;
 }
 
+bool Application::done() const
+{
+    return m_window.shouldClose();
+}
+
 void Application::toggleUi()
 {
     m_ui->toggle();
