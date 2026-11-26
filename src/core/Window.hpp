@@ -2,6 +2,7 @@
 
 #include "core/Input.hpp"
 
+#include <functional>
 #include <string>
 
 struct GLFWwindow;
@@ -53,6 +54,9 @@ public:
     Input& input() { return m_input; }
     const Input& input() const { return m_input; }
 
+    // With clickToCapture: whether a left click may capture the pointer now (false over the UI).
+    void setCaptureFilter(std::function<bool()> filter) { m_captureFilter = std::move(filter); }
+
     // Hides the cursor and reports unbounded (raw where supported) motion for mouse look.
     void setCursorCaptured(bool captured);
     // In a browser the pointer lock can also end without us (Escape), so this asks GLFW there.
@@ -72,6 +76,8 @@ private:
     bool m_cursorCaptured = false;
     int m_refreshRate = 0;
     bool m_headless = false;
+    bool m_clickToCapture = false;
+    std::function<bool()> m_captureFilter;
 };
 
 } // namespace emerald

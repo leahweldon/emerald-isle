@@ -216,8 +216,8 @@ private:
     float m_rainLevel = 0.0f;
     float m_wetness = 0.0f;
     float m_deltaSeconds = 0.0f;
-    bool m_rainWarmedUp = false;
-    bool m_orbitingUntilInput = false; // screenshot runs: rain settled before the frames counted
+    bool m_rainWarmedUp = false; // screenshot runs: rain settled before the frames counted
+    bool m_orbitingUntilInput = false; // --orbit, until the first input
     glm::dvec3 m_lastCameraPos{0.0};
     glm::vec3 m_cameraVelocity{0.0f};
     int m_frameCount = 0;

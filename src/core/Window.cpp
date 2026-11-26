@@ -75,6 +75,7 @@ Window::Window(const WindowConfig& config)
     gl::initCaps();
 
     m_headless = config.headless;
+    m_clickToCapture = config.clickToCapture;
     if (config.headless) {
         m_framebufferWidth = config.width;
         m_framebufferHeight = config.height;
@@ -197,7 +198,14 @@ void Window::onKey(GLFWwindow* handle, int key, int /*scancode*/, int action, in
 
 void Window::onMouseButton(GLFWwindow* handle, int button, int action, int /*mods*/)
 {
-    static_cast<Window*>(glfwGetWindowUserPointer(handle))->m_input.onMouseButton(button, action);
+    auto* window = static_cast<Window*>(glfwGetWindowUserPointer(handle));
+    window->m_input.onMouseButton(button, action);
+    // Browsers grant pointer lock only from inside an input event handler, which is where the
+    // port calls this from.
+    if (window->m_clickToCapture && button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS &&
+        !window->cursorCaptured() && (!window->m_captureFilter || window->m_captureFilter())) {
+        window->setCursorCaptured(true);
+    }
 }
 
 void Window::onCursor(GLFWwindow* handle, double x, double y)

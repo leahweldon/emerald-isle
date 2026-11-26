@@ -33,6 +33,17 @@ public:
     bool wantsMouse() const;
     bool wantsKeyboard() const;
 
+    // Whether a point (window coordinates) is on the panel as last drawn, so a click there belongs
+    // to it even before ImGui has seen the pointer arrive.
+    bool covers(double x, double y) const;
+    void setPanelRect(float x, float y, float width, float height)
+    {
+        m_panelRect[0] = x;
+        m_panelRect[1] = y;
+        m_panelRect[2] = width;
+        m_panelRect[3] = height;
+    }
+
     // UI scale in display units (1 on a Retina Mac, the monitor's scale elsewhere), for sizes.
     float scale() const { return m_scale; }
 
@@ -43,6 +54,7 @@ private:
     bool m_visible = false;
     bool m_frameStarted = false;
     float m_scale = 1.0f;
+    float m_panelRect[4] = {}; // x, y, width, height in display units
 };
 
 } // namespace emerald

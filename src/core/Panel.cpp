@@ -79,6 +79,9 @@ void Application::buildPanel()
         ImGui::End();
         return;
     }
+    const ImVec2 position = ImGui::GetWindowPos();
+    const ImVec2 size = ImGui::GetWindowSize();
+    m_ui->setPanelRect(position.x, position.y, size.x, size.y);
     ImGui::PushItemWidth(-kLabelWidth * scale);
     // Debug views asked for on the command line open their section instead of this one.
     const bool debugOn = m_options.debugView != 0 || m_options.debugTiles || m_options.debugWireframe;

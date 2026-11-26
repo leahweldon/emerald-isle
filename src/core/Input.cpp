@@ -15,7 +15,7 @@ bool inRange(int code, int count)
 
 } // namespace
 
-void Input::beginFrame()
+void Input::endFrame()
 {
     m_pressed.fill(false);
     m_buttonPressed.fill(false);

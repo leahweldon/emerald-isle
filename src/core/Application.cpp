@@ -451,6 +451,11 @@ Application::Application(AppOptions options)
     const bool selfEnding = m_options.frameLimit > 0 || m_options.autoflySeconds > 0.0f;
     // In the browser it starts closed, out of the first view; F1 or the page's button opens it.
     m_ui->setVisible(m_options.ui || (!m_options.window.headless && !selfEnding && !gl::kGles));
+    // Clicks on the panel never capture the pointer.
+    m_window.setCaptureFilter([this] {
+        const glm::dvec2 cursor = m_window.input().cursor();
+        return !m_ui->wantsMouse() && !m_ui->covers(cursor.x, cursor.y);
+    });
     applyQuality(m_options.quality);
     warmUp();
 }
@@ -496,7 +501,6 @@ void Application::frame()
     const auto frameStart = Clock::now();
     const float delta = m_timer.tick();
 
-    m_window.input().beginFrame();
     m_window.pollEvents();
     const auto afterEvents = Clock::now();
     updateUi();
@@ -582,6 +586,7 @@ void Application::frame()
         m_finished = true;
         m_window.requestClose();
     }
+    m_window.input().endFrame();
 }
 
 int Application::finish()
@@ -604,10 +609,6 @@ void Application::update(float deltaSeconds)
     if (m_orbitingUntilInput && input.anyActivity()) {
         m_orbitingUntilInput = false;
         m_controller->startFreeFly();
-    }
-    // In the browser, a click on the scene captures the pointer for mouse look (Escape frees it).
-    if (m_options.window.clickToCapture && input.mousePressed(GLFW_MOUSE_BUTTON_LEFT) && !m_window.cursorCaptured()) {
-        m_window.setCursorCaptured(true);
     }
     m_controller->update(m_window, deltaSeconds);
     updateTime(deltaSeconds);
