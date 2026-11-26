@@ -82,6 +82,9 @@ PixelTransfer transferFor(GLenum internalFormat);
 // Most multisample samples for a renderable format, capped at wanted (0 or 1: none).
 int samplesFor(GLenum internalFormat, int wanted);
 
+// Filter for a depth texture sampled as values: linear where allowed, else nearest.
+GLint depthValueFilter();
+
 void enableSeamlessCubemaps(); // always on in GLES
 void enableMultisample(); // the default anyway, where it is not a switch at all (GLES)
 void setDepthClamp(bool enabled);

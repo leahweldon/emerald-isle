@@ -11,6 +11,7 @@ import { extname, join, resolve } from 'node:path';
 
 const root = resolve(process.argv[2] ?? '../build-web');
 const seconds = Number(process.argv[3] ?? 15);
+const query = process.argv[4] ?? ''; // e.g. "?view=shore&rain=1"
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm',
                 '.data': 'application/octet-stream' };
 
@@ -46,7 +47,7 @@ page.on('response', (response) => {
   if (response.status() >= 400) problems.push(`HTTP ${response.status()}: ${response.url()}`);
 });
 
-await page.goto(url);
+await page.goto(url + query);
 const deadline = Date.now() + 120_000;
 while (!warmedUp && problems.length === 0 && Date.now() < deadline) {
   await page.waitForTimeout(250);

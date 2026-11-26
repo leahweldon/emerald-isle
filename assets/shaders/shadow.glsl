@@ -21,6 +21,12 @@ float cascadeVisibility(int cascade, vec3 relPos, vec3 normal, float nDotL)
     float texel = uShadowTexel[cascade];
     float offset = kNormalOffset * texel * sqrt(1.0 - nDotL * nDotL);
     vec3 p = (uShadowMatrices[cascade] * vec4(relPos + normal * offset, 1.0)).xyz;
+#ifdef GLES
+    // No border colour in WebGL: outside the cascade is lit, as the border makes it on desktop.
+    if (any(lessThan(p.xy, vec2(0.0))) || any(greaterThan(p.xy, vec2(1.0)))) {
+        return 1.0;
+    }
+#endif
     float reference = p.z - kDepthBias / kShadowResolution;
     float step_ = 1.0 / kShadowResolution;
     float sum = 0.0;

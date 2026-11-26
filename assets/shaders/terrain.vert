@@ -102,6 +102,11 @@ void main()
     vec3 relPos = vec3(xz.x, height - uCameraHeight, xz.y);
 #ifdef SHADOW_PASS
     gl_Position = uShadowViewProj * vec4(relPos, 1.0);
+#ifdef NO_DEPTH_CLAMP
+    // Without depth clamping (WebGL), terrain beyond the depth range is flattened onto its ends
+    // per vertex instead of being clipped.
+    gl_Position.z = clamp(gl_Position.z, -gl_Position.w, gl_Position.w);
+#endif
 #else
     vRelPos = relPos;
     vWorldXZ = uNodeMaterialOrigin + grid * spacing;

@@ -287,8 +287,10 @@ void Terrain::uploadTile(const TileData& tile)
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, kTileSamples, kTileSamples, 0, GL_RED, GL_FLOAT,
-                 tile.heights.data());
+    // 32-bit floats need an extension to be filtered in WebGL; half floats do not (heights are then
+    // stored to about a metre).
+    const GLint format = gl::caps().floatLinear ? GL_R32F : GL_R16F;
+    glTexImage2D(GL_TEXTURE_2D, 0, format, kTileSamples, kTileSamples, 0, GL_RED, GL_FLOAT, tile.heights.data());
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);

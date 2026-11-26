@@ -187,6 +187,11 @@ int samplesFor([[maybe_unused]] GLenum internalFormat, int wanted)
     return samples < 2 ? 0 : samples;
 }
 
+GLint depthValueFilter()
+{
+    return g_caps.depthLinear ? GL_LINEAR : GL_NEAREST;
+}
+
 void enableSeamlessCubemaps()
 {
 #ifndef __EMSCRIPTEN__

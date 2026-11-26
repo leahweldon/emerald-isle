@@ -12,7 +12,13 @@
 <body>
 <canvas id="canvas" tabindex="-1"></canvas>
 <script>
-  var Module = { canvas: document.getElementById('canvas') };
+  // URL parameters become options: ?view=shore&rain=1 runs with --view shore --rain 1.
+  var args = [];
+  new URLSearchParams(location.search).forEach(function (value, key) {
+    args.push('--' + key);
+    if (value !== '') args.push(value);
+  });
+  var Module = { canvas: document.getElementById('canvas'), arguments: args };
 </script>
 {{{ SCRIPT }}}
 </body>
