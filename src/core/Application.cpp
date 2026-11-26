@@ -133,6 +133,7 @@ void printUsage(const char* program)
         "  --ui                  Show the panel from the start (F1 toggles it)\n"
         "  --orbit               With --view, orbit its target until the first key, click or scroll\n"
         "  --paused              Start with the time of day paused (T resumes it)\n"
+        "  --touch               Touch screen: Low quality unless --quality is given, gesture input\n"
         "  --quality <level>     low, medium or high (default high; medium on the web)\n"
         "  --debug <view>        Debug view: lod, cascades, tiles or wireframe (repeatable)\n"
         "  --gpu-timing          Also measure GPU time per frame (adds ~0.4 ms on macOS)\n"
@@ -197,6 +198,7 @@ std::filesystem::path locateAssets(const char* argv0)
 
 bool parseOptions(int argc, char** argv, AppOptions& options)
 {
+    bool qualityGiven = false;
     options.assetDir = locateAssets(argv[0]);
 
     for (int i = 1; i < argc; ++i) {
@@ -258,6 +260,7 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
         } else if (std::strcmp(arg, "--quality") == 0 && hasValue) {
             const std::string name = argv[++i];
             options.quality = name == "low" ? 0 : name == "medium" ? 1 : name == "high" ? 2 : -1;
+            qualityGiven = true;
             if (options.quality < 0) {
                 throw std::invalid_argument("Invalid value for --quality: " + name + " (low, medium or high)");
             }
@@ -265,6 +268,8 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.orbit = true;
         } else if (std::strcmp(arg, "--paused") == 0) {
             options.paused = true;
+        } else if (std::strcmp(arg, "--touch") == 0) {
+            options.touch = true;
         } else if (std::strcmp(arg, "--ui") == 0) {
             options.ui = true;
         } else if (std::strcmp(arg, "--debug") == 0 && hasValue) {
@@ -307,6 +312,10 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
         }
     }
 
+    // Phones and tablets start at Low: small GPUs, and very high pixel densities.
+    if (options.touch && !qualityGiven) {
+        options.quality = 0;
+    }
     // A screenshot run needs a few frames so the swap chain has settled.
     if (!options.screenshotPath.empty() && options.frameLimit == 0) {
         options.frameLimit = 10;
@@ -427,7 +436,8 @@ Application::Application(AppOptions options)
         const ViewPreset& preset = *findViewPreset(m_options.view);
         applyViewPreset(preset, m_camera);
         m_controller->startOrbit(glm::dvec3(preset.target), preset.azimuth, preset.elevation, preset.distance, true);
-        m_orbitingUntilInput = true;
+        // On a touch screen the orbit stays an orbit, steered by gestures.
+        m_orbitingUntilInput = !m_options.touch;
     } else {
         applyViewPreset(*findViewPreset(m_options.view), m_camera);
         m_controller->startFreeFly();
@@ -610,6 +620,18 @@ void Application::update(float deltaSeconds)
         m_orbitingUntilInput = false;
         m_controller->startFreeFly();
     }
+    // Gestures since the last frame (each one also stops an orbit's automatic rotation).
+    if (m_touchDrag != glm::vec2(0.0f)) {
+        m_controller->touchDrag(m_touchDrag);
+    }
+    if (m_touchPinch != 1.0f) {
+        m_controller->touchPinch(m_touchPinch);
+    }
+    if (m_touchPan != glm::vec2(0.0f)) {
+        m_controller->touchPan(m_touchPan);
+    }
+    m_touchDrag = m_touchPan = glm::vec2(0.0f);
+    m_touchPinch = 1.0f;
     m_controller->update(m_window, deltaSeconds);
     updateTime(deltaSeconds);
     updateWeather(deltaSeconds);
@@ -622,15 +644,68 @@ void Application::update(float deltaSeconds)
 
 std::string Application::stateJson() const
 {
-    char json[256];
+    char json[384];
     std::snprintf(json, sizeof(json),
                   "{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f,\"yaw\":%.5f,\"pitch\":%.5f,\"orbiting\":%s,"
-                  "\"panel\":%s,\"captured\":%s,\"frames\":%d}",
+                  "\"panel\":%s,\"captured\":%s,\"frames\":%d,\"view\":\"%s\",\"minutes\":%.1f,"
+                  "\"rain\":%.2f,\"quality\":\"%s\",\"touch\":%s}",
                   m_camera.position.x, m_camera.position.y, m_camera.position.z, static_cast<double>(m_camera.yaw),
                   static_cast<double>(m_camera.pitch),
                   m_controller->mode() == CameraController::Mode::Orbit ? "true" : "false",
-                  m_ui->visible() ? "true" : "false", m_window.cursorCaptured() ? "true" : "false", m_frameCount);
+                  m_ui->visible() ? "true" : "false", m_window.cursorCaptured() ? "true" : "false", m_frameCount,
+                  m_options.view.c_str(), m_time.minutes(), static_cast<double>(m_rainTarget),
+                  kQualities[static_cast<std::size_t>(m_quality)].name, m_options.touch ? "true" : "false");
     return json;
+}
+
+void Application::touchDrag(float dx, float dy)
+{
+    m_touchDrag += glm::vec2(dx, dy);
+}
+
+void Application::touchPinch(float scale)
+{
+    m_touchPinch *= scale;
+}
+
+void Application::touchPan(float dx, float dy)
+{
+    m_touchPan += glm::vec2(dx, dy);
+}
+
+const char* Application::nextView()
+{
+    // Each view orbits slowly, as the first one does, until touched.
+    static constexpr const char* kViews[] = {"glenbeigh", "ridges", "archipelago", "kerry", "shore", "kerry-south",
+                                             "wicklow", "overview"};
+    static constexpr const char* kLabels[] = {"Glenbeigh", "Ridges", "Archipelago", "Kerry", "Shore", "Kerry south",
+                                              "Wicklow", "Ireland"};
+    m_touchView = (m_touchView + 1) % static_cast<int>(std::size(kViews));
+    const ViewPreset& preset = *findViewPreset(kViews[m_touchView]);
+    m_options.view = preset.name;
+    applyViewPreset(preset, m_camera);
+    m_controller->startOrbit(glm::dvec3(preset.target), preset.azimuth, preset.elevation, preset.distance, true);
+    return kLabels[m_touchView];
+}
+
+const char* Application::cycleTime()
+{
+    static constexpr double kMinutes[] = {21.5 * 60.0, 13.0 * 60.0, 1.5 * 60.0};
+    static constexpr const char* kLabels[] = {"Golden hour", "Noon", "Night"};
+    m_touchTime = (m_touchTime + 1) % static_cast<int>(std::size(kMinutes));
+    m_options.fixedSun = false;
+    m_time.setMinutes(kMinutes[m_touchTime]);
+    return kLabels[m_touchTime];
+}
+
+const char* Application::cycleRain()
+{
+    static constexpr float kLevels[] = {0.0f, kLightRain, kHeavyRain};
+    static constexpr const char* kLabels[] = {"Dry", "Light rain", "Heavy rain"};
+    m_touchRain = (m_touchRain + 1) % static_cast<int>(std::size(kLevels));
+    m_rainTarget = kLevels[m_touchRain];
+    m_rainLevel = m_rainTarget > 0.0f ? m_rainTarget : m_rainLevel;
+    return kLabels[m_touchRain];
 }
 
 bool Application::done() const

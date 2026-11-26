@@ -26,6 +26,44 @@ extern "C" EMSCRIPTEN_KEEPALIVE const char* emerald_state()
     return state.c_str();
 }
 
+// Touch gestures from the page: drags in CSS pixels, pinches as a scale.
+extern "C" EMSCRIPTEN_KEEPALIVE void emerald_touch_drag(float dx, float dy)
+{
+    if (g_app) {
+        g_app->touchDrag(dx, dy);
+    }
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void emerald_touch_pinch(float scale)
+{
+    if (g_app) {
+        g_app->touchPinch(scale);
+    }
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void emerald_touch_pan(float dx, float dy)
+{
+    if (g_app) {
+        g_app->touchPan(dx, dy);
+    }
+}
+
+// The touch overlay's buttons; each returns the label to show.
+extern "C" EMSCRIPTEN_KEEPALIVE const char* emerald_next_view()
+{
+    return g_app ? g_app->nextView() : "";
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE const char* emerald_cycle_time()
+{
+    return g_app ? g_app->cycleTime() : "";
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE const char* emerald_cycle_rain()
+{
+    return g_app ? g_app->cycleRain() : "";
+}
+
 // Called by the page's panel button.
 extern "C" EMSCRIPTEN_KEEPALIVE void emerald_toggle_panel()
 {
@@ -40,14 +78,19 @@ int main(int argc, char** argv)
     try {
 #ifdef __EMSCRIPTEN__
         // With no options in the page's URL: golden hour over Dingle Bay, slowly orbiting until the
-        // visitor takes over, with the time of day paused.
+        // visitor takes over, with the time of day paused. --touch (added by the page on touch
+        // screens) does not count as an option here.
         std::vector<std::string> defaults = {argc > 0 ? argv[0] : "emerald-isle", "--view", "glenbeigh",
                                              "--time", "21:30", "--orbit", "--paused"};
+        const bool touch = argc == 2 && std::string(argv[1]) == "--touch";
+        if (touch) {
+            defaults.emplace_back("--touch");
+        }
         std::vector<char*> defaultArgv;
         for (std::string& arg : defaults) {
             defaultArgv.push_back(arg.data());
         }
-        if (argc <= 1) {
+        if (argc <= 1 || touch) {
             argc = static_cast<int>(defaultArgv.size());
             argv = defaultArgv.data();
         }
@@ -60,7 +103,7 @@ int main(int argc, char** argv)
             emerald::gl::requestFallbacks();
         }
 #ifdef __EMSCRIPTEN__
-        options.window.clickToCapture = true;
+        options.window.clickToCapture = !options.touch; // no pointer lock on touch screens
 #endif
 
 #ifdef __EMSCRIPTEN__
