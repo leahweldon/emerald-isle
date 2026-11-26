@@ -100,6 +100,9 @@ void Application::buildPanel()
     if (ImGui::CollapsingHeader("Debug views")) {
         panelDebug();
     }
+    if (ImGui::CollapsingHeader("Controls")) {
+        panelHelp();
+    }
     ImGui::PopItemWidth();
     ImGui::TextDisabled("F1 hides this panel");
     ImGui::End();
@@ -360,6 +363,39 @@ void Application::panelDebug()
                      ImVec2(1.0f, 0.0f));
         ImGui::TextDisabled("%d x %d, terrain mirrored in the sea", m_reflection->width(), m_reflection->height());
     }
+}
+
+void Application::panelHelp()
+{
+    struct Control {
+        const char* action;
+        const char* keys;
+    };
+    static constexpr Control kControls[] = {
+        {"Fly", "W A S D, Q / E down / up"},
+        {"Look", "two-finger scroll, or drag with the right button"},
+        {"Free look", "Tab, then move; Tab again to release"},
+        {"Turn / pitch", "arrow keys"},
+        {"Faster", "hold Shift (5x)"},
+        {"Speed", "[ / ] or - / ="},
+        {"Free-fly / orbit", "C"},
+        {"Time", "T pause, , / . 15 min (Shift: 1 hour)"},
+        {"Rain", "R on / off, Shift+R light / heavy"},
+        {"Print pose", "P"},
+        {"Panel", "F1"},
+        {"Quit", "Esc"},
+    };
+    if (ImGui::BeginTable("controls", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+        for (const Control& control : kControls) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled("%s", control.action);
+            ImGui::TableNextColumn();
+            ImGui::TextWrapped("%s", control.keys);
+        }
+        ImGui::EndTable();
+    }
+    ImGui::TextDisabled("While the pointer is over the panel, it gets the mouse.");
 }
 
 } // namespace emerald

@@ -120,6 +120,7 @@ private:
     void panelRendering();
     void panelCamera();
     void panelDebug();
+    void panelHelp();
     // Starts a GPU timing segment for pass while the panel is open.
     void markPass(GpuPassTimer::Pass pass);
     void collectPassTimes();
