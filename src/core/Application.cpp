@@ -854,6 +854,8 @@ void Application::recordFrameStats(float frameMs, float cpuMs)
 {
     const Terrain::Stats& stats = m_terrain->stats();
     m_frameMs.push_back(frameMs);
+    m_frameHistory[m_historyNext] = frameMs;
+    m_historyNext = (m_historyNext + 1) % m_frameHistory.size();
     m_cpuMs.push_back(cpuMs);
     m_gpuMs.push_back(-1.0f);
     m_terrainMs.push_back(static_cast<float>(stats.updateMs));
