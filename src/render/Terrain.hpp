@@ -67,6 +67,10 @@ public:
     void bindCoastMask(GLuint unit) const;
     glm::vec2 demSize() const { return m_demSize; }
 
+    // Slow devices: tiles without horizon maps (distant shadows then come from the cascades only),
+    // requested nearest first rather than coarsest first.
+    void setSlowDevice(bool slow);
+
     // Split distance in child-node sizes: lower gives coarser terrain sooner (default 2.5).
     void setLodRange(double factor) { m_rangeFactor = factor; }
 
@@ -109,6 +113,7 @@ private:
     void uploadTile(const TileData& tile);
     void buildGridMesh();
     double lodRange(int level) const;
+    float requestPriority(int level, double distance, bool visible) const;
     void buildCoastMask(const HeightField& heightField);
 
     std::unique_ptr<TileStreamer> m_streamer;
@@ -137,6 +142,7 @@ private:
     bool m_settled = false;
     double m_generationBudgetMs = 4.0;
     double m_rangeFactor = 2.5;
+    bool m_nearFirst = false;
     Stats m_stats;
 };
 

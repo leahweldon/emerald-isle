@@ -961,6 +961,7 @@ void Application::applyQuality(int quality)
     m_rain->setDropFraction(q.rainDrops);
     m_terrain->setLodRange(q.lodRange);
     m_terrain->setGenerationBudget(q.tileBudgetMs);
+    m_terrain->setSlowDevice(quality == 0 || m_options.touch);
 }
 
 int Application::sceneWidth() const
