@@ -134,9 +134,11 @@
 
     var output = [];
     // Runs that end by themselves (?frames=... or ?autofly=...) post their statistics back when
-    // served from this computer, for measuring browsers; never on the public site.
+    // served from this computer or the local network (to measure a phone); never on the public site.
     window.emeraldFinished = function () {
-      if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      var host = location.hostname;
+      if (host === 'localhost' || host === '127.0.0.1' || /\.local$/.test(host) ||
+          /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host)) {
         fetch('/report', { method: 'POST', body: JSON.stringify({
           browser: navigator.userAgent, query: location.search, pixelRatio: window.devicePixelRatio,
           size: [window.innerWidth, window.innerHeight], output: output }) });
