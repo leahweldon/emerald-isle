@@ -13,9 +13,9 @@ namespace emerald {
 
 namespace {
 
-// A node splits when the camera is within kRangeFactor * child size of it; vertices morph to the
-// coarser grid over the last part of that range so neighbouring levels meet smoothly.
-constexpr double kRangeFactor = 2.5;
+// A node splits when the camera is within the range factor (setLodRange) times the child size of
+// it; vertices morph to the coarser grid over the last part of that range so neighbouring levels
+// meet smoothly.
 constexpr float kMorphStart = 0.75f; // fraction of the range where morphing begins
 constexpr int kRootRadius = 2;       // roots drawn around the camera's root cell (5 x 5)
 // Levels this coarse (131 km nodes and up) are kept loaded even outside the view.
@@ -30,10 +30,6 @@ constexpr float kUnknownMaxY = 5000.0f;
 // Matches kMaterialPeriod in terrain.frag: material patterns repeat exactly every this many metres.
 constexpr double kMaterialPeriod = 360000.0;
 
-double lodRange(int level)
-{
-    return kRangeFactor * nodeSize(level);
-}
 
 // Frustum planes (a, b, c, d) with inward normals, from a camera-relative view-projection.
 void extractPlanes(const glm::mat4& m, glm::vec4 planes[6])
@@ -116,6 +112,11 @@ Terrain::~Terrain()
     glDeleteBuffers(1, &m_ebo);
     glDeleteBuffers(1, &m_vbo);
     glDeleteVertexArrays(1, &m_vao);
+}
+
+double Terrain::lodRange(int level) const
+{
+    return m_rangeFactor * nodeSize(level);
 }
 
 void Terrain::buildGridMesh()

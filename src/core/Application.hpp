@@ -2,6 +2,7 @@
 
 #include "core/CameraController.hpp"
 #include "core/FrameTimer.hpp"
+#include "core/Quality.hpp"
 #include "core/TimeOfDay.hpp"
 #include "core/Window.hpp"
 #include "render/Atmosphere.hpp"
@@ -16,6 +17,12 @@
 #include <memory>
 #include <vector>
 #include <string>
+
+#ifdef __EMSCRIPTEN__
+#define EMERALD_DEFAULT_QUALITY 1
+#else
+#define EMERALD_DEFAULT_QUALITY 2
+#endif
 
 namespace emerald {
 
@@ -55,6 +62,8 @@ struct AppOptions {
     bool ui = false;
     // Web build: use every WebGL fallback even where the browser has the feature, to test them.
     bool webglFallbacks = false;
+    // Index into kQualities: High on desktop, Medium on the web.
+    int quality = EMERALD_DEFAULT_QUALITY;
     // --debug: terrain colouring (0 off, 1 level of detail, 2 shadow cascades), node outlines and
     // wireframe, as in the panel's debug views.
     int debugView = 0;
@@ -112,6 +121,9 @@ private:
     void renderReflection(const glm::mat4& projection);
     // Resolves the HDR scene and tone maps it into the window (or the headless target).
     void toneMap();
+    void applyQuality(int quality);
+    int sceneWidth() const;  // the HDR scene's size: the framebuffer, or less under a pixel-ratio cap
+    int sceneHeight() const;
     float displayExposure() const; // linear scale before the tone curve
     void setTerrainUniforms(Shader& shader);
     void updateTitle();
@@ -178,7 +190,10 @@ private:
     // Per-pass GPU timing while the panel is open (it then stands in for m_gpuTimer).
     std::unique_ptr<GpuPassTimer> m_passTimer;
     bool m_passTiming = false;
-    bool m_splitScenePass = false; // time terrain, sea, sky and rain drops separately
+    bool m_splitScenePass = false;
+    int m_quality = 0;
+    float m_maxPixelRatio = 16.0f;
+    int m_reflectionDivisor = 2; // time terrain, sea, sky and rain drops separately
     GpuPassTimer::Times m_passMs{}; // smoothed for display
     float m_passTotalMs = 0.0f;
     std::array<float, 480> m_frameHistory{}; // recent frame times for the panel's graph, a ring

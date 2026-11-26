@@ -74,6 +74,7 @@ Window::Window(const WindowConfig& config)
 #endif
     gl::initCaps();
 
+    m_headless = config.headless;
     if (config.headless) {
         m_framebufferWidth = config.width;
         m_framebufferHeight = config.height;
@@ -102,6 +103,17 @@ Window::~Window()
         glfwDestroyWindow(m_handle);
     }
     glfwTerminate();
+}
+
+float Window::pixelRatio() const
+{
+    int width = 0;
+    int height = 0;
+    glfwGetWindowSize(m_handle, &width, &height);
+    if (m_headless || width <= 0) {
+        return 1.0f;
+    }
+    return static_cast<float>(m_framebufferWidth) / static_cast<float>(width);
 }
 
 bool Window::shouldClose() const

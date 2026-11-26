@@ -67,6 +67,9 @@ public:
     void bindCoastMask(GLuint unit) const;
     glm::vec2 demSize() const { return m_demSize; }
 
+    // Split distance in child-node sizes: lower gives coarser terrain sooner (default 2.5).
+    void setLodRange(double factor) { m_rangeFactor = factor; }
+
     // Main-thread time per frame for generating tiles when there is no worker thread (the web).
     void setGenerationBudget(double ms) { m_generationBudgetMs = ms; }
 
@@ -105,6 +108,7 @@ private:
     int residentSlot(const TileKey& key);
     void uploadTile(const TileData& tile);
     void buildGridMesh();
+    double lodRange(int level) const;
     void buildCoastMask(const HeightField& heightField);
 
     std::unique_ptr<TileStreamer> m_streamer;
@@ -132,6 +136,7 @@ private:
     std::int64_t m_rootZ = 0;
     bool m_settled = false;
     double m_generationBudgetMs = 4.0;
+    double m_rangeFactor = 2.5;
     Stats m_stats;
 };
 

@@ -22,6 +22,9 @@ public:
     void resolve() const;
     GLuint readFramebuffer() const { return m_resolveFbo ? m_resolveFbo : m_drawFbo; }
     void bindTexture(GLuint unit) const;
+    // Filtering when the texture is read: nearest (the default) or linear, for scaling it up.
+    void setFilter(GLint filter);
+    int samples() const { return m_samples; }
 
     int width() const { return m_width; }
     int height() const { return m_height; }
@@ -29,6 +32,7 @@ public:
 private:
     int m_width;
     int m_height;
+    int m_samples = 0;
     GLuint m_drawFbo = 0;
     GLuint m_msaaColour = 0; // multisampled renderbuffer, only with MSAA
     GLuint m_depth = 0;

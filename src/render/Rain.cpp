@@ -215,7 +215,8 @@ void Rain::updateGround(Terrain& terrain, Shader& depthShader, GLuint heightTile
 
 void Rain::simulate(float dt, const glm::dvec3& cameraPos, const glm::vec3& wind, float intensity)
 {
-    m_activeDrops = static_cast<int>(std::lround(static_cast<double>(kMaxDrops) * std::clamp(intensity, 0.0f, 1.0f)));
+    m_activeDrops = static_cast<int>(std::lround(static_cast<double>(kMaxDrops) * m_dropFraction *
+                                                  std::clamp(intensity, 0.0f, 1.0f)));
     const glm::dvec3 size(2.0 * kHalfWidth, 2.0 * kHalfHeight, 2.0 * kHalfWidth);
     const glm::dvec3 centre = cameraPos - glm::dvec3(0.0, kCentreDrop, 0.0);
     m_boxOrigin = glm::vec3(centre - glm::floor(centre / size) * size);

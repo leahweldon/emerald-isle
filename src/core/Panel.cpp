@@ -3,6 +3,7 @@
 #include "core/Application.hpp"
 
 #include "core/CameraController.hpp"
+#include "render/OffscreenTarget.hpp"
 #include "render/Rain.hpp"
 #include "render/ReflectionTarget.hpp"
 #include "render/ShadowMaps.hpp"
@@ -253,6 +254,17 @@ void Application::panelWeather()
 
 void Application::panelRendering()
 {
+    const float scale = m_ui->scale();
+    if (ImGui::BeginCombo("Quality", kQualities[static_cast<std::size_t>(m_quality)].name)) {
+        for (int i = 0; i < static_cast<int>(kQualities.size()); ++i) {
+            if (ImGui::Selectable(kQualities[static_cast<std::size_t>(i)].name, i == m_quality)) {
+                applyQuality(i);
+            }
+        }
+        ImGui::EndCombo();
+    }
+    label("Scene", scale);
+    ImGui::Text("%d x %d, %dx MSAA", sceneWidth(), sceneHeight(), m_scene ? m_scene->samples() : 0);
     int mapper = m_options.agx ? 1 : 0;
     if (ImGui::Combo("Tone mapper", &mapper, "PBR Neutral\0AgX\0")) {
         m_options.agx = mapper == 1;

@@ -8,7 +8,7 @@ uniform vec4 uShadowTexel;       // world size of one shadow texel in each casca
 uniform vec3 uViewForward;
 uniform bool uShadowsOff; // panel toggle: everything lit
 
-const float kShadowResolution = 2048.0;
+uniform float uShadowResolution; // texels per side of each cascade
 const float kCascadeBlend = 0.15;  // last fraction of each cascade, cross-faded into the next
 const float kNormalOffset = 1.5;   // texels, at grazing light
 const float kDepthBias = 1.0;      // texels' worth of depth
@@ -27,8 +27,8 @@ float cascadeVisibility(int cascade, vec3 relPos, vec3 normal, float nDotL)
         return 1.0;
     }
 #endif
-    float reference = p.z - kDepthBias / kShadowResolution;
-    float step_ = 1.0 / kShadowResolution;
+    float reference = p.z - kDepthBias / uShadowResolution;
+    float step_ = 1.0 / uShadowResolution;
     float sum = 0.0;
     for (int y = -1; y <= 1; ++y) {
         for (int x = -1; x <= 1; ++x) {

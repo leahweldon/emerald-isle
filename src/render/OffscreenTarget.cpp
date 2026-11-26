@@ -23,6 +23,7 @@ OffscreenTarget::OffscreenTarget(int width, int height, int samples, GLenum colo
     , m_height(height)
 {
     const GLsizei msaa = gl::samplesFor(colourFormat, samples);
+    m_samples = msaa;
 
     glGenTextures(1, &m_texture);
     glBindTexture(GL_TEXTURE_2D, m_texture);
@@ -88,6 +89,14 @@ void OffscreenTarget::resolve() const
     glBlitFramebuffer(0, 0, m_width, m_height, 0, 0, m_width, m_height, GL_COLOR_BUFFER_BIT,
                       GL_NEAREST);
     glBindFramebuffer(GL_FRAMEBUFFER, m_drawFbo);
+}
+
+void OffscreenTarget::setFilter(GLint filter)
+{
+    glBindTexture(GL_TEXTURE_2D, m_texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+    glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 void OffscreenTarget::bindTexture(GLuint unit) const

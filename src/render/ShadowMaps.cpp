@@ -23,11 +23,12 @@ constexpr float kConstantBias = 2.0f;
 
 } // namespace
 
-ShadowMaps::ShadowMaps()
+ShadowMaps::ShadowMaps(int resolution)
+    : m_resolution(resolution)
 {
     glGenTextures(1, &m_texture);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_texture);
-    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT32F, kResolution, kResolution, kCascades, 0,
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT32F, m_resolution, m_resolution, kCascades, 0,
                  GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
     // Hardware comparison with bilinear filtering: each lookup is already a 2 x 2 PCF.
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -105,7 +106,7 @@ void ShadowMaps::update(const glm::dvec3& cameraPos, const glm::vec3& forward, f
         const float centreDepth = std::min(0.5f * (n + f) * (1.0f + k2), f);
         const float radius = std::sqrt((f - centreDepth) * (f - centreDepth) + f * f * k2);
         const glm::vec3 centre = forward * centreDepth;
-        const double texel = 2.0 * static_cast<double>(radius) / kResolution;
+        const double texel = 2.0 * static_cast<double>(radius) / m_resolution;
         m_texelSize[index] = static_cast<float>(texel);
 
         // Snap the centre to the texel grid in world space; the offsets stay small in float.
@@ -139,7 +140,7 @@ void ShadowMaps::begin(int cascade)
     }
     glBindFramebuffer(GL_FRAMEBUFFER, m_framebuffer);
     glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_texture, 0, cascade);
-    glViewport(0, 0, kResolution, kResolution);
+    glViewport(0, 0, m_resolution, m_resolution);
     glClear(GL_DEPTH_BUFFER_BIT);
     // Both faces: a heightfield seen from the light shows its back on slopes facing away.
     glDisable(GL_CULL_FACE);
@@ -171,6 +172,7 @@ void ShadowMaps::apply(Shader& shader, GLuint unit) const
     shader.set("uCascadeStart", glm::vec4(m_cascadeStart[0], m_cascadeStart[1], m_cascadeStart[2], m_cascadeStart[3]));
     shader.set("uCascadeEnd", glm::vec4(m_cascadeEnd[0], m_cascadeEnd[1], m_cascadeEnd[2], m_cascadeEnd[3]));
     shader.set("uShadowTexel", glm::vec4(m_texelSize[0], m_texelSize[1], m_texelSize[2], m_texelSize[3]));
+    shader.set("uShadowResolution", static_cast<float>(m_resolution));
     shader.set("uViewForward", m_forward);
 }
 

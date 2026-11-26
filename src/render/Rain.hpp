@@ -60,6 +60,8 @@ public:
               float pixelAngle, const glm::vec3& cameraVelocity, const RainLighting& lighting);
 
     int activeDrops() const { return m_activeDrops; }
+    // Fraction of the pool drawn at full intensity (the quality setting).
+    void setDropFraction(float fraction) { m_dropFraction = fraction; }
     // Transform feedback steps checked with a query, and those that wrote fewer drops than the pool.
     void enableValidation();
     int checkedSteps() const { return m_checkedSteps; }
@@ -93,6 +95,7 @@ private:
     glm::vec3 m_boxOrigin{0.0f}; // box centre modulo the box size
     float m_cameraHeight = 0.0f;
     int m_activeDrops = 0;
+    float m_dropFraction = 1.0f;
     int m_frame = 0;
 
     bool m_validating = false;

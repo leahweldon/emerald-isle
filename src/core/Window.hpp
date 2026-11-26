@@ -43,6 +43,8 @@ public:
     int framebufferHeight() const { return m_framebufferHeight; }
     int refreshRate() const { return m_refreshRate; } // primary display, 0 if unknown
     float aspectRatio() const;
+    // Device pixels per window unit (2 on a Retina display or a HiDPI browser); 1 headless.
+    float pixelRatio() const;
 
     GLFWwindow* native() const { return m_handle; }
 
@@ -66,6 +68,7 @@ private:
     Input m_input;
     bool m_cursorCaptured = false;
     int m_refreshRate = 0;
+    bool m_headless = false;
 };
 
 } // namespace emerald

@@ -82,9 +82,8 @@ constexpr float kDryingSeconds = 6.0f;
 // Screenshot runs step the rain at this fixed rate, after a warm-up, so captures repeat exactly.
 constexpr float kRainFixedStep = 1.0f / 60.0f;
 constexpr int kRainWarmUpSteps = 90;
-// The reflection is rendered at this fraction of the screen size, and with this level-of-detail
-// scale (< 1 is coarser): rippled and seen at grazing angles, it does not need more.
-constexpr int kReflectionDivisor = 2;
+// The reflection is rendered with this level-of-detail scale (< 1 is coarser), and smaller than
+// the scene (the quality's divisor): rippled and seen at grazing angles, it does not need more.
 constexpr float kReflectionLodScale = 0.5f;
 
 // MSVC deprecates fopen (C4996, an error with warnings as errors); fopen_s is its replacement.
@@ -132,6 +131,7 @@ void printUsage(const char* program)
         "  --tone-mapper <name>  neutral (default, Khronos PBR Neutral) or agx\n"
         "  --rain <0-1>          Rain intensity, 0 dry to 1 heavy (default 0)\n"
         "  --ui                  Show the panel from the start (F1 toggles it)\n"
+        "  --quality <level>     low, medium or high (default high; medium on the web)\n"
         "  --debug <view>        Debug view: lod, cascades, tiles or wireframe (repeatable)\n"
         "  --gpu-timing          Also measure GPU time per frame (adds ~0.4 ms on macOS)\n"
         "  --validate <tiles>    Check for GL errors and terrain holes, require at least this many\n"
@@ -253,6 +253,12 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.rain = parseFloat(arg, argv[++i], 0.0f, 1.0f);
         } else if (std::strcmp(arg, "--webgl-fallbacks") == 0) {
             options.webglFallbacks = true;
+        } else if (std::strcmp(arg, "--quality") == 0 && hasValue) {
+            const std::string name = argv[++i];
+            options.quality = name == "low" ? 0 : name == "medium" ? 1 : name == "high" ? 2 : -1;
+            if (options.quality < 0) {
+                throw std::invalid_argument("Invalid value for --quality: " + name + " (low, medium or high)");
+            }
         } else if (std::strcmp(arg, "--ui") == 0) {
             options.ui = true;
         } else if (std::strcmp(arg, "--debug") == 0 && hasValue) {
@@ -337,7 +343,7 @@ Application::Application(AppOptions options)
     m_seaShader = std::make_unique<Shader>(shaderDir / "sea.vert", shaderDir / "sea.frag");
     m_shadowShader = std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "shadow.frag",
                                               "#define SHADOW_PASS\n");
-    m_shadows = std::make_unique<ShadowMaps>();
+    m_shadows = std::make_unique<ShadowMaps>(kQualities[static_cast<std::size_t>(m_options.quality)].shadowResolution);
     m_seabed = std::make_unique<SeabedMap>();
     m_reflectionShader = std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "terrain.frag",
                                                   "#define REFLECTION_PASS\n");
@@ -432,6 +438,7 @@ Application::Application(AppOptions options)
                                 m_options.assetDir / "fonts" / "Roboto-Medium.ttf");
     const bool selfEnding = m_options.frameLimit > 0 || m_options.autoflySeconds > 0.0f;
     m_ui->setVisible(m_options.ui || (!m_options.window.headless && !selfEnding));
+    applyQuality(m_options.quality);
     warmUp();
 }
 
@@ -675,11 +682,16 @@ void Application::updateTime(float deltaSeconds)
 
 void Application::render()
 {
-    // The scene goes into a linear HDR target that follows the drawable size.
-    const int width = m_window.framebufferWidth();
-    const int height = m_window.framebufferHeight();
-    if (!m_scene || m_scene->width() != width || m_scene->height() != height) {
+    // The scene goes into a linear HDR target that follows the drawable size (or less, under the
+    // quality's pixel-ratio cap; the tone mapping then scales it up).
+    const int width = sceneWidth();
+    const int height = sceneHeight();
+    if (!m_scene || m_scene->width() != width || m_scene->height() != height ||
+        m_scene->samples() != gl::samplesFor(sceneFormat(), m_options.window.samples)) {
         m_scene = std::make_unique<OffscreenTarget>(width, height, m_options.window.samples, sceneFormat());
+        if (width != m_window.framebufferWidth()) {
+            m_scene->setFilter(GL_LINEAR);
+        }
     }
     m_scene->bind();
 
@@ -724,8 +736,7 @@ void Application::render()
     m_seabed->apply(*m_seaShader, kSeabedUnit);
     m_reflection->bindTexture(kReflectionUnit);
     m_seaShader->set("uReflection", static_cast<int>(kReflectionUnit));
-    m_seaShader->set("uViewportSize", glm::vec2(static_cast<float>(m_window.framebufferWidth()),
-                                                static_cast<float>(m_window.framebufferHeight())));
+    m_seaShader->set("uViewportSize", glm::vec2(static_cast<float>(width), static_cast<float>(height)));
     m_seaShader->set("uExaggeration", m_heightField->verticalExaggeration());
     m_shadows->apply(*m_seaShader, kShadowUnit);
     m_terrain->bindCoastMask(kCoastUnit);
@@ -737,7 +748,7 @@ void Application::render()
     gl::setWireframe(false);
 
     // Skybox last, at the far plane, so it is only shaded where nothing else was drawn.
-    const float pixelAngle = m_camera.fovY / static_cast<float>(m_window.framebufferHeight());
+    const float pixelAngle = m_camera.fovY / static_cast<float>(height);
     markScenePart(GpuPassTimer::Sky);
     m_sky->setDisplay(displayExposure(), m_options.agx ? 1 : 0);
     m_sky->drawBackground(glm::inverse(projection * rotationOnly), m_atmosphere, pixelAngle);
@@ -815,6 +826,33 @@ void Application::toneMap()
     glEnable(GL_DEPTH_TEST);
 }
 
+void Application::applyQuality(int quality)
+{
+    m_quality = quality;
+    const Quality& q = kQualities[static_cast<std::size_t>(quality)];
+    m_maxPixelRatio = q.maxPixelRatio;
+    m_reflectionDivisor = q.reflectionDivisor;
+    m_options.window.samples = q.msaa;
+    if (m_shadows->resolution() != q.shadowResolution) {
+        m_shadows = std::make_unique<ShadowMaps>(q.shadowResolution);
+    }
+    m_rain->setDropFraction(q.rainDrops);
+    m_terrain->setLodRange(q.lodRange);
+    m_terrain->setGenerationBudget(q.tileBudgetMs);
+}
+
+int Application::sceneWidth() const
+{
+    const float scale = std::min(1.0f, m_maxPixelRatio / m_window.pixelRatio());
+    return std::max(static_cast<int>(std::lround(static_cast<float>(m_window.framebufferWidth()) * scale)), 1);
+}
+
+int Application::sceneHeight() const
+{
+    const float scale = std::min(1.0f, m_maxPixelRatio / m_window.pixelRatio());
+    return std::max(static_cast<int>(std::lround(static_cast<float>(m_window.framebufferHeight()) * scale)), 1);
+}
+
 float Application::displayExposure() const
 {
     const float base = m_options.agx ? kAgxExposure : kNeutralExposure;
@@ -868,8 +906,8 @@ void Application::setTerrainUniforms(Shader& shader)
 
 void Application::renderReflection(const glm::mat4& projection)
 {
-    m_reflection->resize(std::max(m_window.framebufferWidth() / kReflectionDivisor, 1),
-                         std::max(m_window.framebufferHeight() / kReflectionDivisor, 1));
+    m_reflection->resize(std::max(sceneWidth() / m_reflectionDivisor, 1),
+                         std::max(sceneHeight() / m_reflectionDivisor, 1));
     // Camera-relative position to its mirror image in the sea (y = 0): y -> -y - 2 * camera height.
     glm::mat4 mirror(1.0f);
     mirror[1][1] = -1.0f;
