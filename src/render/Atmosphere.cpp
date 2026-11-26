@@ -154,7 +154,7 @@ void Atmosphere::apply(Shader& shader, float cameraHeight) const
     shader.set("uAmbientTint", ambientScale() * glm::mix(glm::vec3(1.0f), kGoldenShade, haze() * (1.0f - night())));
     shader.set("uNight", night());
     const float t = glm::smoothstep(highAltitudeStart, highAltitudeEnd, cameraHeight);
-    shader.set("uFogDensity", fogDensity * glm::mix(1.0f, highAltitudeFogScale, t) * glm::mix(1.0f, kRainFog, rain));
+    shader.set("uFogDensity", (fog ? fogDensity : 0.0f) * glm::mix(1.0f, highAltitudeFogScale, t) * glm::mix(1.0f, kRainFog, rain));
     shader.set("uFogFalloff", 1.0f / fogScaleHeight);
     shader.set("uRain", rain);
     shader.set("uOvercast", overcast());

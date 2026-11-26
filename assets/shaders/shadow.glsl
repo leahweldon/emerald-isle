@@ -6,6 +6,7 @@ uniform vec4 uCascadeStart;      // view depth where each cascade starts and end
 uniform vec4 uCascadeEnd;
 uniform vec4 uShadowTexel;       // world size of one shadow texel in each cascade
 uniform vec3 uViewForward;
+uniform bool uShadowsOff; // panel toggle: everything lit
 
 const float kShadowResolution = 2048.0;
 const float kCascadeBlend = 0.15;  // last fraction of each cascade, cross-faded into the next
@@ -35,6 +36,9 @@ float cascadeVisibility(int cascade, vec3 relPos, vec3 normal, float nDotL)
 // cascade it fades into farVisibility (1 where nothing farther is known).
 float shadowVisibility(vec3 relPos, vec3 normal, float nDotL, float farVisibility)
 {
+    if (uShadowsOff) {
+        return 1.0;
+    }
     float depth = dot(relPos, uViewForward);
     if (depth >= uCascadeEnd.w) {
         return farVisibility;

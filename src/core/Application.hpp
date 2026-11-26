@@ -112,6 +112,7 @@ private:
     void panelPerformance();
     void panelTime();
     void panelWeather();
+    void panelRendering();
     // Starts a GPU timing segment for pass while the panel is open.
     void markPass(GpuPassTimer::Pass pass);
     void collectPassTimes();
@@ -143,6 +144,13 @@ private:
     std::unique_ptr<Shader> m_toneMapShader;
     std::unique_ptr<Rain> m_rain;
     std::unique_ptr<Ui> m_ui;
+    // Features the panel can switch off, to see what each contributes.
+    struct Features {
+        bool shadows = true;
+        bool horizonShadows = true;
+        bool reflections = true;
+        bool rainParticles = true;
+    } m_features;
     // Per-pass GPU timing, only while the panel is open (it then stands in for m_gpuTimer).
     std::unique_ptr<GpuPassTimer> m_passTimer;
     bool m_passTiming = false;

@@ -37,6 +37,7 @@ uniform sampler2DArray uMaterialNormal;
 
 uniform sampler2DArray uHorizon; // the node's horizon map: 8 directions in two RGBA layers
 uniform float uTileBorder;
+uniform bool uHorizonShadowsOff; // panel toggle
 
 // Soft edge for distant shadows, also hiding the 8-bit angle steps: about a degree.
 const float kHorizonSoftness = 0.018;
@@ -372,7 +373,7 @@ void main()
     float diffuse = max(dot(shadingNormal, uLightDir), 0.0);
     float lit = 0.0;
     if (diffuse > 0.0) {
-        float far = dot(vRelPos, uViewForward) > uCascadeStart.w ? horizonVisibility() : 1.0;
+        float far = !uHorizonShadowsOff && dot(vRelPos, uViewForward) > uCascadeStart.w ? horizonVisibility() : 1.0;
         lit = mix(shadowVisibility(vRelPos, n, max(dot(n, uLightDir), 0.0), far), 1.0, 0.5 * uRain);
         diffuse *= lit;
     }

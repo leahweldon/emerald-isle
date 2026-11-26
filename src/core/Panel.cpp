@@ -57,6 +57,9 @@ void Application::buildPanel()
     if (ImGui::CollapsingHeader("Weather")) {
         panelWeather();
     }
+    if (ImGui::CollapsingHeader("Rendering")) {
+        panelRendering();
+    }
     ImGui::PopItemWidth();
     ImGui::TextDisabled("F1 hides this panel");
     ImGui::End();
@@ -186,6 +189,30 @@ void Application::panelWeather()
     ImGui::TextUnformatted("Drops");
     ImGui::SameLine(kValueColumn * scale);
     ImGui::Text("%d of %d", m_rain->activeDrops(), Rain::kMaxDrops);
+}
+
+void Application::panelRendering()
+{
+    int mapper = m_options.agx ? 1 : 0;
+    if (ImGui::Combo("Tone mapper", &mapper, "PBR Neutral\0AgX\0")) {
+        m_options.agx = mapper == 1;
+    }
+    ImGui::SliderFloat("Exposure", &m_options.exposureEv, -3.0f, 3.0f, "%+.1f EV");
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+        m_options.exposureEv = 0.0f;
+    }
+    // Two columns of switches.
+    const float column = ImGui::GetContentRegionAvail().x * 0.5f;
+    ImGui::Checkbox("Shadows", &m_features.shadows);
+    ImGui::SameLine(column);
+    ImGui::BeginDisabled(!m_features.shadows);
+    ImGui::Checkbox("Horizon shadows", &m_features.horizonShadows);
+    ImGui::EndDisabled();
+    ImGui::Checkbox("Reflections", &m_features.reflections);
+    ImGui::SameLine(column);
+    ImGui::Checkbox("Fog", &m_atmosphere.fog);
+    ImGui::Checkbox("Rain particles", &m_features.rainParticles);
+    ImGui::TextDisabled("Right-click exposure to reset it");
 }
 
 } // namespace emerald

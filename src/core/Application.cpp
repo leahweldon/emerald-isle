@@ -580,7 +580,7 @@ void Application::updateWeather(float deltaSeconds)
 
 void Application::renderRain()
 {
-    if (m_rainIntensity <= 0.0f) {
+    if (m_rainIntensity <= 0.0f || !m_features.rainParticles) {
         return;
     }
     const glm::dvec3& eye = m_camera.position;
@@ -696,7 +696,7 @@ void Application::render()
 
     // Rain after everything opaque, blended into the HDR target.
     markPass(GpuPassTimer::Rain);
-    if (m_rainIntensity > 0.0f) {
+    if (m_rainIntensity > 0.0f && m_features.rainParticles) {
         RainLighting lighting;
         lighting.lightDir = m_atmosphere.lightDir();
         lighting.lightColour = m_atmosphere.lightColour();
@@ -765,7 +765,7 @@ void Application::renderShadows(const glm::mat4& projection)
 {
     // Twilight has no direct light to shadow; the maps keep their last contents meanwhile.
     const glm::vec3 light = m_atmosphere.lightColour();
-    if (std::max(light.r, std::max(light.g, light.b)) < 1e-4f) {
+    if (!m_features.shadows || std::max(light.r, std::max(light.g, light.b)) < 1e-4f) {
         return;
     }
     const glm::dvec3& eye = m_camera.position;
@@ -813,7 +813,11 @@ void Application::renderReflection(const glm::mat4& projection)
     mirror[1][1] = -1.0f;
     mirror[3][1] = -2.0f * static_cast<float>(m_camera.position.y);
 
-    m_reflection->begin();
+    m_reflection->begin(); // clears: with reflections off, the sea reflects only the sky
+    if (!m_features.reflections) {
+        m_reflection->end();
+        return;
+    }
     m_reflectionShader->use();
     setTerrainUniforms(*m_reflectionShader);
     m_reflectionShader->set("uMirror", mirror);
@@ -846,6 +850,8 @@ void Application::setSceneUniforms(Shader& shader)
     shader.set("uCameraXZ", glm::vec2(m_camera.position.x, m_camera.position.z));
     shader.set("uCameraHeight", static_cast<float>(m_camera.position.y));
     m_atmosphere.apply(shader, static_cast<float>(m_camera.position.y));
+    shader.set("uShadowsOff", m_features.shadows ? 0 : 1);
+    shader.set("uHorizonShadowsOff", m_features.horizonShadows ? 0 : 1);
 }
 
 void Application::recordFrameStats(float frameMs, float cpuMs)
