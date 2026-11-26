@@ -145,6 +145,15 @@ The [live demo](https://leahweldon.github.io/emerald-isle/) is the same C++ sour
   | MSAA | off | 2× | 4× |
 
 - **Download:** about 7 MB in all: `index.wasm` 0.9 MB (0.4 MB compressed), `index.js` 0.15 MB, and `index.data` 6.5 MB of assets. The material textures are re-encoded for the web by `tools/make_web_assets.py` (15 MB down to 2.5 MB); the 16-bit heightmap (2.5 MB) is kept as it is.
+- **Measured** on an M5 MacBook (120 Hz display, window at 2× pixel density, so Medium renders the scene at 1.5×), 2,400-frame runs:
+
+  | Browser | First view (golden-hour orbit) | 20 s flight over Kerry | GPU time | Main-thread work per frame |
+  |---|---|---|---|---|
+  | Chrome 158 | 120 FPS | 120 FPS | 4.2 ms (Kerry 4.5 ms) | median 0.5 ms, max 6.6 ms |
+  | Firefox 161 | 120 FPS | 120 FPS | not available | median 1 ms, max 10 ms |
+  | Safari 26.6 | 60 FPS | 60 FPS | not available | median 2 ms, max 6 ms |
+
+  Every run held the display's rate. Safari draws at most 60 frames a second by default (its "Prefer page rendering updates near 60 fps" setting), and only Chrome offers GPU timer queries. Firefox and Safari report time to the millisecond only. Tile generation never took more than 5 ms of a frame, even flying at 2.5 km/s.
 - **Options in the address:** any option can be passed as a URL parameter, for example [`?view=shore&rain=1&time=13:30`](https://leahweldon.github.io/emerald-isle/?view=shore&rain=1&time=13:30). Without any, the demo opens on golden hour over Dingle Bay, orbiting slowly until you press a key, click or scroll.
 
 ## Building
