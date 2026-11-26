@@ -85,6 +85,7 @@ constexpr int kRainWarmUpSteps = 90;
 // The reflection is rendered with this level-of-detail scale (< 1 is coarser), and smaller than
 // the scene (the quality's divisor): rippled and seen at grazing angles, it does not need more.
 constexpr float kReflectionLodScale = 0.5f;
+constexpr float kMinReflectionSide = 256.0f; // pixels, along the reflection's shorter side
 
 // MSVC deprecates fopen (C4996, an error with warnings as errors); fopen_s is its replacement.
 std::FILE* openForWriting(const std::string& path)
@@ -1027,8 +1028,13 @@ void Application::setTerrainUniforms(Shader& shader)
 
 void Application::renderReflection(const glm::mat4& projection)
 {
-    m_reflection->resize(std::max(sceneWidth() / m_reflectionDivisor, 1),
-                         std::max(sceneHeight() / m_reflectionDivisor, 1));
+    // A fraction of the scene, but never so small that coasts mirrored in it turn to steps
+    // (a phone's scene at Low quality is only about 400 pixels across).
+    const float shorter = static_cast<float>(std::min(sceneWidth(), sceneHeight()));
+    const float scale = std::max(1.0f / static_cast<float>(m_reflectionDivisor),
+                                 std::min(kMinReflectionSide / shorter, 1.0f));
+    m_reflection->resize(std::max(static_cast<int>(std::lround(static_cast<float>(sceneWidth()) * scale)), 1),
+                         std::max(static_cast<int>(std::lround(static_cast<float>(sceneHeight()) * scale)), 1));
     // Camera-relative position to its mirror image in the sea (y = 0): y -> -y - 2 * camera height.
     glm::mat4 mirror(1.0f);
     mirror[1][1] = -1.0f;
