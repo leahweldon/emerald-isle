@@ -20,6 +20,10 @@ struct ViewPreset {
 // Returns nullptr if no preset has this name.
 const ViewPreset* findViewPreset(const std::string& name);
 
+// Number of presets, and each by index, for menus.
+int viewPresetCount();
+const ViewPreset& viewPreset(int index);
+
 // Comma-separated preset names, for usage text.
 std::string viewPresetNames();
 

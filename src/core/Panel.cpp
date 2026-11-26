@@ -2,7 +2,10 @@
 
 #include "core/Application.hpp"
 
+#include "core/CameraController.hpp"
 #include "render/Rain.hpp"
+#include "render/ViewPresets.hpp"
+#include "world/HeightField.hpp"
 #include "render/Terrain.hpp"
 #include "world/SolarPosition.hpp"
 #include "ui/Ui.hpp"
@@ -22,6 +25,13 @@ namespace {
 constexpr float kPanelWidth = 360.0f;
 constexpr float kLabelWidth = 110.0f; // right of sliders, for their labels
 constexpr float kValueColumn = 130.0f; // where readout values start
+
+// A readout's name, then the cursor at the value column.
+void label(const char* name, float scale)
+{
+    ImGui::TextUnformatted(name);
+    ImGui::SameLine(kValueColumn * scale);
+}
 
 } // namespace
 
@@ -59,6 +69,9 @@ void Application::buildPanel()
     }
     if (ImGui::CollapsingHeader("Rendering")) {
         panelRendering();
+    }
+    if (ImGui::CollapsingHeader("Camera")) {
+        panelCamera();
     }
     ImGui::PopItemWidth();
     ImGui::TextDisabled("F1 hides this panel");
@@ -98,18 +111,18 @@ void Application::panelPerformance()
 
     ImGui::SeparatorText("Terrain");
     const Terrain::Stats& stats = m_terrain->stats();
-    const auto row = [scale](const char* name, const char* format, auto... values) {
-        ImGui::TextUnformatted(name);
-        ImGui::SameLine(kValueColumn * scale);
-        ImGui::Text(format, values...);
-    };
-    row("Triangles", "%.2fM (%d draws)", static_cast<double>(stats.triangles) / 1e6, stats.drawCalls);
-    row("Shadow passes", "%.2fM (%d draws)", static_cast<double>(stats.shadowTriangles) / 1e6, stats.shadowDrawCalls);
-    row("Reflection", "%.2fM (%d draws)", static_cast<double>(stats.reflectionTriangles) / 1e6,
+    label("Triangles", scale);
+    ImGui::Text("%.2fM (%d draws)", static_cast<double>(stats.triangles) / 1e6, stats.drawCalls);
+    label("Shadow passes", scale);
+    ImGui::Text("%.2fM (%d draws)", static_cast<double>(stats.shadowTriangles) / 1e6, stats.shadowDrawCalls);
+    label("Reflection", scale);
+    ImGui::Text("%.2fM (%d draws)", static_cast<double>(stats.reflectionTriangles) / 1e6,
         stats.reflectionDrawCalls);
-    row("Tiles", "%d resident, %llu generated", stats.residentTiles,
+    label("Tiles", scale);
+    ImGui::Text("%d resident, %llu generated", stats.residentTiles,
         static_cast<unsigned long long>(stats.tilesGenerated));
-    row("Streaming", "%zu queued, %d uploaded", stats.outstandingTiles, stats.uploadsThisFrame);
+    label("Streaming", scale);
+    ImGui::Text("%zu queued, %d uploaded", stats.outstandingTiles, stats.uploadsThisFrame);
 }
 
 void Application::panelTime()
@@ -213,6 +226,60 @@ void Application::panelRendering()
     ImGui::Checkbox("Fog", &m_atmosphere.fog);
     ImGui::Checkbox("Rain particles", &m_features.rainParticles);
     ImGui::TextDisabled("Right-click exposure to reset it");
+}
+
+void Application::panelCamera()
+{
+    const float scale = m_ui->scale();
+    // Jump to a preset; free-fly from there.
+    const char* current = m_options.view.empty() ? "(orbit)" : m_options.view.c_str();
+    if (ImGui::BeginCombo("View", current)) {
+        for (int i = 0; i < viewPresetCount(); ++i) {
+            const ViewPreset& preset = viewPreset(i);
+            if (ImGui::Selectable(preset.name, m_options.view == preset.name)) {
+                m_options.view = preset.name;
+                applyViewPreset(preset, m_camera);
+                m_controller->startFreeFly();
+            }
+        }
+        ImGui::EndCombo();
+    }
+    float multiplier = m_controller->speedMultiplier();
+    if (ImGui::SliderFloat("Speed", &multiplier, 1.0f / 32.0f, 32.0f, "%.2fx", ImGuiSliderFlags_Logarithmic)) {
+        m_controller->setSpeedMultiplier(multiplier);
+    }
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+        m_controller->setSpeedMultiplier(1.0f);
+    }
+
+    const glm::dvec3& p = m_camera.position;
+    const double ground = m_heightField->groundHeight(p.x, p.z);
+    label("Position", scale);
+    ImGui::Text("%.0f, %.0f m", p.x, p.z);
+    label("Height", scale);
+    ImGui::Text("%.0f m, %.0f m above ground", p.y, p.y - ground);
+    float heading = glm::degrees(m_camera.yaw);
+    heading -= 360.0f * std::floor(heading / 360.0f);
+    label("Heading", scale);
+    ImGui::Text("%.0f\xc2\xb0, pitch %.0f\xc2\xb0", static_cast<double>(heading),
+        static_cast<double>(glm::degrees(m_camera.pitch)));
+    if (m_controller->mode() == CameraController::Mode::FreeFly) {
+        const double v = static_cast<double>(m_controller->effectiveSpeed());
+        label("Flying", scale);
+    ImGui::Text(v >= 1000.0 ? "%.1f km/s" : "%.0f m/s", v >= 1000.0 ? v / 1000.0 : v);
+    } else {
+        label("Flying", scale);
+    ImGui::Text("orbit (C for free-fly)");
+    }
+
+    // The pose in the form ViewPresets.cpp takes; also what P prints.
+    if (ImGui::Button("Copy pose as a preset", ImVec2(-1.0f, 0.0f))) {
+        ImGui::SetClipboardText(m_controller->presetLine().c_str());
+        m_copiedAt = m_timer.elapsedSeconds();
+    }
+    if (m_timer.elapsedSeconds() - m_copiedAt < 2.0) {
+        ImGui::TextDisabled("Copied to the clipboard");
+    }
 }
 
 } // namespace emerald

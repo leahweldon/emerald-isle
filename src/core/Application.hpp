@@ -113,6 +113,7 @@ private:
     void panelTime();
     void panelWeather();
     void panelRendering();
+    void panelCamera();
     // Starts a GPU timing segment for pass while the panel is open.
     void markPass(GpuPassTimer::Pass pass);
     void collectPassTimes();
@@ -158,6 +159,7 @@ private:
     float m_passTotalMs = 0.0f;
     std::array<float, 480> m_frameHistory{}; // recent frame times for the panel's graph, a ring
     std::size_t m_historyNext = 0;
+    double m_copiedAt = -10.0; // when the panel last copied the pose, seconds
     unsigned m_fullscreenVao = 0; // GL vertex array name
     Camera m_camera;
     std::unique_ptr<CameraController> m_controller;

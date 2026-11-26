@@ -208,6 +208,11 @@ void CameraController::updateNearPlane()
     m_camera.nearPlane = std::clamp(altitude * 0.3f, 2.0f, 5000.0f);
 }
 
+void CameraController::setSpeedMultiplier(float multiplier)
+{
+    m_speedMultiplier = std::clamp(multiplier, kMinMultiplier, kMaxMultiplier);
+}
+
 glm::dvec3 CameraController::lookTarget() const
 {
     const glm::dvec3 origin = m_camera.position;
