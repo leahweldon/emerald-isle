@@ -61,7 +61,11 @@ void Application::updateUi()
 {
     Input& input = m_window.input();
     input.setBlocked(false, false);
-    if (input.wasPressed(GLFW_KEY_F1)) {
+    // F1, H or ` (F1 is a brightness key on Mac keyboards, and some browsers take it), but not
+    // while typing into a panel field.
+    const bool toggle = input.wasPressed(GLFW_KEY_F1) || input.wasPressed(GLFW_KEY_H) ||
+                        input.wasPressed(GLFW_KEY_GRAVE_ACCENT);
+    if (toggle && !m_ui->wantsTextInput()) {
         m_ui->toggle();
     }
     if (m_ui->beginFrame(m_window.framebufferWidth(), m_window.framebufferHeight())) {
@@ -109,7 +113,7 @@ void Application::buildPanel()
         panelHelp();
     }
     ImGui::PopItemWidth();
-    ImGui::TextDisabled("F1 hides this panel");
+    ImGui::TextDisabled("H or F1 hides this panel");
     ImGui::End();
 }
 
@@ -416,7 +420,7 @@ void Application::panelHelp()
         {"Time", "T pause, , / . 15 min (Shift: 1 hour)"},
         {"Rain", "R on / off, Shift+R light / heavy"},
         {"Print pose", "P"},
-        {"Panel", "F1"},
+        {"Panel", "H, ` or F1"},
         {"Quit", "Esc"},
     };
     if (ImGui::BeginTable("controls", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {

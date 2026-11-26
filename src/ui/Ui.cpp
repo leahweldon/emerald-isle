@@ -178,6 +178,11 @@ bool Ui::covers(double x, double y) const
            y < m_panelRect[1] + m_panelRect[3];
 }
 
+bool Ui::wantsTextInput() const
+{
+    return m_visible && ImGui::GetIO().WantTextInput;
+}
+
 bool Ui::wantsKeyboard() const
 {
     return m_visible && ImGui::GetIO().WantCaptureKeyboard;

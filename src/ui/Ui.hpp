@@ -32,6 +32,8 @@ public:
     // Whether ImGui is using the mouse or keyboard, so the camera and shortcuts should not.
     bool wantsMouse() const;
     bool wantsKeyboard() const;
+    // Whether a text field is being edited (keys then belong to it, shortcuts included).
+    bool wantsTextInput() const;
 
     // Whether a point (window coordinates) is on the panel as last drawn, so a click there belongs
     // to it even before ImGui has seen the pointer arrive.

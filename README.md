@@ -99,7 +99,7 @@ flowchart LR
 
 ## The panel
 
-**F1** opens an in-app panel, built on [Dear ImGui](https://github.com/ocornut/imgui) and drawn after tone mapping, so it is not tone mapped. It is open from the start in interactive sessions and closed in runs that end by themselves, unless `--ui` is passed. Its sections:
+**H** (or **`** or **F1**) opens an in-app panel, built on [Dear ImGui](https://github.com/ocornut/imgui) and drawn after tone mapping, so it is not tone mapped. It is open from the start in interactive sessions and closed in runs that end by themselves, unless `--ui` is passed. Its sections:
 
 - **Performance:** frame rate, a frame-time graph of the last 480 frames, GPU time per pass from timer queries, and terrain stats: triangles and draw calls (also for the shadow and reflection passes), resident and generated tiles, and the streaming queue. Timer queries run only while the panel is open. They are placed between render passes. Inside the main HDR pass they would split it, which costs extra on macOS, so terrain, sea, sky and rain drops are timed together as "Scene" unless **Split the scene pass** is ticked.
 - **Time & sky:** clock, date, time speed and pause, and the sun's elevation and bearing.
@@ -238,7 +238,8 @@ On a MacBook's ProMotion display, GLFW with OpenGL presents at 120 Hz (measured 
 | Rain on / off | **R** | **R** |
 | Light ↔ heavy rain | **Shift**+**R** | **Shift**+**R** |
 | Print pose as a `--view` preset line | **P** | **P** |
-| Show / hide the panel | **F1** | **F1** |
+| Show / hide the panel | **H**, **`** or **F1** (not while typing into a panel field) | **H**, **`** or **F1** |
+| Look around (web build) | Click the scene to capture the pointer, **Esc** to release it | Click, then move the mouse |
 | Quit | **Esc** | **Esc** |
 
 Flying speed follows your height above the ground, like a map viewer: about 50 m/s skimming the hills at 30 m, about 2.4 km/s at a 1.5 km cruising height (Kerry to the edge of the DEM in about 12 s), and faster still from orbit. The multiplier keys scale that, and the window title shows the current speed (or "orbit"). Without `--view` the app starts in a slow orbit of the island; press **C** to take control. The camera stays at least 30 m above the ground and sea.
