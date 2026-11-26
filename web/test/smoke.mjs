@@ -11,7 +11,8 @@ import { extname, join, resolve } from 'node:path';
 
 const root = resolve(process.argv[2] ?? '../build-web');
 const seconds = Number(process.argv[3] ?? 15);
-const query = process.argv[4] ?? ''; // e.g. "?view=shore&rain=1"
+// The first view, at low quality to keep software rendering quick (options replace the defaults).
+const query = process.argv[4] ?? '?view=glenbeigh&time=21:30&orbit&paused&quality=low';
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm',
                 '.data': 'application/octet-stream' };
 
@@ -31,7 +32,8 @@ const url = `http://127.0.0.1:${server.address().port}/`;
 
 const problems = [];
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+// Small: CI runners render WebGL on the CPU, a few seconds a frame at full size.
+const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
 let warmedUp = false;
 page.on('console', (message) => {
   const text = message.text();
@@ -56,8 +58,14 @@ if (!warmedUp && problems.length === 0) problems.push('the app did not start wit
 if (problems.length === 0) {
   await page.waitForTimeout(seconds * 1000);
 }
+// The screenshot waits for the page to paint, which software rendering can make slow; it is an
+// aid, not part of the test.
 await mkdir('test-results', { recursive: true });
-await page.screenshot({ path: 'test-results/smoke.png' });
+try {
+  await page.screenshot({ path: 'test-results/smoke.png', timeout: 120_000 });
+} catch (error) {
+  console.warn(`No screenshot: ${error.message.split('\n')[0]}`);
+}
 await browser.close();
 server.close();
 

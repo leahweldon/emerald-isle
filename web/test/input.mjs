@@ -33,7 +33,8 @@ const check = (ok, what) => {
 };
 
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
+// Small, at low quality: CI runners render WebGL on the CPU.
+const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
 await page.addInitScript(() => {
   window.pointerLockRequests = [];
   Element.prototype.requestPointerLock = function () {
@@ -43,7 +44,7 @@ await page.addInitScript(() => {
 });
 page.on('console', (m) => { if (m.type() === 'error') console.log(`[console error] ${m.text()}`); });
 page.on('pageerror', (e) => failures.push(`page error: ${e.message}`));
-await page.goto(`http://127.0.0.1:${server.address().port}/`);
+await page.goto(`http://127.0.0.1:${server.address().port}/?view=glenbeigh&time=21:30&orbit&paused&quality=low`);
 await page.waitForFunction(() => document.getElementById('loading')?.classList.contains('done'), null,
                            { timeout: 120_000 });
 
@@ -52,7 +53,7 @@ const state = () => page.evaluate(() => JSON.parse(Module.ccall('emerald_state',
 const settle = async (frames = 4) => {
   const start = (await state()).frames;
   await page.waitForFunction((f) => JSON.parse(Module.ccall('emerald_state', 'string', [], [])).frames >= f,
-                             start + frames, { timeout: 60_000 });
+                             start + frames, { timeout: 180_000 });
 };
 const hold = async (key, frames = 6) => {
   await page.keyboard.down(key);
@@ -63,7 +64,7 @@ const hold = async (key, frames = 6) => {
 
 let s = await state();
 check(s.orbiting, 'starts orbiting');
-await page.mouse.click(480, 300);
+await page.mouse.click(400, 250);
 await settle();
 s = await state();
 check(!s.orbiting, 'a click stops the orbit');
