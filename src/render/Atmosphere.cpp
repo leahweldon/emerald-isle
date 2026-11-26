@@ -33,6 +33,14 @@ constexpr float kGoldenBoost = 0.4f;      // extra strength of a low sun's light
 // Shade at golden hour is lit by the blue sky overhead rather than the warm horizon.
 const glm::vec3 kGoldenShade(0.80f, 0.93f, 1.25f);
 constexpr float kSunsetY = -0.02f; // sun about 1 degree down: the moon takes over as the light
+// Rain: the fraction of direct light full cloud removes, and the fog density multiplier at
+// heavy rain (visibility falls from ~250 km to ~30 km).
+constexpr float kRainDimming = 0.85f;
+constexpr float kRainFog = 8.0f;
+// Overcast zenith radiance per unit of sun height, cool grey; heavy rain darkens it further.
+const glm::vec3 kCloudRadiance = 0.30f * glm::vec3(0.92f, 0.96f, 1.0f);
+constexpr float kHeavyCloudDarkening = 0.65f;
+constexpr float kRainForFullCloud = 0.4f; // rain intensity at which cloud cover is complete
 
 } // namespace
 
@@ -99,16 +107,34 @@ glm::vec3 Atmosphere::lightColour() const
         const float luminance = glm::dot(sun, glm::vec3(0.2126f, 0.7152f, 0.0722f));
         const glm::vec3 golden = glm::max(glm::vec3(luminance) + (sun - luminance) * (1.0f + kGoldenSaturation * haze()),
                                           glm::vec3(0.0f));
-        return sunStrength * (1.0f + kGoldenBoost * haze()) * golden;
+        return (1.0f - kRainDimming * overcast()) * sunStrength * (1.0f + kGoldenBoost * haze()) * golden;
     }
     // A low moon is dimmed and warmed by the air like the sun; kMoonLight is its overhead value.
     const glm::vec3 overhead = sunTransmittance(glm::vec3(0.0f, 1.0f, 0.0f), haze());
-    return night() * kMoonLight * sunTransmittance(moonDir(), haze()) / overhead;
+    return (1.0f - kRainDimming * overcast()) * night() * kMoonLight * sunTransmittance(moonDir(), haze()) / overhead;
 }
 
 float Atmosphere::ambientScale() const
 {
-    return glm::mix(1.0f, 0.5f, glm::smoothstep(-0.02f, 0.05f, sunDir.y));
+    // Under cloud the sky is the light, so it is no longer halved against the sun.
+    const float clear = glm::mix(1.0f, 0.5f, glm::smoothstep(-0.02f, 0.05f, sunDir.y));
+    return glm::mix(clear, 1.0f, overcast());
+}
+
+float Atmosphere::overcast() const
+{
+    return glm::smoothstep(0.0f, kRainForFullCloud, rain);
+}
+
+glm::vec3 Atmosphere::overcastSky() const
+{
+    // Daylight through the cloud follows the sun's height, softened since cloud scatters light
+    // from the whole sky, and fades through twilight; at night the cloud glows faintly with
+    // moonlight and airglow.
+    const float sun = (0.15f + 0.85f * std::max(sunDir.y, 0.0f)) * glm::smoothstep(-0.12f, 0.02f, sunDir.y);
+    const glm::vec3 day = kCloudRadiance * sun;
+    const glm::vec3 nightGlow = nightSky() * 3.0f + glm::vec3(moonSkyIntensity() * 4.0f);
+    return (day + nightGlow) * glm::mix(1.0f, kHeavyCloudDarkening, rain);
 }
 
 float Atmosphere::moonSkyIntensity() const
@@ -128,8 +154,11 @@ void Atmosphere::apply(Shader& shader, float cameraHeight) const
     shader.set("uAmbientTint", ambientScale() * glm::mix(glm::vec3(1.0f), kGoldenShade, haze() * (1.0f - night())));
     shader.set("uNight", night());
     const float t = glm::smoothstep(highAltitudeStart, highAltitudeEnd, cameraHeight);
-    shader.set("uFogDensity", fogDensity * glm::mix(1.0f, highAltitudeFogScale, t));
+    shader.set("uFogDensity", fogDensity * glm::mix(1.0f, highAltitudeFogScale, t) * glm::mix(1.0f, kRainFog, rain));
     shader.set("uFogFalloff", 1.0f / fogScaleHeight);
+    shader.set("uRain", rain);
+    shader.set("uOvercast", overcast());
+    shader.set("uWetness", wetness);
 }
 
 } // namespace emerald

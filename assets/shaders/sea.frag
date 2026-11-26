@@ -13,6 +13,8 @@ uniform samplerCube uSkyCube;
 uniform vec3 uIrradianceSH[9];
 uniform vec3 uAmbientTint; // scale on sky light, cooler at golden hour
 uniform float uNight; // 0 by day, 1 at full night
+uniform float uRain;  // 0 dry, 1 heavy rain
+uniform float uOvercast; // cloud cover: no sharp glint once the sun is hidden
 uniform float uFogDensity;
 uniform float uFogFalloff;
 uniform sampler2D uCoastMask;  // blurred land mask, see TerrainMesh::bindCoastMask
@@ -29,6 +31,7 @@ uniform float uSeabedRange;      // height at depth 0, world units
 uniform float uExaggeration;
 uniform sampler2D uReflection;   // mirrored terrain, linear colour; alpha 0 where only sky
 uniform vec2 uViewportSize;      // pixels, for screen coordinates
+uniform float uWaveTime;         // seconds; frozen for screenshots
 
 #include "shadow.glsl"
 
@@ -44,6 +47,27 @@ const float kFoamDepth = 0.8;     // metres: foam where the water is shallower t
 const vec3 kFoam = vec3(0.7);     // foam albedo
 const float kReflectionDistortion = 0.03; // screen fraction per unit of ripple slope
 const float kFoamCover = 0.7;     // at most this much of the surface is foam
+// Raindrop rings: at most one per grid cell (the cell divides the wave period, so the pattern
+// wraps with the waves), each expanding and fading over its period; rain intensity sets the share
+// of cells with a ring. They fade out with distance before they alias, leaving rougher water.
+const float kRingCell = 0.75;     // metres
+const float kRingPeriod = 1.1;    // seconds
+const float kRingRadius = 0.55;   // metres, at the end of the period
+const float kRingWavelength = 0.12;
+const float kRingSlope = 0.6;     // peak slope of a fresh ring
+const float kRingHighlight = 0.6; // brightening of fresh crests (and the splash at the centre)
+const float kRingFadeStart = 40.0;
+const float kRingFadeEnd = 220.0;
+const float kRainRoughness = 0.03;  // slope variance added by heavy rain, everywhere
+// Rain-roughened water smears reflections, mostly vertically (each facet tilts the mirror image
+// up or down the screen); screen fractions at heavy rain. Mirrored detail also loses contrast
+// towards the sky, and the rougher surface reflects a little less at grazing angles.
+const vec2 kRainSmear = vec2(0.004, 0.03);
+const float kRainMirrorLoss = 0.5;
+const float kRainFresnelLoss = 0.25;
+// Under cloud, shallow water loses its turquoise to a grey-green.
+const vec3 kOvercastWater = vec3(0.85, 1.05, 0.95);
+const float kOvercastDesaturation = 0.7;
 
 // Diffuse sky light from order-2 SH (coefficients pre-convolved and divided by pi on the CPU).
 vec3 skyAmbient(vec3 n)
@@ -99,6 +123,51 @@ vec3 rippleNormal(vec3 waveNormal, out float slopeVariance)
                           waveNormal.z + slope.y * waveNormal.y));
 }
 
+// Shallow water under cloud: no sun to light the sand through it, so turquoise turns grey-green.
+// Matches terrain.frag, so the coastline blend still meets the sea.
+vec3 overcastWater(vec3 c)
+{
+    float luminance = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    return mix(c, luminance * kOvercastWater, kOvercastDesaturation * uOvercast);
+}
+
+vec3 hash3(vec2 p)
+{
+    vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+    q += dot(q, q.yxz + 33.33);
+    return fract((q.xxy + q.yzz) * q.zyx);
+}
+
+// Slope (d height / dx, d height / dz) of the raindrop rings around wrapped world point p, and
+// in crest how bright their young crests are: under an even overcast sky, tilting the water
+// barely changes its reflection, so the rings are seen by their crests catching the light.
+vec2 rainRings(vec2 p, out float crest)
+{
+    vec2 cell = floor(p / kRingCell);
+    vec2 slope = vec2(0.0);
+    crest = 0.0;
+    for (int j = -1; j <= 1; ++j) {
+        for (int i = -1; i <= 1; ++i) {
+            vec2 c = cell + vec2(i, j);
+            vec3 h = hash3(mod(c, 1536.0 / kRingCell));
+            float cycle = uWaveTime / kRingPeriod + h.z * 17.0;
+            // A fresh draw each cycle decides whether this cell has a ring.
+            if (hash3(vec2(floor(cycle), h.x * 113.0)).x > uRain) {
+                continue;
+            }
+            float age = fract(cycle);
+            vec2 d = p - (c + 0.15 + 0.7 * h.xy) * kRingCell;
+            float dist = max(length(d), 1e-4);
+            float x = dist - age * kRingRadius;
+            float wave = sin(x * 6.2831853 / kRingWavelength) * exp(-x * x / (kRingWavelength * kRingWavelength));
+            float fade = (1.0 - age) * (1.0 - age);
+            slope += kRingSlope * fade * wave * d / dist;
+            crest += fade * fade * max(wave, 0.0);
+        }
+    }
+    return slope;
+}
+
 // Depth of water in metres, from the nearer seabed layer that covers this point; -1 if neither.
 float waterDepth()
 {
@@ -136,6 +205,16 @@ void main()
     vec3 v = normalize(-vRelPos);
     float slopeVariance;
     vec3 n = rippleNormal(normalize(vWaveNormal), slopeVariance);
+    float crest = 0.0;
+    if (uRain > 0.0) {
+        float near = 1.0 - smoothstep(kRingFadeStart, kRingFadeEnd, length(vRelPos));
+        if (near > 0.0) {
+            vec2 ring = near * rainRings(vWaveXZ, crest);
+            crest *= near;
+            n = normalize(n - vec3(ring.x, 0.0, ring.y));
+        }
+        slopeVariance += kRainRoughness * uRain;
+    }
     // Seen edge-on, a ripple can face away from the camera; keep the shading normal visible.
     n = normalize(n + vec3(0.0, max(0.05 - dot(n, v), 0.0), 0.0));
 
@@ -154,10 +233,14 @@ void main()
         foam = kFoamCover * distanceFade * smoothstep(kFoamDepth, 0.1, depth) *
                smoothstep(0.4, 0.65, lace + 0.3 * (1.0 - depth / kFoamDepth));
     }
+    if (uOvercast > 0.0) {
+        water = overcastWater(water);
+    }
 
     // Terrain shadows on the water (headlands over bays) dim the direct light and its glint.
     float diffuse = max(dot(n, uLightDir), 0.0);
     float visibility = uLightDir.y > 0.0 ? shadowVisibility(vRelPos, vec3(0.0, 1.0, 0.0), uLightDir.y, 1.0) : 0.0;
+    visibility = mix(visibility, 1.0, 0.5 * uRain); // cloud softens what direct light is left
     vec3 lightOnSurface = skyAmbient(n) + uLightColour * diffuse * visibility;
     vec3 body = water * lightOnSurface;
 
@@ -168,16 +251,34 @@ void main()
     vec3 reflection = texture(uSkyCube, r).rgb;
     // Mirrored terrain where it was drawn, nudged by the ripples, over the sky behind it.
     vec2 screen = gl_FragCoord.xy / uViewportSize + n.xz * kReflectionDistortion;
-    vec4 mirrored = texture(uReflection, clamp(screen, vec2(0.0), vec2(1.0)));
+    vec4 mirrored;
+    if (uRain > 0.0) {
+        // Seven taps along a short, mostly vertical line, rotated per pixel to hide the steps.
+        vec2 smear = kRainSmear * uRain;
+        float jitter = hash3(gl_FragCoord.xy).x - 0.5;
+        mirrored = vec4(0.0);
+        for (int i = -3; i <= 3; ++i) {
+            vec2 tap = screen + smear * ((float(i) + jitter) / 3.0) * vec2(jitter * 2.0, 1.0);
+            mirrored += texture(uReflection, clamp(tap, vec2(0.0), vec2(1.0)));
+        }
+        mirrored /= 7.0;
+        mirrored.a *= 1.0 - kRainMirrorLoss * uRain;
+    } else {
+        mirrored = texture(uReflection, clamp(screen, vec2(0.0), vec2(1.0)));
+    }
     reflection = mix(reflection, mirrored.rgb, mirrored.a);
     float fresnel = schlick(dot(n, v));
+    if (uRain > 0.0) {
+        fresnel *= 1.0 - kRainFresnelLoss * uRain;
+    }
     // Waves too small for the ripple maps still tilt the surface (Cox and Munk: slope variance
     // 0.003 + 0.00512 per m/s of wind). They count once the ripples stop being resolved, which
     // widens the distant glint into a glitter path.
     float unresolved = (0.003 + 0.00512 * uWindSpeed) * smoothstep(50.0, 3000.0, length(vRelPos));
     float alpha = sqrt(kGlintRoughness * kGlintRoughness + max(slopeVariance, unresolved));
-    vec3 glint = uLightColour * visibility * ggxSpecular(n, v, uLightDir, alpha);
+    vec3 glint = uLightColour * visibility * ggxSpecular(n, v, uLightDir, alpha) * (1.0 - uOvercast);
     vec3 colour = mix(mix(body, reflection, fresnel) + glint, kFoam * lightOnSurface, foam);
+    colour += kRingHighlight * crest * kFoam * lightOnSurface;
     colour = nightVision(colour);
 
     // Same fog as terrain.frag.

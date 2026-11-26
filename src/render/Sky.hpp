@@ -38,6 +38,9 @@ public:
     // Sets uSkyCube (bound to unit) and uIrradianceSH[9] for terrain and sea shading.
     void applyEnvironment(Shader& shader, GLuint unit) const;
 
+    // Diffuse sky light averaged over all directions (the constant SH term), for particles.
+    glm::vec3 averageIrradiance() const { return m_irradianceSH[0] * 0.282095f; }
+
     int refreshes() const { return m_refreshes; } // cubemaps swapped in since startup
 
 private:

@@ -17,13 +17,17 @@ A real-time terrain renderer of Ireland, written in C++17 and modern shader-base
 - [x] **5. Infinite world:** terrain chunks streamed around the camera, with level of detail
 - [x] **6. Shadows:** cascaded shadow maps and horizon-map distant shadows from a moving sun, with a day/night cycle
 - [x] **7. Water:** Gerstner waves, drifting ripples, planar reflections, depth-tinted shallows, foam and a sun and moon glint
-- [ ] **8. Weather:** GPU-instanced rain
+- [x] **8. Weather:** GPU rain simulated with transform feedback and drawn as instanced streaks, with splashes, overcast skies, wet ground and raindrop rings on the sea
 - [ ] **9. Tools:** in-app panel for toggling features and viewing frame timings
 - [ ] **10. Web:** WebGL build with a live demo
 
 ## Screenshots
 
-The image at the top is milestone 6 at golden hour. Milestone 6 and 7 images are reproducible with `--view <name> --screenshot <file>` plus the options shown (rendered at 2560 × 1440 and downscaled; screenshots freeze the waves).
+The image at the top is milestone 6 at golden hour. Milestone 6, 7 and 8 images are reproducible with `--view <name> --screenshot <file>` plus the options shown (rendered at 2560 × 1440 and downscaled; screenshots freeze the waves and step the rain at a fixed rate).
+
+![Milestone 8, weather: heavy rain over Dingle Bay from the Glenbeigh hills, with the far shore fading into the rain under an overcast sky (--view glenbeigh --time 13:30 --rain 1)](docs/images/milestone-08.png)
+
+![Milestone 8, weather: light rain at sunset, the low sun glowing through thin cloud and mist (--view glenbeigh --time 21:30 --rain 0.3)](docs/images/milestone-08-evening.png)
 
 ![Milestone 7, water: low sun over Dingle Bay from the Glenbeigh hills, with the Dingle peninsula mirrored in the sea and the sun's glint (--view glenbeigh --time 21:30)](docs/images/milestone-07.png)
 
@@ -62,6 +66,15 @@ flowchart LR
 - **Reflection:** Schlick Fresnel blends the water colour (looking down) with reflections (at grazing angles), so the far sea runs into the sky at the horizon. The terrain is drawn mirrored about sea level into a half-resolution HDR texture, with coarser levels of detail and plain material colours; the sea reads it at its own screen position, nudged by the ripples, over the sky cubemap where nothing was drawn.
 - **Depth:** the ground under the sea around the camera is rendered straight down into two depth layers (near and wide), each snapped to its texel grid, giving the water depth at every point. Shallow water is clear turquoise fading to blue-green offshore, with lacy foam where it is under a metre deep; around Ireland, whose sea floor in the DEM is flat, a blurred coast mask still tints kilometres of coastal water.
 - **Light:** the sun or moon glint is GGX specular, dimmed by the cascaded shadows, so headlands shade bays and golden hour and moonlit nights get a glitter path. Fog, night vision and the coastal blend into the terrain apply as before.
+
+## How the rain works
+
+- **Simulation (transform feedback):** up to 196,608 raindrops live in a vertex buffer, each with a position, velocity and diameter (0.5–5 mm, mostly small). Every frame a vertex shader advances them, one drop per vertex, with rasterisation off, and transform feedback writes the results into a second buffer; the two buffers swap roles each frame (ping-pong). Each drop falls under gravity against quadratic air drag, scaled so it settles at its terminal velocity (about 2 m/s for the smallest drops, 9 m/s for the largest), and drifts with the same wind that drives the waves. Steps are delta-time based, capped at 50 ms.
+- **The box:** drops fill an 80 m box from 60 m below the camera to 20 m above it. Positions are stored world-fixed modulo the box size, so the box wraps around the camera: a drop leaving one side comes back on the other, the density stays constant at any flying speed, and coordinates stay small however far out the camera is.
+- **Collision:** the terrain under the box is rendered straight down into a 128 × 128 height map from the streamed tiles each frame (skipped when the camera is too high for drops to reach the ground). A drop that crosses the ground or the sea during a step respawns at the top of the box. A landing on the ground also records its position, and a second pool of 32,768 splash droplets, advanced the same way, reads those landings through a buffer texture: each dead droplet checks its share of the drops and, on a landing, jumps outwards and upwards, falls, bounces once and fades within half a second.
+- **Drawing (instancing):** drops and droplets are drawn after the opaque scene and before tone mapping, as instanced camera-facing quads: one instance per particle, four vertices built in the vertex shader. Each is a streak from the particle back along its velocity relative to the camera over 50 ms, so the rain slants with the wind and stretches when flying. Streaks are depth tested against the scene without writing depth. Depth clamping keeps drops nearer than the near plane (often hundreds of metres from a high camera) in front of everything instead of clipping them. A streak is at least a fixed angle wide (a pixel at 720p) with its opacity scaled by its true width, so distant drops fade instead of aliasing; each particle counts for many real drops. Streaks add light to the scene and never darken it: each drop passes on some of the sky light around it, plus the bright light behind it (the sky above the line of sight, and the sun or moon when it is behind the drop and not hidden by cloud), so rain glows against a low sun and shows at noon, golden hour and night. Each drop has its own width, opacity and streak length; near drops are drawn a little wider and softer, far ones thinner and fainter.
+- **Weather:** rain intensity runs from 0 (dry) to 1 (heavy) and eases towards its target over a few seconds. It clouds the sky over (full cover from moderate rain), with a grey overcast that follows the sun's height, so the ambient light and fog colour follow too. It dims direct light by up to 85% and weakens shadows, hides the sun, moon, stars and the sea's glint, and thickens the fog up to eightfold. The ground gets wet over a couple of seconds and dries more slowly: albedo darkens per material, and a water film, glossier on flat ground, reflects the sky. On the sea, procedural raindrop rings expand and fade near the camera. Rain roughens all the water out to the horizon: mirrored hills are smeared and lose contrast (softened in light rain, broken up in heavy rain), and shallow water loses its turquoise to grey-green under cloud.
+- **Cost:** on an M5 with a 2560 × 1440 window, heavy rain (all 196,608 drops) adds about 0.8–1.35 ms of GPU time over 30 s flights, and light rain about 0.5–0.6 ms. Shading is cheap. Nearly all of the cost is per instance: even drops rejected in the vertex shader cost vertex work, and only about 7% of the box is in view. That is what caps the drop count. Compacting visible drops on the GPU would need geometry shaders or GL 4 features, beyond the OpenGL 3.3 baseline.
 
 ## How light and shadow work
 
@@ -105,7 +118,7 @@ build\Release\emerald-isle.exe       # Windows (Visual Studio generator)
 | `--headless` | Keep the window hidden and never take focus; render into an offscreen framebuffer at exactly `--width` × `--height` (no HiDPI scaling, 4× MSAA resolved). Needs `--frames`, `--screenshot` or `--autofly`. Vsync is off, and the frame log's focus column is always 0 |
 | `--frames <n>` | Exit after rendering *n* frames |
 | `--screenshot <file>` | Save the final frame as a PNG, then exit |
-| `--view <name>` | Start in free-fly at a preset pose instead of the orbit: `overview`, `kerry`, `wicklow`, `glenbeigh`, `archipelago`, `ridges`, `kerry-south` |
+| `--view <name>` | Start in free-fly at a preset pose instead of the orbit: `overview`, `kerry`, `wicklow`, `glenbeigh`, `archipelago`, `ridges`, `kerry-south`, `shore` (low on a beach, close enough for rain to land nearby) |
 | `--time <HH:MM>` | Local clock time in Irish civil time, summer time included (default 18:00). The sun's position comes from the solar equations for 53.4° N, 8° W |
 | `--date <MM-DD>` | Date (default 06-21, midsummer) |
 | `--sun-bearing <deg>`, `--sun-elevation <deg>` | Fix the sun at a compass bearing (0 = north, default 225) and elevation (default 22) instead of following the time of day |
@@ -115,6 +128,7 @@ build\Release\emerald-isle.exe       # Windows (Visual Studio generator)
 | `--validate <tiles>` | Check correctness during the run: no GL errors (counted separately inside the shadow passes), shadow casters drawn, no holes in the visible terrain once it has loaded, ground always loaded under the camera, and at least *tiles* tiles generated and resident. Prints PASS/FAIL per check and exits non-zero on failure (used by CI) |
 | `--exposure <ev>` | Exposure offset in stops for the final tone mapping (default 0) |
 | `--tone-mapper <name>` | `neutral` (default, Khronos PBR Neutral) or `agx` |
+| `--rain <0-1>` | Start with rain of this intensity, 0 dry to 1 heavy (default 0); with `--validate`, also checks that every simulation step wrote the whole drop pool |
 | `--gpu-timing` | Also measure GPU time per frame with timer queries (exit stats and `gpu_ms` in the frame log); costs ~0.4 ms a frame on macOS |
 
 The window title shows the frame rate and frame time, terrain triangles, draw calls and loaded tiles (plus any still streaming). On exit the app prints the median, p99 and maximum frame time, the frames over the 120 Hz and 60 Hz budgets (8.3 ms and 16.7 ms), the time before the swap (CPU work plus driver waits, so the rest of a slow frame is waiting to present), and the terrain's main-thread cost. With vsync on, the frame rate follows the display's refresh rate (logged at startup) and the exit stats add the average presentation rate. Single frame times are less useful then: a swap sometimes returns at once and the next waits two refreshes, so pairs of ~1.7 ms and ~15 ms frames appear even when every refresh gets a new frame.
@@ -136,19 +150,21 @@ On a MacBook's ProMotion display, GLFW with OpenGL presents at 120 Hz (measured 
 | Free-fly ↔ orbit | **C** | **C** |
 | Pause / resume time | **T** | **T** |
 | Time back / forward 15 min | **,** / **.** (1 hour with **Shift**) | **,** / **.** (1 hour with **Shift**) |
+| Rain on / off | **R** | **R** |
+| Light ↔ heavy rain | **Shift**+**R** | **Shift**+**R** |
 | Print pose as a `--view` preset line | **P** | **P** |
 | Quit | **Esc** | **Esc** |
 
 Flying speed follows your height above the ground, like a map viewer: about 50 m/s skimming the hills at 30 m, about 2.4 km/s at a 1.5 km cruising height (Kerry to the edge of the DEM in about 12 s), and faster still from orbit. The multiplier keys scale that, and the window title shows the current speed (or "orbit"). Without `--view` the app starts in a slow orbit of the island; press **C** to take control. The camera stays at least 30 m above the ground and sea.
 
-Time runs at one minute per second in interactive sessions, and the window title shows the clock and date. Runs that end by themselves (`--frames`, `--screenshot`, `--autofly`) keep the time fixed so they are reproducible.
+Time runs at one minute per second in interactive sessions, and the window title shows the clock and date (and the rain, while it rains). **R** starts and stops rain at the current level: light (30%) unless `--rain` set another; **Shift**+**R** switches between light and heavy and starts it. Rain eases in and out over a few seconds, and the ground dries more slowly. Runs that end by themselves (`--frames`, `--screenshot`, `--autofly`) keep the time fixed so they are reproducible.
 
 ## Project structure
 
 ```text
 src/
   core/     window and context, frame timing, application loop, screenshots
-  render/   shaders, atmosphere and sky, shadow maps, camera and view presets, CDLOD terrain, materials, sea surface, reflections and seabed map
+  render/   shaders, atmosphere and sky, shadow maps, camera and view presets, CDLOD terrain, materials, sea surface, reflections and seabed map, rain
   world/    height field (DEM + procedural islands), noise, solar position, tile streaming and horizon maps
 assets/
   shaders/  GLSL source

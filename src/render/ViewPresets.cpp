@@ -7,7 +7,7 @@ namespace emerald {
 namespace {
 
 // Targets from ITM coordinates of each landmark, relative to the heightmap centre.
-const std::array<ViewPreset, 7> kPresets = {{
+const std::array<ViewPreset, 8> kPresets = {{
     // Whole island from the south-east, side-lit by the south-west sun.
     {"overview", glm::vec3(0.0f, 0.0f, 0.0f), 0.8f, 0.2f, 400e3f},
     // MacGillycuddy's Reeks and Carrauntoohil from the east.
@@ -27,6 +27,9 @@ const std::array<ViewPreset, 7> kPresets = {{
     // midsummer midnight the full moon stands due south, 30 degrees right of the view, so slopes
     // and the bay catch it from the side.
     {"kerry-south", glm::vec3(-116e3f, 600.0f, 170e3f), 3.66f, 0.10f, 45e3f},
+    // Low on the shore west of Glenbeigh, ~32 m above the ground, looking north-north-west
+    // across Castlemaine Harbour to the Dingle peninsula: close enough for rain to land nearby.
+    {"shore", glm::vec3(-161956.0f, 0.0f, 126293.0f), 0.291f, 0.0056f, 10440.0f},
 }};
 
 } // namespace

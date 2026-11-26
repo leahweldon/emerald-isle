@@ -56,15 +56,17 @@ jobs:
             --frames 10 --screenshot frame.png
 
       # Flies with tiles streaming continuously over the procedural archipelago, and west over
-      # Kerry across the DEM border. Checks correctness, not timing: a runner without a GPU is too
-      # noisy for frame times. Fails on GL errors, holes in the terrain, ground missing under the
-      # camera, fewer than 100 tiles streamed, or a flight that does not complete.
+      # Kerry across the DEM border in heavy rain. Checks correctness, not timing: a runner without
+      # a GPU is too noisy for frame times. Fails on GL errors, holes in the terrain, ground missing
+      # under the camera, fewer than 100 tiles streamed, a flight that does not complete, or (in
+      # rain) a transform feedback step that did not write every drop.
       - name: Streaming test
         if: runner.os == 'Linux'
         run: |
-          for view in archipelago kerry; do
-            xvfb-run -a -s "-screen 0 640x480x24" ./build/emerald-isle --headless --view "$view" \
-              --autofly 10 --width 640 --height 360 --validate 100
+          for flight in "archipelago --rain 0" "kerry --rain 1"; do
+            set -- $flight
+            xvfb-run -a -s "-screen 0 640x480x24" ./build/emerald-isle --headless --view "$1" \
+              --rain "$3" --autofly 10 --width 640 --height 360 --validate 100
           done
 
       - name: Upload rendered frame
