@@ -258,6 +258,8 @@ void CameraController::updateOrbit(float dt)
 void CameraController::applyOrbit()
 {
     m_camera.lookFrom(m_orbitTarget, m_orbitAzimuth, m_orbitElevation, m_orbitDistance);
+    m_camera.pitch -= m_orbitTilt;
+    m_camera.clampPitch();
     // Matches the preset convention: precision scales with how far away the subject is.
     m_camera.nearPlane = m_orbitDistance * 0.01f;
 }
@@ -283,6 +285,16 @@ void CameraController::updateNearPlane()
     const auto altitude = static_cast<float>(
         m_camera.position.y - m_groundHeight(m_camera.position.x, m_camera.position.z));
     m_camera.nearPlane = std::clamp(altitude * 0.3f, 2.0f, 5000.0f);
+}
+
+void CameraController::setOrbitTilt(float tilt)
+{
+    if (tilt != m_orbitTilt) {
+        m_orbitTilt = tilt;
+        if (m_mode == Mode::Orbit) {
+            applyOrbit();
+        }
+    }
 }
 
 void CameraController::setSpeedMultiplier(float multiplier)

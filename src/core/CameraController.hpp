@@ -48,6 +48,9 @@ public:
     // The [ ] multiplier on free-fly speed, clamped to 1/32-32.
     float speedMultiplier() const { return m_speedMultiplier; }
     void setSpeedMultiplier(float multiplier);
+    // Pitches an orbit this far below its target (radians), so land rather than sky fills a
+    // portrait screen.
+    void setOrbitTilt(float tilt);
 
     // The current pose as a ViewPreset initialiser line, for src/render/ViewPresets.cpp.
     std::string presetLine() const;
@@ -81,6 +84,7 @@ private:
     float m_orbitElevation = 0.0f;
     float m_orbitDistance = 1.0f;
     bool m_orbitAnimate = false;
+    float m_orbitTilt = 0.0f;
 };
 
 } // namespace emerald

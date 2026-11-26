@@ -621,6 +621,10 @@ void Application::update(float deltaSeconds)
         m_orbitingUntilInput = false;
         m_controller->startFreeFly();
     }
+    // Portrait: tilt the orbit down, fully at 9:16 or narrower.
+    constexpr float kPortraitTilt = 0.2f;
+    const float portrait = std::clamp((1.0f - m_window.aspectRatio()) / (1.0f - 9.0f / 16.0f), 0.0f, 1.0f);
+    m_controller->setOrbitTilt(kPortraitTilt * portrait);
     // Gestures since the last frame (each one also stops an orbit's automatic rotation).
     if (m_touchDrag != glm::vec2(0.0f)) {
         m_controller->touchDrag(m_touchDrag);
@@ -870,7 +874,7 @@ void Application::render()
     gl::setWireframe(false);
 
     // Skybox last, at the far plane, so it is only shaded where nothing else was drawn.
-    const float pixelAngle = m_camera.fovY / static_cast<float>(height);
+    const float pixelAngle = m_camera.verticalFov(m_window.aspectRatio()) / static_cast<float>(height);
     markScenePart(GpuPassTimer::Sky);
     m_sky->setDisplay(displayExposure(), m_options.agx ? 1 : 0);
     m_sky->drawBackground(glm::inverse(projection * rotationOnly), m_atmosphere, pixelAngle);
@@ -993,7 +997,8 @@ void Application::renderShadows(const glm::mat4& projection)
     }
     const glm::dvec3& eye = m_camera.position;
     const double ground = m_heightField->groundHeight(eye.x, eye.z);
-    m_shadows->update(eye, m_camera.forward(), m_camera.fovY, projection[1][1] / projection[0][0],
+    m_shadows->update(eye, m_camera.forward(), m_camera.verticalFov(m_window.aspectRatio()),
+                      projection[1][1] / projection[0][0],
                       static_cast<float>(eye.y - ground), m_atmosphere.lightDir());
 
     // Errors from earlier in the frame are counted by validateFrame(), not against the shadows.
