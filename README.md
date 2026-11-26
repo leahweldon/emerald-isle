@@ -105,6 +105,8 @@ flowchart LR
 - **Debug views:** terrain coloured by level of detail or by shadow cascade (with legends of node sizes and cascade distances), node outlines, wireframe, and a preview of the reflection texture.
 - **Controls:** the keyboard and trackpad controls.
 
+**Cost** (M5, 1280 × 720 window at 2560 × 1440, 30 s flights): closed, nothing measurable, with GPU time within 0.01 ms of the build without the panel. Open, building the panel takes about 0.03 ms of CPU time. Frame times stay within run-to-run noise: unchanged over Kerry, where frames are held near 8.3 ms by the 120 Hz display, and about 0.3 ms longer on average over Glenbeigh. With the panel open, the timer queries make the CPU wait for the GPU inside the frame rather than at the swap, so the time before the swap reads about 5 ms higher without the frame taking longer.
+
 While the pointer is over the panel or a widget is in use, the camera and shortcuts do not see the mouse or keys. Text is rasterised at full pixel resolution, so it stays sharp on HiDPI screens; headless captures scale the panel to the image as a 1280 × 720 window would show it.
 
 ## Building
