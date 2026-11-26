@@ -57,6 +57,8 @@ struct AppOptions {
     float exposureEv = 0.0f;
     // Final tone curve: false for Khronos PBR Neutral, true for AgX.
     bool agx = false;
+    // FXAA in the tone mapping: -1 whenever the scene has no MSAA, 0 off, 1 on.
+    int fxaa = -1;
     // Show the panel from the start. Otherwise it starts open only in interactive sessions (not
     // in runs that end by themselves); F1 toggles it.
     bool ui = false;
@@ -64,6 +66,9 @@ struct AppOptions {
     bool webglFallbacks = false;
     bool orbit = false;  // --orbit: orbit the --view target until the first input
     bool paused = false; // --paused: time of day starts paused
+    // --touch (set by the web page on touch screens): Low quality unless --quality is given, no
+    // pointer capture, and touch gestures steer the camera, keeping an orbit an orbit.
+    bool touch = false;
     // Index into kQualities: High on desktop, Medium on the web.
     int quality = EMERALD_DEFAULT_QUALITY;
     // --debug: terrain colouring (0 off, 1 level of detail, 2 shadow cascades), node outlines and
@@ -110,6 +115,15 @@ public:
     bool done() const;
     // Camera, orbit, panel and pointer state as JSON, for the web build's input test.
     std::string stateJson() const;
+    // Touch gestures from the web page, applied at the next update: drags in CSS pixels, a pinch
+    // as a scale.
+    void touchDrag(float dx, float dy);
+    void touchPinch(float scale);
+    void touchPan(float dx, float dy);
+    // The touch overlay's buttons: each steps through its choices and returns the new label.
+    const char* nextView();
+    const char* cycleTime();
+    const char* cycleRain();
     // Shows or hides the panel (F1 does the same), for the web page's button.
     void toggleUi();
 
@@ -200,6 +214,7 @@ private:
     bool m_passTiming = false;
     bool m_splitScenePass = false;
     int m_quality = 0;
+    bool fxaaEnabled() const;
     float m_maxPixelRatio = 16.0f;
     int m_reflectionDivisor = 2; // time terrain, sea, sky and rain drops separately
     GpuPassTimer::Times m_passMs{}; // smoothed for display
@@ -220,6 +235,12 @@ private:
     float m_deltaSeconds = 0.0f;
     bool m_rainWarmedUp = false; // screenshot runs: rain settled before the frames counted
     bool m_orbitingUntilInput = false; // --orbit, until the first input
+    glm::vec2 m_touchDrag{0.0f};       // gestures since the last update
+    glm::vec2 m_touchPan{0.0f};
+    float m_touchPinch = 1.0f;
+    int m_touchView = 0;  // overlay choices, as indices into their lists
+    int m_touchTime = 0;
+    int m_touchRain = 0;
     glm::dvec3 m_lastCameraPos{0.0};
     glm::vec3 m_cameraVelocity{0.0f};
     int m_frameCount = 0;

@@ -114,6 +114,23 @@ Terrain::~Terrain()
     glDeleteVertexArrays(1, &m_vao);
 }
 
+float Terrain::requestPriority(int level, double distance, bool visible) const
+{
+    // Missing roots are holes, so always first. Then coarse levels before fine ones, so the whole
+    // view is covered early; or, on slow devices, nearest in view first (then off screen), so the
+    // starting view fills in before the horizon.
+    if (m_nearFirst) {
+        return static_cast<float>((level == kMaxLevel ? 0.0 : visible ? 1e8 : 5e8) + distance);
+    }
+    return static_cast<float>((kMaxLevel - level) * 1e8 + distance);
+}
+
+void Terrain::setSlowDevice(bool slow)
+{
+    m_nearFirst = slow;
+    m_streamer->setHorizonMaps(!slow);
+}
+
 double Terrain::lodRange(int level) const
 {
     return m_rangeFactor * nodeSize(level);
@@ -399,7 +416,7 @@ void Terrain::selectNode(const TileKey& key, const glm::dvec3& cameraPos, const 
         // Children are only selected once all four are loaded, so this is a visible root: a hole.
         ++m_stats.missingNodes;
         // Coarser levels first, then nearest.
-        wanted.push_back({key, static_cast<float>((kMaxLevel - key.level) * 1e8 + distance)});
+        wanted.push_back({key, requestPriority(key.level, distance, true)});
         return;
     }
 
@@ -414,8 +431,9 @@ void Terrain::selectNode(const TileKey& key, const glm::dvec3& cameraPos, const 
                 const glm::dvec3 clo(static_cast<double>(children[i].x) * childSize, kUnknownMinY,
                                      static_cast<double>(children[i].z) * childSize);
                 const glm::dvec3 chi = clo + glm::dvec3(childSize, kUnknownMaxY - kUnknownMinY, childSize);
-                wanted.push_back({children[i], static_cast<float>((kMaxLevel - children[i].level) * 1e8 +
-                                                                  distanceToBox(cameraPos, clo, chi))});
+                const bool visible = boxVisible(planes, glm::vec3(clo - cameraPos), glm::vec3(chi - cameraPos));
+                wanted.push_back({children[i], requestPriority(children[i].level, distanceToBox(cameraPos, clo, chi),
+                                                               visible)});
             }
         }
         if (ready) {

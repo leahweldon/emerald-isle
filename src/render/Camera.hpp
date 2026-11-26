@@ -29,6 +29,9 @@ public:
 
     // Rotation only: world positions must be made relative to `position` before transforming.
     glm::mat4 view() const;
+    // fovY in landscape; in portrait (aspect < 1), widened to keep the horizontal field of a
+    // 16:9 landscape view.
+    float verticalFov(float aspect) const;
     glm::mat4 projection(float aspect) const;
 };
 

@@ -82,6 +82,9 @@ std::string shaderPrelude()
     if (!g_caps.depthClamp) {
         prelude += "#define NO_DEPTH_CLAMP\n";
     }
+    if (!g_caps.depthLinear) {
+        prelude += "#define NO_DEPTH_FILTERING\n";
+    }
     if (!g_caps.bufferTextures) {
         prelude += "#define NO_BUFFER_TEXTURES\n";
     }

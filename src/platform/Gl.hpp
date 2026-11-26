@@ -55,8 +55,8 @@ void requestFallbacks();
 const Caps& caps();
 
 // The shader's first line for this context: "#version 330 core", or "#version 300 es" with
-// default precisions, then defines for missing features (GLES, NO_DEPTH_CLAMP, NO_BUFFER_TEXTURES,
-// TONEMAP_IN_SCENE), none of them on desktop.
+// default precisions, then defines for missing features (GLES, NO_DEPTH_CLAMP, NO_DEPTH_FILTERING,
+// NO_BUFFER_TEXTURES, TONEMAP_IN_SCENE), none of them on desktop.
 std::string shaderPrelude();
 
 // Query results: whether available, and a GL_TIME_ELAPSED result in nanoseconds.

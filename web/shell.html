@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Emerald Isle</title>
 <meta name="description" content="A real-time terrain renderer of Ireland in C++ and OpenGL, running in the browser on WebGL 2.">
 <style>
@@ -41,6 +41,26 @@
                               padding: 7px 11px; text-decoration: none; cursor: pointer; }
   .corner a:hover, .corner button:hover { background: rgba(40, 60, 52, 0.9); }
 
+  /* Touch screens (body.touch): no page scrolling, zoom or pull-to-refresh over the scene; the
+     overlay's buttons replace the panel; everything clears the notch and home indicator. */
+  body.touch { overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  body.touch #canvas { touch-action: none; height: 100%; }
+  body.touch #panel-button { display: none; }
+  body.touch .corner { top: calc(10px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right)); }
+  #touchbar { display: none; }
+  body.touch #touchbar { display: flex; position: fixed; z-index: 2; gap: 8px; left: 50%; transform: translateX(-50%);
+                         bottom: calc(12px + env(safe-area-inset-bottom)); width: min(520px, calc(100vw - 24px
+                         - env(safe-area-inset-left) - env(safe-area-inset-right))); }
+  #touchbar button { flex: 1; min-height: 52px; padding: 6px 4px; border: 0; border-radius: 14px; background: var(--panel);
+                     color: var(--text); font: 600 15px var(--font); line-height: 1.2; touch-action: manipulation;
+                     -webkit-tap-highlight-color: transparent; }
+  #touchbar button small { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
+  #touchbar button:active { background: rgba(40, 70, 56, 0.95); }
+  body.touch #intro { bottom: calc(80px + env(safe-area-inset-bottom)); }
+  .touch-only { display: none; }
+  body.touch .touch-only { display: inline; }
+  body.touch .desktop-only { display: none; }
+
   /* Shown instead of the app when it cannot run. */
   #unsupported { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px;
                  background: var(--bg); z-index: 4; }
@@ -61,13 +81,20 @@
 
 <div id="intro" class="hidden">
   <strong>Emerald Isle</strong>
-  <span>Click to look around (<kbd>Esc</kbd> to stop) · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to fly,
+  <span class="desktop-only">Click to look around (<kbd>Esc</kbd> to stop) · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to fly,
     <kbd>Q</kbd>/<kbd>E</kbd> down / up · scroll to turn · <kbd>H</kbd> for the panel</span>
+  <span class="touch-only">Drag to look around · pinch to move · two fingers to pan</span>
 </div>
 
 <div class="corner">
   <button id="panel-button" type="button" title="Show or hide the panel (H)">Panel</button>
   <a href="https://github.com/leahweldon/emerald-isle" target="_blank" rel="noopener">GitHub</a>
+</div>
+
+<div id="touchbar">
+  <button id="view-button" type="button"><small>View</small><span>Glenbeigh</span></button>
+  <button id="time-button" type="button"><small>Time</small><span>Golden hour</span></button>
+  <button id="rain-button" type="button"><small>Weather</small><span>Dry</span></button>
 </div>
 
 <div id="unsupported">
@@ -94,6 +121,10 @@
       return;
     }
 
+    // Phones and tablets: a coarse primary pointer, or touch with no fine pointer at all.
+    var touch = matchMedia('(pointer: coarse)').matches ||
+                (navigator.maxTouchPoints > 0 && !matchMedia('(any-pointer: fine)').matches);
+
     // URL parameters become options: ?view=shore&rain=1 runs with --view shore --rain 1.
     var args = [];
     new URLSearchParams(location.search).forEach(function (value, key) {
@@ -103,14 +134,21 @@
 
     var output = [];
     // Runs that end by themselves (?frames=... or ?autofly=...) post their statistics back when
-    // served from this computer, for measuring browsers; never on the public site.
+    // served from this computer or the local network (to measure a phone); never on the public site.
     window.emeraldFinished = function () {
-      if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      var host = location.hostname;
+      if (host === 'localhost' || host === '127.0.0.1' || /\.local$/.test(host) ||
+          /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host)) {
         fetch('/report', { method: 'POST', body: JSON.stringify({
           browser: navigator.userAgent, query: location.search, pixelRatio: window.devicePixelRatio,
           size: [window.innerWidth, window.innerHeight], output: output }) });
       }
     };
+    if (touch) {
+      args.push('--touch');
+      document.body.classList.add('touch');
+      setUpTouch();
+    }
     var progress = document.getElementById('progress');
     var status = document.getElementById('status');
     window.Module = {
@@ -149,6 +187,57 @@
       canvas.focus();
     });
     canvas.addEventListener('mousedown', function () { canvas.focus(); });
+
+    function call(name, types, values, returns) {
+      return window.Module && Module.ccall ? Module.ccall(name, returns || null, types, values) : null;
+    }
+
+    // Gestures on the scene: one finger drags the view, two fingers pinch and pan. Movements are
+    // passed on as they happen, in CSS pixels, and the app applies them at its next frame.
+    function setUpTouch() {
+      var last = null;
+      var snapshot = function (touches) {
+        if (touches.length === 0) return null;
+        var a = touches[0], b = touches[1];
+        if (!b) return { count: 1, x: a.clientX, y: a.clientY };
+        return { count: 2, x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2,
+                 spread: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) };
+      };
+      var reset = function (event) {
+        event.preventDefault();
+        last = snapshot(event.touches);
+        document.getElementById('intro').classList.add('hidden');
+      };
+      canvas.addEventListener('touchstart', reset, { passive: false });
+      canvas.addEventListener('touchend', reset, { passive: false });
+      canvas.addEventListener('touchcancel', reset, { passive: false });
+      canvas.addEventListener('touchmove', function (event) {
+        event.preventDefault();
+        var now = snapshot(event.touches);
+        if (!now || !last || now.count !== last.count) {
+          last = now;
+          return;
+        }
+        var dx = now.x - last.x, dy = now.y - last.y;
+        if (now.count === 1) {
+          call('emerald_touch_drag', ['number', 'number'], [dx, dy]);
+        } else {
+          call('emerald_touch_pan', ['number', 'number'], [dx, dy]);
+          if (last.spread > 0 && now.spread > 0) call('emerald_touch_pinch', ['number'], [now.spread / last.spread]);
+        }
+        last = now;
+      }, { passive: false });
+
+      var button = function (id, name) {
+        document.getElementById(id).addEventListener('click', function () {
+          var label = call(name, [], [], 'string');
+          if (label) this.querySelector('span').textContent = label;
+        });
+      };
+      button('view-button', 'emerald_next_view');
+      button('time-button', 'emerald_cycle_time');
+      button('rain-button', 'emerald_cycle_rain');
+    }
 
     var script = document.createElement('script');
     script.src = 'index.js';

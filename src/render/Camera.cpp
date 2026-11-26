@@ -42,9 +42,19 @@ glm::mat4 Camera::view() const
     return glm::lookAt(glm::vec3(0.0f), forward(), glm::vec3(0.0f, 1.0f, 0.0f));
 }
 
+float Camera::verticalFov(float aspect) const
+{
+    if (aspect >= 1.0f) {
+        return fovY;
+    }
+    constexpr float kLandscape = 16.0f / 9.0f;
+    constexpr float kMaxFovY = 1.40f; // 80 degrees
+    return std::min(2.0f * std::atan(std::tan(0.5f * fovY) * kLandscape / aspect), kMaxFovY);
+}
+
 glm::mat4 Camera::projection(float aspect) const
 {
-    return glm::perspective(fovY, aspect, nearPlane, farPlane);
+    return glm::perspective(verticalFov(aspect), aspect, nearPlane, farPlane);
 }
 
 } // namespace emerald

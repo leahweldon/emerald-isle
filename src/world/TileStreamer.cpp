@@ -38,8 +38,10 @@ double bilinear(const std::vector<float>& grid, int size, double x, double z)
 // direction), so generation on the main thread can stop when its frame budget is spent.
 class TileJob {
 public:
-    TileJob(const HeightField& heightField, const TileKey& key)
+    // withHorizon false: heights only (no distant shadows from this tile).
+    TileJob(const HeightField& heightField, const TileKey& key, bool withHorizon)
         : m_heightField(heightField)
+        , m_withHorizon(withHorizon)
         , m_size(nodeSize(key.level))
         , m_spacing(m_size / kTileQuads)
         , m_originX(static_cast<double>(key.x) * m_size)
@@ -61,7 +63,7 @@ public:
             heightRow();
             if (++m_row == kTileSamples) {
                 m_row = 0;
-                m_phase = m_tile.key.level >= kHorizonMinLevel ? Phase::Context : Phase::Done;
+                m_phase = m_withHorizon && m_tile.key.level >= kHorizonMinLevel ? Phase::Context : Phase::Done;
             }
             break;
         case Phase::Context:
@@ -156,6 +158,7 @@ private:
     }
 
     const HeightField& m_heightField;
+    bool m_withHorizon;
     double m_size;
     double m_spacing;
     double m_originX;
@@ -187,9 +190,9 @@ TileStreamer::~TileStreamer()
 #endif
 }
 
-TileData TileStreamer::generate(const HeightField& heightField, const TileKey& key)
+TileData TileStreamer::generate(const HeightField& heightField, const TileKey& key, bool withHorizon)
 {
-    TileJob job(heightField, key);
+    TileJob job(heightField, key, withHorizon);
     while (!job.step()) {
     }
     return job.take();
@@ -253,7 +256,7 @@ bool TileStreamer::generateNext(std::unique_lock<std::mutex>& lock)
     m_busy = true;
 
     lock.unlock();
-    TileData tile = generate(m_heightField, key);
+    TileData tile = generate(m_heightField, key, m_horizonMaps.load());
     lock.lock();
 
     m_busy = false;
@@ -291,7 +294,7 @@ void TileStreamer::pump([[maybe_unused]] double budgetMs)
                                                [](const Request& a, const Request& b) {
                                                    return a.priority < b.priority;
                                                });
-            m_job = std::make_unique<TileJob>(m_heightField, best->key);
+            m_job = std::make_unique<TileJob>(m_heightField, best->key, m_horizonMaps.load());
             m_requests.erase(best);
             m_inProgress = m_job->key();
             m_busy = true;

@@ -169,13 +169,33 @@ vec2 rainRings(vec2 p, out float crest)
     return slope;
 }
 
+// The seabed map's value at uv, bilinearly filtered: by the texture unit, or by hand where depth
+// textures cannot be filtered (WebGL), which would otherwise leave stair-steps along the coast.
+float seabedSample(vec2 uv, int layer)
+{
+#ifdef NO_DEPTH_FILTERING
+    vec2 size = vec2(textureSize(uSeabed, 0).xy);
+    vec2 texel = uv * size - 0.5;
+    ivec2 base = ivec2(floor(texel));
+    vec2 f = texel - floor(texel);
+    ivec2 last = ivec2(size) - 1;
+    float a = texelFetch(uSeabed, ivec3(clamp(base, ivec2(0), last), layer), 0).r;
+    float b = texelFetch(uSeabed, ivec3(clamp(base + ivec2(1, 0), ivec2(0), last), layer), 0).r;
+    float c = texelFetch(uSeabed, ivec3(clamp(base + ivec2(0, 1), ivec2(0), last), layer), 0).r;
+    float d = texelFetch(uSeabed, ivec3(clamp(base + ivec2(1, 1), ivec2(0), last), layer), 0).r;
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+#else
+    return texture(uSeabed, vec3(uv, float(layer))).r;
+#endif
+}
+
 // Depth of water in metres, from the nearer seabed layer that covers this point; -1 if neither.
 float waterDepth()
 {
     for (int i = 0; i < 2; ++i) {
         vec2 uv = (vRelPos.xz + uSeabedArea[i].xy) * uSeabedArea[i].z * 0.5 + 0.5;
         if (all(greaterThan(uv, vec2(0.01))) && all(lessThan(uv, vec2(0.99)))) {
-            float height = (0.5 - texture(uSeabed, vec3(uv, float(i))).r) * 2.0 * uSeabedRange;
+            float height = (0.5 - seabedSample(uv, i)) * 2.0 * uSeabedRange;
             return max(-height, 0.0) / uExaggeration;
         }
     }

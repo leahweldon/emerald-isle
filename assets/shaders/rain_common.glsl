@@ -24,13 +24,32 @@ vec3 toBox(vec3 rel)
     return mod(rel - uBoxCentre + uBoxOrigin, 2.0 * uHalfSize);
 }
 
+// The ground map at uv, bilinearly filtered (by hand where depth textures cannot be filtered).
+float groundSample(vec2 uv)
+{
+#ifdef NO_DEPTH_FILTERING
+    vec2 size = vec2(textureSize(uGround, 0));
+    vec2 texel = uv * size - 0.5;
+    ivec2 base = ivec2(floor(texel));
+    vec2 f = texel - floor(texel);
+    ivec2 last = ivec2(size) - 1;
+    float a = texelFetch(uGround, clamp(base, ivec2(0), last), 0).r;
+    float b = texelFetch(uGround, clamp(base + ivec2(1, 0), ivec2(0), last), 0).r;
+    float c = texelFetch(uGround, clamp(base + ivec2(0, 1), ivec2(0), last), 0).r;
+    float d = texelFetch(uGround, clamp(base + ivec2(1, 1), ivec2(0), last), 0).r;
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+#else
+    return texture(uGround, uv).r;
+#endif
+}
+
 // Camera-relative height of the ground or the sea, whichever is higher; land is true for ground.
 float surfaceHeight(vec2 relXZ, out bool land)
 {
     float sea = -uCameraHeight;
     float ground = -1e9;
     if (uGroundValid) {
-        float depth = texture(uGround, relXZ / uHalfSize.xz * 0.5 + 0.5).r;
+        float depth = groundSample(relXZ / uHalfSize.xz * 0.5 + 0.5);
         ground = uBoxCentre.y + (0.5 - depth) * 2.0 * uGroundRange;
     }
     land = ground > sea;

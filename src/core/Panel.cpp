@@ -266,6 +266,7 @@ void Application::panelRendering()
         for (int i = 0; i < static_cast<int>(kQualities.size()); ++i) {
             if (ImGui::Selectable(kQualities[static_cast<std::size_t>(i)].name, i == m_quality)) {
                 applyQuality(i);
+                m_options.fxaa = -1; // back to the quality's default
             }
         }
         ImGui::EndCombo();
@@ -291,6 +292,11 @@ void Application::panelRendering()
     ImGui::SameLine(column);
     ImGui::Checkbox("Fog", &m_atmosphere.fog);
     ImGui::Checkbox("Rain particles", &m_features.rainParticles);
+    ImGui::SameLine(column);
+    bool fxaa = fxaaEnabled();
+    if (ImGui::Checkbox("FXAA", &fxaa)) {
+        m_options.fxaa = fxaa ? 1 : 0;
+    }
     ImGui::TextDisabled("Right-click exposure to reset it");
 }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -101,7 +102,11 @@ public:
     static constexpr bool kThreaded = EMERALD_THREADS != 0;
 
     // Fills one tile synchronously (used by the worker; public for tests).
-    static TileData generate(const HeightField& heightField, const TileKey& key);
+    static TileData generate(const HeightField& heightField, const TileKey& key, bool withHorizon = true);
+
+    // Whether new tiles get horizon maps (distant shadows); off on slow devices, where they
+    // are most of a tile's generation time.
+    void setHorizonMaps(bool enabled) { m_horizonMaps = enabled; }
 
 private:
     void run();
@@ -118,6 +123,7 @@ private:
     TileKey m_inProgress;
     bool m_stop = false;
     std::uint64_t m_generated = 0;
+    std::atomic<bool> m_horizonMaps{true};
 #if EMERALD_THREADS
     std::thread m_thread;
 #else
