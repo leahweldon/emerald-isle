@@ -34,6 +34,20 @@ float cascadeVisibility(int cascade, vec3 relPos, vec3 normal, float nDotL)
 
 // Direct-light visibility from the cascades, cross-faded at every boundary. Past the last
 // cascade it fades into farVisibility (1 where nothing farther is known).
+// Which cascade covers relPos, for the debug view: 0-3 plus the fraction of the cross-fade into
+// the next, or 4 beyond the last cascade (horizon maps).
+float shadowCascade(vec3 relPos)
+{
+    float depth = dot(relPos, uViewForward);
+    if (depth >= uCascadeEnd.w) {
+        return 4.0;
+    }
+    int cascade = depth < uCascadeEnd.x ? 0 : depth < uCascadeEnd.y ? 1 : depth < uCascadeEnd.z ? 2 : 3;
+    float start = uCascadeStart[cascade];
+    float end = uCascadeEnd[cascade];
+    return float(cascade) + smoothstep(end - kCascadeBlend * (end - start), end, depth);
+}
+
 float shadowVisibility(vec3 relPos, vec3 normal, float nDotL, float farVisibility)
 {
     if (uShadowsOff) {

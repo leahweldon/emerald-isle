@@ -4,6 +4,8 @@
 
 #include "core/CameraController.hpp"
 #include "render/Rain.hpp"
+#include "render/ReflectionTarget.hpp"
+#include "render/ShadowMaps.hpp"
 #include "render/ViewPresets.hpp"
 #include "world/HeightField.hpp"
 #include "render/Terrain.hpp"
@@ -25,6 +27,24 @@ namespace {
 constexpr float kPanelWidth = 360.0f;
 constexpr float kLabelWidth = 110.0f; // right of sliders, for their labels
 constexpr float kValueColumn = 130.0f; // where readout values start
+
+// Debug colours, matching debugPalette() in terrain.frag (linear; the panel shows them as sRGB).
+constexpr float kPalette[9][3] = {{0.85f, 0.20f, 0.20f}, {0.95f, 0.55f, 0.15f}, {0.90f, 0.85f, 0.20f},
+                                  {0.35f, 0.80f, 0.30f}, {0.20f, 0.70f, 0.80f}, {0.25f, 0.40f, 0.90f},
+                                  {0.60f, 0.35f, 0.85f}, {0.85f, 0.40f, 0.70f}, {0.85f, 0.85f, 0.85f}};
+
+// A colour swatch from the debug palette, then text on the same line.
+void swatch(const float* rgb, float scale)
+{
+    const float size = ImGui::GetTextLineHeight();
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    const auto srgb = [](float c) { return std::pow(c, 1.0f / 2.2f); };
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        at, ImVec2(at.x + size, at.y + size),
+        ImGui::GetColorU32(ImVec4(srgb(rgb[0]), srgb(rgb[1]), srgb(rgb[2]), 1.0f)), 3.0f * scale);
+    ImGui::Dummy(ImVec2(size, size));
+    ImGui::SameLine();
+}
 
 // A readout's name, then the cursor at the value column.
 void label(const char* name, float scale)
@@ -58,7 +78,10 @@ void Application::buildPanel()
         return;
     }
     ImGui::PushItemWidth(-kLabelWidth * scale);
-    if (ImGui::CollapsingHeader("Performance", ImGuiTreeNodeFlags_DefaultOpen)) {
+    // Debug views asked for on the command line open their section instead of this one.
+    const bool debugOn = m_options.debugView != 0 || m_options.debugTiles || m_options.debugWireframe;
+    ImGui::SetNextItemOpen(!debugOn, ImGuiCond_Once);
+    if (ImGui::CollapsingHeader("Performance")) {
         panelPerformance();
     }
     if (ImGui::CollapsingHeader("Time & sky")) {
@@ -72,6 +95,10 @@ void Application::buildPanel()
     }
     if (ImGui::CollapsingHeader("Camera")) {
         panelCamera();
+    }
+    ImGui::SetNextItemOpen(debugOn, ImGuiCond_Once);
+    if (ImGui::CollapsingHeader("Debug views")) {
+        panelDebug();
     }
     ImGui::PopItemWidth();
     ImGui::TextDisabled("F1 hides this panel");
@@ -279,6 +306,59 @@ void Application::panelCamera()
     }
     if (m_timer.elapsedSeconds() - m_copiedAt < 2.0) {
         ImGui::TextDisabled("Copied to the clipboard");
+    }
+}
+
+void Application::panelDebug()
+{
+    const float scale = m_ui->scale();
+    ImGui::RadioButton("Shaded", &m_debug.view, 0);
+    ImGui::SameLine();
+    ImGui::RadioButton("Level of detail", &m_debug.view, 1);
+    ImGui::SameLine();
+    ImGui::RadioButton("Cascades", &m_debug.view, 2);
+    const float column = ImGui::GetContentRegionAvail().x * 0.5f;
+    ImGui::Checkbox("Tile borders", &m_debug.tileBorders);
+    ImGui::SameLine(column);
+    ImGui::Checkbox("Wireframe", &m_debug.wireframe);
+
+    if (m_debug.view == 1) {
+        // Node size per CDLOD level; colours blend to the next level where vertices geomorph.
+        ImGui::TextDisabled("Node size by level; blends show geomorphing");
+        for (int level = 0; level <= kMaxLevel; ++level) {
+            swatch(kPalette[level], scale);
+            const double km = nodeSize(level) / 1000.0;
+            ImGui::Text("%d: %.0f km", level, km);
+            if (level % 2 == 0 && level < kMaxLevel) {
+                ImGui::SameLine(column);
+            }
+        }
+    } else if (m_debug.view == 2) {
+        ImGui::TextDisabled("Shadow cascades by view distance");
+        float start = 0.0f;
+        for (int cascade = 0; cascade < ShadowMaps::kCascades; ++cascade) {
+            swatch(kPalette[cascade * 2], scale);
+            const float end = m_shadows->cascadeEnd(cascade);
+            ImGui::Text("%d: to %.1f km", cascade, static_cast<double>(end) / 1000.0);
+            if (cascade % 2 == 0) {
+                ImGui::SameLine(column);
+            }
+            start = end;
+        }
+        const float grey[3] = {0.55f, 0.55f, 0.55f};
+        swatch(grey, scale);
+        ImGui::Text("beyond %.0f km: horizon maps", static_cast<double>(start) / 1000.0);
+    }
+
+    ImGui::Checkbox("Reflection texture", &m_debug.reflectionPreview);
+    if (m_debug.reflectionPreview && m_reflection->width() > 0) {
+        // Linear HDR, half resolution, drawn upside down by GL convention: flipped here.
+        const float width = ImGui::GetContentRegionAvail().x;
+        const float height = width * static_cast<float>(m_reflection->height()) /
+                             static_cast<float>(m_reflection->width());
+        ImGui::Image(static_cast<ImTextureID>(m_reflection->texture()), ImVec2(width, height), ImVec2(0.0f, 1.0f),
+                     ImVec2(1.0f, 0.0f));
+        ImGui::TextDisabled("%d x %d, terrain mirrored in the sea", m_reflection->width(), m_reflection->height());
     }
 }
 

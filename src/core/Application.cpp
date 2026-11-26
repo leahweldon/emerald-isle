@@ -128,6 +128,7 @@ void printUsage(const char* program)
         "  --tone-mapper <name>  neutral (default, Khronos PBR Neutral) or agx\n"
         "  --rain <0-1>          Rain intensity, 0 dry to 1 heavy (default 0)\n"
         "  --ui                  Show the panel from the start (F1 toggles it)\n"
+        "  --debug <view>        Debug view: lod, cascades, tiles or wireframe (repeatable)\n"
         "  --gpu-timing          Also measure GPU time per frame (adds ~0.4 ms on macOS)\n"
         "  --validate <tiles>    Check for GL errors and terrain holes, require at least this many\n"
         "                        tiles generated and resident, exit non-zero on failure\n"
@@ -248,6 +249,20 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.rain = parseFloat(arg, argv[++i], 0.0f, 1.0f);
         } else if (std::strcmp(arg, "--ui") == 0) {
             options.ui = true;
+        } else if (std::strcmp(arg, "--debug") == 0 && hasValue) {
+            const std::string view = argv[++i];
+            if (view == "lod") {
+                options.debugView = 1;
+            } else if (view == "cascades") {
+                options.debugView = 2;
+            } else if (view == "tiles") {
+                options.debugTiles = true;
+            } else if (view == "wireframe") {
+                options.debugWireframe = true;
+            } else {
+                throw std::invalid_argument("Invalid value for --debug: " + view +
+                                            " (lod, cascades, tiles or wireframe)");
+            }
         } else if (std::strcmp(arg, "--tone-mapper") == 0 && hasValue) {
             const std::string name = argv[++i];
             if (name != "neutral" && name != "agx") {
@@ -403,6 +418,9 @@ Application::Application(AppOptions options)
     }
 
     m_lastCameraPos = m_camera.position;
+    m_debug.view = m_options.debugView;
+    m_debug.tileBorders = m_options.debugTiles;
+    m_debug.wireframe = m_options.debugWireframe;
     m_passTimer = std::make_unique<GpuPassTimer>();
     m_ui = std::make_unique<Ui>(m_window.native(), m_options.window.headless, m_window.framebufferHeight(),
                                 m_options.assetDir / "fonts" / "Roboto-Medium.ttf");
@@ -666,6 +684,11 @@ void Application::render()
     markPass(GpuPassTimer::Terrain);
     m_terrainShader->use();
     setTerrainUniforms(*m_terrainShader);
+    m_terrainShader->set("uDebugView", m_debug.view);
+    m_terrainShader->set("uTileBorders", m_debug.tileBorders ? 1 : 0);
+    if (m_debug.wireframe) {
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    }
     m_terrain->draw(*m_terrainShader, kHeightUnit, kHorizonUnit);
 
     // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.
@@ -688,6 +711,7 @@ void Application::render()
     glPolygonOffset(1.0f, 1.0f);
     m_sea->draw();
     glDisable(GL_POLYGON_OFFSET_FILL);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
     // Skybox last, at the far plane, so it is only shaded where nothing else was drawn.
     const float pixelAngle = m_camera.fovY / static_cast<float>(m_window.framebufferHeight());

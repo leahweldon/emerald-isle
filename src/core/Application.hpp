@@ -53,6 +53,11 @@ struct AppOptions {
     // Show the panel from the start. Otherwise it starts open only in interactive sessions (not
     // in runs that end by themselves); F1 toggles it.
     bool ui = false;
+    // --debug: terrain colouring (0 off, 1 level of detail, 2 shadow cascades), node outlines and
+    // wireframe, as in the panel's debug views.
+    int debugView = 0;
+    bool debugTiles = false;
+    bool debugWireframe = false;
     // Starting rain intensity, 0 (dry) to 1 (heavy); R and Shift+R change it while running.
     float rain = 0.0f;
     // --sun-bearing or --sun-elevation fix the sun in place of the time of day (degrees).
@@ -114,6 +119,7 @@ private:
     void panelWeather();
     void panelRendering();
     void panelCamera();
+    void panelDebug();
     // Starts a GPU timing segment for pass while the panel is open.
     void markPass(GpuPassTimer::Pass pass);
     void collectPassTimes();
@@ -152,6 +158,13 @@ private:
         bool reflections = true;
         bool rainParticles = true;
     } m_features;
+    // Debug views: they show how the systems work.
+    struct DebugViews {
+        int view = 0; // terrain colouring: 0 off, 1 level of detail, 2 shadow cascades
+        bool tileBorders = false;
+        bool wireframe = false;
+        bool reflectionPreview = false;
+    } m_debug;
     // Per-pass GPU timing, only while the panel is open (it then stands in for m_gpuTimer).
     std::unique_ptr<GpuPassTimer> m_passTimer;
     bool m_passTiming = false;

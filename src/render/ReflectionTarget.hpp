@@ -22,6 +22,7 @@ public:
     void end();
 
     void bindTexture(GLuint unit) const;
+    GLuint texture() const { return m_colour; } // for the panel's preview
     int width() const { return m_width; }
     int height() const { return m_height; }
 
