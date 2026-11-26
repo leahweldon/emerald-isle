@@ -93,6 +93,7 @@ add_executable(emerald-isle
     src/render/Atmosphere.cpp
     src/render/Camera.cpp
     src/render/GpuTimer.cpp
+    src/render/GpuPassTimer.cpp
     src/render/OffscreenTarget.cpp
     src/render/Rain.cpp
     src/render/ReflectionTarget.cpp

@@ -6,6 +6,7 @@
 #include "core/Window.hpp"
 #include "render/Atmosphere.hpp"
 #include "render/Camera.hpp"
+#include "render/GpuPassTimer.hpp"
 
 #include <filesystem>
 #include <cstdint>
@@ -103,6 +104,9 @@ private:
     // Starts the UI frame and builds the panel (Panel.cpp), and keeps its input from the camera.
     void updateUi();
     void buildPanel();
+    // Starts a GPU timing segment for pass while the panel is open.
+    void markPass(GpuPassTimer::Pass pass);
+    void collectPassTimes();
     // Reads every pending GL error into count (recording the first), for --validate.
     static void drainGlErrors(int& count, unsigned& first);
     bool reportValidation() const;
@@ -131,6 +135,11 @@ private:
     std::unique_ptr<Shader> m_toneMapShader;
     std::unique_ptr<Rain> m_rain;
     std::unique_ptr<Ui> m_ui;
+    // Per-pass GPU timing, only while the panel is open (it then stands in for m_gpuTimer).
+    std::unique_ptr<GpuPassTimer> m_passTimer;
+    bool m_passTiming = false;
+    GpuPassTimer::Times m_passMs{}; // smoothed for display
+    float m_passTotalMs = 0.0f;
     unsigned m_fullscreenVao = 0; // GL vertex array name
     Camera m_camera;
     std::unique_ptr<CameraController> m_controller;

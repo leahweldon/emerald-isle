@@ -2,6 +2,7 @@
 
 #include "core/Screenshot.hpp"
 #include "render/GpuTimer.hpp"
+#include "render/GpuPassTimer.hpp"
 #include "render/OffscreenTarget.hpp"
 #include "render/Rain.hpp"
 #include "render/Shader.hpp"
@@ -404,6 +405,7 @@ Application::Application(AppOptions options)
     }
 
     m_lastCameraPos = m_camera.position;
+    m_passTimer = std::make_unique<GpuPassTimer>();
     m_ui = std::make_unique<Ui>(m_window.native(), m_options.window.headless, m_window.framebufferHeight(),
                                 m_options.assetDir / "fonts" / "Roboto-Medium.ttf");
     const bool selfEnding = m_options.frameLimit > 0 || m_options.autoflySeconds > 0.0f;
@@ -452,11 +454,17 @@ int Application::run()
         update(delta);
         const auto afterUpdate = Clock::now();
         ++m_frameCount;
-        if (m_gpuTimer) {
+        // Pass timing replaces whole-frame timing while the panel is open: the queries cannot nest.
+        m_passTiming = m_ui->visible();
+        if (m_passTiming) {
+            m_passTimer->beginFrame(m_frameCount);
+        } else if (m_gpuTimer) {
             m_gpuTimer->begin(m_frameCount);
         }
         render();
-        if (m_gpuTimer) {
+        if (m_passTiming) {
+            m_passTimer->endFrame();
+        } else if (m_gpuTimer) {
             m_gpuTimer->end();
         }
         const auto afterRender = Clock::now();
@@ -499,6 +507,7 @@ int Application::run()
         const double totalMs = ms(frameStart, Clock::now());
         const double swapMs = ms(afterRender, afterSwap);
         recordFrameStats(static_cast<float>(totalMs), static_cast<float>(totalMs - swapMs));
+        collectPassTimes();
         if (m_gpuTimer) {
             for (const GpuTimer::Result& r : m_gpuTimer->collect()) {
                 m_gpuMs[static_cast<std::size_t>(r.frame - 1)] = static_cast<float>(r.ms);
@@ -638,6 +647,7 @@ void Application::render()
     m_scene->bind();
 
     // Refreshes the sky one cubemap face per frame while the sun moves.
+    markPass(GpuPassTimer::Sky);
     m_sky->update(m_atmosphere);
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -645,17 +655,23 @@ void Application::render()
 
     const glm::mat4 projection = m_camera.projection(m_window.aspectRatio());
     const glm::mat4 rotationOnly(glm::mat3(m_camera.view()));
+    markPass(GpuPassTimer::Other); // tile uploads
     m_terrain->update(m_camera.position, projection * m_camera.view());
+    markPass(GpuPassTimer::Shadows);
     renderShadows(projection);
+    markPass(GpuPassTimer::Water);
     renderSeabed();
     renderReflection(projection);
+    markPass(GpuPassTimer::Rain);
     renderRain();
 
+    markPass(GpuPassTimer::Terrain);
     m_terrainShader->use();
     setTerrainUniforms(*m_terrainShader);
     m_terrain->draw(*m_terrainShader, kHeightUnit, kHorizonUnit);
 
     // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.
+    markPass(GpuPassTimer::Water);
     m_seaShader->use();
     setSceneUniforms(*m_seaShader);
     // Screenshots freeze the waves, so they are reproducible.
@@ -677,9 +693,11 @@ void Application::render()
 
     // Skybox last, at the far plane, so it is only shaded where nothing else was drawn.
     const float pixelAngle = m_camera.fovY / static_cast<float>(m_window.framebufferHeight());
+    markPass(GpuPassTimer::Sky);
     m_sky->drawBackground(glm::inverse(projection * rotationOnly), m_atmosphere, pixelAngle);
 
     // Rain after everything opaque, blended into the HDR target.
+    markPass(GpuPassTimer::Rain);
     if (m_rainIntensity > 0.0f) {
         RainLighting lighting;
         lighting.lightDir = m_atmosphere.lightDir();
@@ -693,8 +711,32 @@ void Application::render()
                      pixelAngle, m_cameraVelocity, lighting);
     }
 
+    markPass(GpuPassTimer::ToneMap);
     toneMap();
+    markPass(GpuPassTimer::Ui);
     m_ui->draw(); // into the final framebuffer, after tone mapping
+}
+
+void Application::markPass(GpuPassTimer::Pass pass)
+{
+    if (m_passTiming) {
+        m_passTimer->mark(pass);
+    }
+}
+
+void Application::collectPassTimes()
+{
+    for (const GpuPassTimer::Result& r : m_passTimer->collect()) {
+        // Smoothed over a few dozen frames, so the readout is steady enough to read.
+        constexpr float kSmoothing = 0.05f;
+        for (std::size_t i = 0; i < m_passMs.size(); ++i) {
+            m_passMs[i] += (r.ms[i] - m_passMs[i]) * kSmoothing;
+        }
+        m_passTotalMs += (r.total - m_passTotalMs) * kSmoothing;
+        if (m_gpuTimer) {
+            m_gpuMs[static_cast<std::size_t>(r.frame - 1)] = r.total;
+        }
+    }
 }
 
 void Application::toneMap()
