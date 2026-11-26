@@ -124,6 +124,7 @@ private:
     // Starts a GPU timing segment for pass while the panel is open.
     void markPass(GpuPassTimer::Pass pass);
     void collectPassTimes();
+    void markScenePart(GpuPassTimer::Pass pass); // only when the scene pass is split
     // Reads every pending GL error into count (recording the first), for --validate.
     static void drainGlErrors(int& count, unsigned& first);
     bool reportValidation() const;
@@ -166,9 +167,10 @@ private:
         bool wireframe = false;
         bool reflectionPreview = false;
     } m_debug;
-    // Per-pass GPU timing, only while the panel is open (it then stands in for m_gpuTimer).
+    // Per-pass GPU timing while the panel is open (it then stands in for m_gpuTimer).
     std::unique_ptr<GpuPassTimer> m_passTimer;
     bool m_passTiming = false;
+    bool m_splitScenePass = false; // time terrain, sea, sky and rain drops separately
     GpuPassTimer::Times m_passMs{}; // smoothed for display
     float m_passTotalMs = 0.0f;
     std::array<float, 480> m_frameHistory{}; // recent frame times for the panel's graph, a ring

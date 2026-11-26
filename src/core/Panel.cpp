@@ -125,15 +125,27 @@ void Application::panelPerformance()
     ImGui::TextDisabled("Last %zu frames, 0-20 ms (120 Hz: 8.3 ms)", m_frameHistory.size());
 
     ImGui::SeparatorText("GPU time per pass");
+    if (ImGui::Checkbox("Split the scene pass", &m_splitScenePass)) {
+        m_passMs = {}; // the passes being timed change
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Times terrain, sea, sky and rain drops separately. Each extra timer query\n"
+                          "splits the GPU's render pass, which costs about 0.5 ms a frame on macOS.");
+    }
     const float total = std::max(m_passTotalMs, 1e-3f);
     for (int i = 0; i < GpuPassTimer::kPassCount; ++i) {
+        const auto pass = static_cast<GpuPassTimer::Pass>(i);
+        const bool scenePart = pass == GpuPassTimer::Terrain || pass == GpuPassTimer::Sea;
+        if ((pass == GpuPassTimer::Scene && m_splitScenePass) || (scenePart && !m_splitScenePass)) {
+            continue;
+        }
         const float ms = m_passMs[static_cast<std::size_t>(i)];
         ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(GpuPassTimer::name(static_cast<GpuPassTimer::Pass>(i)));
+        ImGui::TextUnformatted(GpuPassTimer::name(pass));
         ImGui::SameLine(kValueColumn * scale);
-        char label[16];
-        std::snprintf(label, sizeof(label), "%.2f ms", static_cast<double>(ms));
-        ImGui::ProgressBar(ms / total, ImVec2(-1.0f, 0.0f), label);
+        char text[16];
+        std::snprintf(text, sizeof(text), "%.2f ms", static_cast<double>(ms));
+        ImGui::ProgressBar(ms / total, ImVec2(-1.0f, 0.0f), text);
     }
     ImGui::Text("Total");
     ImGui::SameLine(kValueColumn * scale);

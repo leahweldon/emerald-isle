@@ -11,11 +11,13 @@ namespace emerald {
 // GPU time per render pass from GL_TIME_ELAPSED queries. Such queries cannot nest (and
 // GL_TIMESTAMP reads back zero on macOS), so a frame is split into consecutive segments, each
 // timed by its own query and credited to a pass; passes that recur in a frame are summed, and the
-// segments together cover the whole frame. Results are read only once available, a few frames
-// later, so timing never stalls the pipeline.
+// segments together cover the frame's GPU work (not idle gaps between them). Results are read
+// only once available, a few frames later, so timing never stalls the pipeline. On macOS each
+// boundary inside a render pass splits it, which costs more than the boundaries between passes.
 class GpuPassTimer {
 public:
-    enum Pass { Shadows, Water, Rain, Terrain, Sky, ToneMap, Ui, Other, kPassCount };
+    // Scene is the main HDR pass as a whole; Terrain, Sea, Sky and Rain split it when asked.
+    enum Pass { Shadows, Reflection, Rain, Scene, Terrain, Sea, Sky, ToneMap, Ui, Other, kPassCount };
     using Times = std::array<float, kPassCount>; // milliseconds
 
     struct Result {

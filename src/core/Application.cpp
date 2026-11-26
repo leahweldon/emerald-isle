@@ -471,6 +471,7 @@ int Application::run()
         const auto afterUpdate = Clock::now();
         ++m_frameCount;
         // Pass timing replaces whole-frame timing while the panel is open: the queries cannot nest.
+        // Every frame: timing only some of them made those frames 2-7 ms slower on macOS.
         m_passTiming = m_ui->visible();
         if (m_passTiming) {
             m_passTimer->beginFrame(m_frameCount);
@@ -675,13 +676,15 @@ void Application::render()
     m_terrain->update(m_camera.position, projection * m_camera.view());
     markPass(GpuPassTimer::Shadows);
     renderShadows(projection);
-    markPass(GpuPassTimer::Water);
+    markPass(GpuPassTimer::Reflection);
     renderSeabed();
     renderReflection(projection);
     markPass(GpuPassTimer::Rain);
     renderRain();
 
-    markPass(GpuPassTimer::Terrain);
+    // Within the main pass, timer queries split the GPU's render pass (costly on macOS), so its
+    // parts are timed separately only when the panel asks.
+    markPass(m_splitScenePass ? GpuPassTimer::Terrain : GpuPassTimer::Scene);
     m_terrainShader->use();
     setTerrainUniforms(*m_terrainShader);
     m_terrainShader->set("uDebugView", m_debug.view);
@@ -692,7 +695,7 @@ void Application::render()
     m_terrain->draw(*m_terrainShader, kHeightUnit, kHorizonUnit);
 
     // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.
-    markPass(GpuPassTimer::Water);
+    markScenePart(GpuPassTimer::Sea);
     m_seaShader->use();
     setSceneUniforms(*m_seaShader);
     // Screenshots freeze the waves, so they are reproducible.
@@ -715,11 +718,11 @@ void Application::render()
 
     // Skybox last, at the far plane, so it is only shaded where nothing else was drawn.
     const float pixelAngle = m_camera.fovY / static_cast<float>(m_window.framebufferHeight());
-    markPass(GpuPassTimer::Sky);
+    markScenePart(GpuPassTimer::Sky);
     m_sky->drawBackground(glm::inverse(projection * rotationOnly), m_atmosphere, pixelAngle);
 
     // Rain after everything opaque, blended into the HDR target.
-    markPass(GpuPassTimer::Rain);
+    markScenePart(GpuPassTimer::Rain);
     if (m_rainIntensity > 0.0f && m_features.rainParticles) {
         RainLighting lighting;
         lighting.lightDir = m_atmosphere.lightDir();
@@ -743,6 +746,13 @@ void Application::markPass(GpuPassTimer::Pass pass)
 {
     if (m_passTiming) {
         m_passTimer->mark(pass);
+    }
+}
+
+void Application::markScenePart(GpuPassTimer::Pass pass)
+{
+    if (m_splitScenePass) {
+        markPass(pass);
     }
 }
 

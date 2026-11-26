@@ -20,9 +20,11 @@ const char* GpuPassTimer::name(Pass pass)
 {
     switch (pass) {
     case Shadows: return "Shadows";
-    case Water: return "Water & reflection";
+    case Reflection: return "Reflection & seabed";
     case Rain: return "Rain";
+    case Scene: return "Scene";
     case Terrain: return "Terrain";
+    case Sea: return "Sea";
     case Sky: return "Sky";
     case ToneMap: return "Tone map";
     case Ui: return "Panel";
