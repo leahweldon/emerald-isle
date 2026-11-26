@@ -455,100 +455,114 @@ Application::~Application()
 
 int Application::run()
 {
+    while (!m_window.shouldClose()) {
+        frame();
+    }
+    return finish();
+}
+
+void Application::frame()
+{
     using Clock = std::chrono::steady_clock;
     const auto ms = [](Clock::time_point a, Clock::time_point b) {
         return std::chrono::duration<double, std::milli>(b - a).count();
     };
-    while (!m_window.shouldClose()) {
-        const auto frameStart = Clock::now();
-        const float delta = m_timer.tick();
+    const auto frameStart = Clock::now();
+    const float delta = m_timer.tick();
 
-        m_window.input().beginFrame();
-        m_window.pollEvents();
-        const auto afterEvents = Clock::now();
-        updateUi();
-        update(delta);
-        const auto afterUpdate = Clock::now();
-        ++m_frameCount;
-        // Pass timing replaces whole-frame timing while the panel is open: the queries cannot nest.
-        // Every frame: timing only some of them made those frames 2-7 ms slower on macOS.
-        m_passTiming = m_ui->visible();
-        if (m_passTiming) {
-            m_passTimer->beginFrame(m_frameCount);
-        } else if (m_gpuTimer) {
-            m_gpuTimer->begin(m_frameCount);
-        }
-        render();
-        if (m_passTiming) {
-            m_passTimer->endFrame();
-        } else if (m_gpuTimer) {
-            m_gpuTimer->end();
-        }
-        const auto afterRender = Clock::now();
+    m_window.input().beginFrame();
+    m_window.pollEvents();
+    const auto afterEvents = Clock::now();
+    updateUi();
+    update(delta);
+    const auto afterUpdate = Clock::now();
+    ++m_frameCount;
+    // Pass timing replaces whole-frame timing while the panel is open: the queries cannot nest.
+    // Every frame: timing only some of them made those frames 2-7 ms slower on macOS.
+    m_passTiming = m_ui->visible();
+    if (m_passTiming) {
+        m_passTimer->beginFrame(m_frameCount);
+    } else if (m_gpuTimer) {
+        m_gpuTimer->begin(m_frameCount);
+    }
+    render();
+    if (m_passTiming) {
+        m_passTimer->endFrame();
+    } else if (m_gpuTimer) {
+        m_gpuTimer->end();
+    }
+    const auto afterRender = Clock::now();
 
-        // Screenshots count only frames with the terrain fully streamed in (or give up after 60 s),
-        // so they never capture half-loaded tiles. Plain --frames runs count every frame.
-        if (m_terrain->settled()) {
-            ++m_settledFrames;
-        }
-        const bool screenshot = !m_options.screenshotPath.empty();
-        const bool timedOut = screenshot && m_timer.elapsedSeconds() > 60.0;
-        if (timedOut && m_settledFrames < m_options.frameLimit) {
-            std::fprintf(stderr, "Terrain still streaming after 60 s; capturing anyway\n");
-        }
-        const int counted = screenshot ? m_settledFrames : m_frameCount;
-        const bool autoflyDone = m_options.autoflySeconds > 0.0f &&
-                                 m_timer.elapsedSeconds() >= static_cast<double>(m_options.autoflySeconds);
-        const bool lastFrame = autoflyDone ||
-                               (m_options.frameLimit > 0 && (counted >= m_options.frameLimit || timedOut));
-        if (lastFrame && !m_options.screenshotPath.empty()) {
-            // Read the back buffer before it is presented, so the capture matches this frame.
-            const unsigned source = m_offscreen ? m_offscreen->readFramebuffer() : 0;
-            if (!saveFramebufferPng(source, m_window.framebufferWidth(), m_window.framebufferHeight(),
-                                    m_options.screenshotPath)) {
-                return EXIT_FAILURE;
-            }
-        }
-
-        m_window.swapBuffers();
-        const auto afterSwap = Clock::now();
-        if (m_options.validateMinTiles > 0) {
-            validateFrame();
-        }
-
-        if (m_timer.hasNewSample()) {
-            updateTitle();
-        }
-
-        // Timed per loop iteration, so every phase belongs to the frame it is reported with.
-        const double totalMs = ms(frameStart, Clock::now());
-        const double swapMs = ms(afterRender, afterSwap);
-        recordFrameStats(static_cast<float>(totalMs), static_cast<float>(totalMs - swapMs));
-        collectPassTimes();
-        if (m_gpuTimer) {
-            for (const GpuTimer::Result& r : m_gpuTimer->collect()) {
-                m_gpuMs[static_cast<std::size_t>(r.frame - 1)] = static_cast<float>(r.ms);
-            }
-        }
-        if (m_frameLog) {
-            const Terrain::Stats& st = m_terrain->stats();
-            char row[256];
-            std::snprintf(row, sizeof(row),
-                          "%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%zu,%d,%zu,%d,%.1f,%.1f,%.1f,%d,",
-                          m_frameCount, totalMs, ms(frameStart, afterEvents), ms(afterEvents, afterUpdate),
-                          st.updateMs, ms(afterUpdate, afterRender) - st.updateMs, swapMs,
-                          st.uploadsThisFrame, st.outstandingTiles, st.residentTiles, st.triangles,
-                          st.drawCalls, m_camera.position.x, m_camera.position.y, m_camera.position.z,
-                          m_window.focused() ? 1 : 0);
-            m_pendingLogRows.emplace_back(m_frameCount, row);
-            flushFrameLog(false);
-        }
-        if (lastFrame) {
-            m_finished = true;
+    // Screenshots count only frames with the terrain fully streamed in (or give up after 60 s),
+    // so they never capture half-loaded tiles. Plain --frames runs count every frame.
+    if (m_terrain->settled()) {
+        ++m_settledFrames;
+    }
+    const bool screenshot = !m_options.screenshotPath.empty();
+    const bool timedOut = screenshot && m_timer.elapsedSeconds() > 60.0;
+    if (timedOut && m_settledFrames < m_options.frameLimit) {
+        std::fprintf(stderr, "Terrain still streaming after 60 s; capturing anyway\n");
+    }
+    const int counted = screenshot ? m_settledFrames : m_frameCount;
+    const bool autoflyDone = m_options.autoflySeconds > 0.0f &&
+                             m_timer.elapsedSeconds() >= static_cast<double>(m_options.autoflySeconds);
+    const bool lastFrame = autoflyDone ||
+                           (m_options.frameLimit > 0 && (counted >= m_options.frameLimit || timedOut));
+    if (lastFrame && !m_options.screenshotPath.empty()) {
+        // Read the back buffer before it is presented, so the capture matches this frame.
+        const unsigned source = m_offscreen ? m_offscreen->readFramebuffer() : 0;
+        if (!saveFramebufferPng(source, m_window.framebufferWidth(), m_window.framebufferHeight(),
+                                m_options.screenshotPath)) {
+            m_exitCode = EXIT_FAILURE;
             m_window.requestClose();
+            return;
         }
     }
 
+    m_window.swapBuffers();
+    const auto afterSwap = Clock::now();
+    if (m_options.validateMinTiles > 0) {
+        validateFrame();
+    }
+
+    if (m_timer.hasNewSample()) {
+        updateTitle();
+    }
+
+    // Timed per loop iteration, so every phase belongs to the frame it is reported with.
+    const double totalMs = ms(frameStart, Clock::now());
+    const double swapMs = ms(afterRender, afterSwap);
+    recordFrameStats(static_cast<float>(totalMs), static_cast<float>(totalMs - swapMs));
+    collectPassTimes();
+    if (m_gpuTimer) {
+        for (const GpuTimer::Result& r : m_gpuTimer->collect()) {
+            m_gpuMs[static_cast<std::size_t>(r.frame - 1)] = static_cast<float>(r.ms);
+        }
+    }
+    if (m_frameLog) {
+        const Terrain::Stats& st = m_terrain->stats();
+        char row[256];
+        std::snprintf(row, sizeof(row),
+                      "%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%zu,%d,%zu,%d,%.1f,%.1f,%.1f,%d,",
+                      m_frameCount, totalMs, ms(frameStart, afterEvents), ms(afterEvents, afterUpdate),
+                      st.updateMs, ms(afterUpdate, afterRender) - st.updateMs, swapMs,
+                      st.uploadsThisFrame, st.outstandingTiles, st.residentTiles, st.triangles,
+                      st.drawCalls, m_camera.position.x, m_camera.position.y, m_camera.position.z,
+                      m_window.focused() ? 1 : 0);
+        m_pendingLogRows.emplace_back(m_frameCount, row);
+        flushFrameLog(false);
+    }
+    if (lastFrame) {
+        m_finished = true;
+        m_window.requestClose();
+    }
+}
+
+int Application::finish()
+{
+    if (m_exitCode != EXIT_SUCCESS) {
+        return m_exitCode;
+    }
     std::printf("Rendered %d frames, last average %.1f FPS (%.2f ms/frame)\n",
                 m_frameCount, m_timer.framesPerSecond(), m_timer.frameTimeMs());
     printRunStats();

@@ -87,7 +87,12 @@ public:
     explicit Application(AppOptions options);
     ~Application();
 
+    // Runs frames until the window closes, then finish().
     int run();
+    // One iteration of the frame loop, for hosts that drive it themselves (the browser).
+    void frame();
+    // Prints the run's statistics and validation; returns the exit code.
+    int finish();
 
 private:
     // Rain levels for Shift+R and the panel's buttons.
@@ -206,7 +211,8 @@ private:
 
     // --validate counters. Hole checks start once the initial load has covered the view, which
     // does not need streaming to catch up completely (it may never, on a software renderer).
-    bool m_finished = false; // the run reached its frame limit or autofly duration
+    bool m_finished = false;
+    int m_exitCode = 0; // the run reached its frame limit or autofly duration
     bool m_terrainReady = false;
     int m_validatedFrames = 0;
     int m_glErrorCount = 0;
