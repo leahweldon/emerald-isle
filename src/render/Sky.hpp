@@ -51,8 +51,9 @@ private:
     // Computes the SH and swaps the cubemaps once the readback is done. Returns false if the
     // GPU has not finished and wait is false.
     bool finishReadback(bool wait);
-    void computeIrradiance(const float* texels);
-    std::size_t readbackBytes() const; // six faces of RGB floats at the SH mip level
+    // texels: six faces at the SH mip level, channels floats per texel.
+    void computeIrradiance(const float* texels, std::size_t channels);
+    std::size_t readbackBytes() const;
 
     Shader m_skyShader;
     Shader m_skyboxShader;
@@ -64,6 +65,12 @@ private:
     GLsync m_fence = nullptr;
     int m_faceSize = 0;
     int m_shSize = 0;        // face size of the mip level read back for the SH
+    // Cubemap format and how it is read back: RGB floats on desktop; RGBA (GLES cannot render to
+    // RGB16F), as bytes where float targets are unsupported.
+    GLenum m_internalFormat = GL_RGB16F;
+    GLenum m_readFormat = GL_RGB;
+    GLenum m_readType = GL_FLOAT;
+    std::size_t m_readChannels = 3;
 
     Stage m_stage = Stage::Idle;
     std::size_t m_nextFace = 0;

@@ -1,5 +1,7 @@
 #include "ui/Ui.hpp"
 
+#include "platform/Gl.hpp"
+
 #include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -71,7 +73,7 @@ Ui::Ui(GLFWwindow* window, bool headless, int framebufferHeight, const std::file
     ImGui::GetStyle().ScaleAllSizes(m_scale);
 
     ImGui_ImplGlfw_InitForOpenGL(window, true); // chains to the window's own input callbacks
-    ImGui_ImplOpenGL3_Init("#version 330 core");
+    ImGui_ImplOpenGL3_Init(gl::kGles ? "#version 300 es" : "#version 330 core");
 }
 
 Ui::~Ui()

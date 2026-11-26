@@ -87,15 +87,12 @@ std::vector<GpuPassTimer::Result> GpuPassTimer::collect()
             m_oldest = (m_oldest + 1) % kFrames;
             continue;
         }
-        GLint available = 0;
-        glGetQueryObjectiv(slot.queries[slot.used - 1], GL_QUERY_RESULT_AVAILABLE, &available);
-        if (!available) {
+        if (!gl::queryAvailable(slot.queries[slot.used - 1])) {
             break;
         }
         Result result{slot.frame, {}, 0.0f};
         for (std::size_t i = 0; i < slot.used; ++i) {
-            GLuint64 ns = 0;
-            glGetQueryObjectui64v(slot.queries[i], GL_QUERY_RESULT, &ns);
+            const GLuint64 ns = gl::queryNanoseconds(slot.queries[i]);
             const auto ms = static_cast<float>(static_cast<double>(ns) / 1e6);
             result.ms[slot.passes[i]] += ms;
             result.total += ms;

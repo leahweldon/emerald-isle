@@ -11,7 +11,13 @@ layout(location = 1) in vec4 aVelocity; // m/s, life at spawn (s)
 out vec4 oPosition;
 out vec4 oVelocity;
 
+#ifdef NO_BUFFER_TEXTURES
+uniform sampler2D uDrops; // the drops just updated, copied into rows of 1024 texels (see Rain)
+vec4 dropTexel(int i) { return texelFetch(uDrops, ivec2(i % 1024, i / 1024), 0); }
+#else
 uniform samplerBuffer uDrops; // the drops just updated: position, velocity, hit per drop
+vec4 dropTexel(int i) { return texelFetch(uDrops, i); }
+#endif
 uniform int uActiveDrops;
 uniform int uGroups;
 uniform float uDt;
@@ -37,12 +43,12 @@ void main()
     } else if (uGroundValid) { // with no ground in the box, nothing can land
         life = 0.0;
         for (int d = gl_VertexID % uGroups; d < uActiveDrops; d += uGroups) {
-            vec4 hit = texelFetch(uDrops, d * 3 + 2);
+            vec4 hit = dropTexel(d * 3 + 2);
             if (hit.w > 0.5) {
                 uint seed = uint(gl_VertexID) * 7919u + uint(uFrame) * 104729u;
                 float angle = 6.2831853 * random(seed);
                 // Bigger drops throw their droplets further.
-                float size = 0.6 + 0.2 * texelFetch(uDrops, d * 3).w;
+                float size = 0.6 + 0.2 * dropTexel(d * 3).w;
                 float outward = mix(0.4, 1.4, random(seed)) * size;
                 life = mix(0.2, 0.45, random(seed));
                 v = vec4(cos(angle) * outward, mix(0.8, 2.0, random(seed)) * size, sin(angle) * outward, life);

@@ -1,7 +1,14 @@
 #include "platform/Gl.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
+
+#ifdef __EMSCRIPTEN__
+// WebGL 2's getBufferSubData: provided by Emscripten, not declared in its GLES 3 header.
+extern "C" void glGetBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, void* data);
+#endif
 
 namespace emerald::gl {
 
@@ -78,6 +85,112 @@ std::string shaderPrelude()
     return prelude;
 #else
     return "#version 330 core\n";
+#endif
+}
+
+bool queryAvailable(GLuint query)
+{
+    GLuint available = GL_FALSE;
+    glGetQueryObjectuiv(query, GL_QUERY_RESULT_AVAILABLE, &available);
+    return available != GL_FALSE;
+}
+
+GLuint64 queryNanoseconds(GLuint query)
+{
+    GLuint64 ns = 0;
+#ifdef __EMSCRIPTEN__
+    glGetQueryObjectui64vEXT(query, GL_QUERY_RESULT, &ns);
+#else
+    glGetQueryObjectui64v(query, GL_QUERY_RESULT, &ns);
+#endif
+    return ns;
+}
+
+void bufferTextureRgba32f([[maybe_unused]] GLuint buffer)
+{
+#ifndef __EMSCRIPTEN__
+    glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, buffer);
+#endif
+}
+
+void readBuffer(GLenum target, GLsizeiptr bytes, void* out)
+{
+#ifdef __EMSCRIPTEN__
+    glGetBufferSubData(target, 0, bytes, out);
+#else
+    if (const void* data = glMapBufferRange(target, 0, bytes, GL_MAP_READ_BIT)) {
+        std::memcpy(out, data, static_cast<std::size_t>(bytes));
+        glUnmapBuffer(target);
+    }
+#endif
+}
+
+int mipLevels([[maybe_unused]] GLenum target, int width, int height)
+{
+#ifdef __EMSCRIPTEN__
+    // GLES 3.0 cannot be asked; glGenerateMipmap makes the full chain.
+    return static_cast<int>(std::floor(std::log2(std::max(width, height)))) + 1;
+#else
+    (void)width;
+    (void)height;
+    int levels = 0;
+    for (GLint level = 0;; ++level) {
+        GLint levelWidth = 0;
+        glGetTexLevelParameteriv(target, level, GL_TEXTURE_WIDTH, &levelWidth);
+        if (levelWidth == 0) {
+            break;
+        }
+        levels = level + 1;
+        if (levelWidth == 1) {
+            break;
+        }
+    }
+    return levels;
+#endif
+}
+
+void readCubeFace(GLuint cubemap, GLenum face, int level, [[maybe_unused]] int size, GLenum format, GLenum type,
+                  GLintptr offset, [[maybe_unused]] GLuint scratchFramebuffer)
+{
+#ifdef __EMSCRIPTEN__
+    glBindFramebuffer(GL_FRAMEBUFFER, scratchFramebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, face, cubemap, level);
+    glReadPixels(0, 0, size, size, format, type, reinterpret_cast<void*>(offset));
+#else
+    glBindTexture(GL_TEXTURE_CUBE_MAP, cubemap);
+    glGetTexImage(face, level, format, type, reinterpret_cast<void*>(offset));
+#endif
+}
+
+PixelTransfer transferFor(GLenum internalFormat)
+{
+    switch (internalFormat) {
+    case GL_R11F_G11F_B10F: return {GL_RGB, GL_FLOAT};
+    case GL_RGB16F: return {GL_RGB, GL_FLOAT};
+    case GL_RGBA16F: return {GL_RGBA, GL_FLOAT};
+    case GL_RGBA32F: return {GL_RGBA, GL_FLOAT};
+    case GL_R32F: return {GL_RED, GL_FLOAT};
+    case GL_R16F: return {GL_RED, GL_FLOAT};
+    default: return {GL_RGBA, GL_UNSIGNED_BYTE};
+    }
+}
+
+int samplesFor([[maybe_unused]] GLenum internalFormat, int wanted)
+{
+    GLint most = 0;
+#ifdef __EMSCRIPTEN__
+    glGetInternalformativ(GL_RENDERBUFFER, internalFormat, GL_SAMPLES, 1, &most);
+#else
+    glGetIntegerv(GL_MAX_SAMPLES, &most);
+#endif
+    const int samples = std::min(wanted, static_cast<int>(most));
+    return samples < 2 ? 0 : samples;
+}
+
+void enableSeamlessCubemaps()
+{
+#ifndef __EMSCRIPTEN__
+    glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 #endif
 }
 

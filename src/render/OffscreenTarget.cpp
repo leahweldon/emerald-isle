@@ -22,17 +22,13 @@ OffscreenTarget::OffscreenTarget(int width, int height, int samples, GLenum colo
     : m_width(width)
     , m_height(height)
 {
-    GLint maxSamples = 0;
-    glGetIntegerv(GL_MAX_SAMPLES, &maxSamples);
-    GLsizei msaa = samples < maxSamples ? samples : maxSamples;
-    if (msaa < 2) {
-        msaa = 0;
-    }
+    const GLsizei msaa = gl::samplesFor(colourFormat, samples);
 
     glGenTextures(1, &m_texture);
     glBindTexture(GL_TEXTURE_2D, m_texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(colourFormat), width, height, 0, GL_RGBA, GL_FLOAT,
-                 nullptr);
+    const gl::PixelTransfer transfer = gl::transferFor(colourFormat);
+    glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(colourFormat), width, height, 0, transfer.format,
+                 transfer.type, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);

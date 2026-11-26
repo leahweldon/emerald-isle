@@ -82,18 +82,7 @@ TextureArray::TextureArray(const std::vector<std::filesystem::path>& layers, Enc
     GLint minFilter = 0;
     glGetTexParameteriv(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, &minFilter);
     m_trilinear = minFilter == GL_LINEAR_MIPMAP_LINEAR;
-    // Count levels the driver actually allocated.
-    for (GLint level = 0;; ++level) {
-        GLint levelWidth = 0;
-        glGetTexLevelParameteriv(GL_TEXTURE_2D_ARRAY, level, GL_TEXTURE_WIDTH, &levelWidth);
-        if (levelWidth == 0) {
-            break;
-        }
-        m_mipLevels = level + 1;
-        if (levelWidth == 1) {
-            break;
-        }
-    }
+    m_mipLevels = gl::mipLevels(GL_TEXTURE_2D_ARRAY, width, height);
 
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
 }

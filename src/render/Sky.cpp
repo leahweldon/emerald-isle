@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
@@ -80,15 +81,22 @@ Sky::Sky(const std::filesystem::path& shaderDir, int faceSize)
     // Full-screen triangles come from gl_VertexID; core profile still needs a VAO bound.
     glGenVertexArrays(1, &m_vao);
 
-    glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+    gl::enableSeamlessCubemaps();
+    if (gl::kGles) {
+        m_internalFormat = gl::caps().floatTargets ? GL_RGBA16F : GL_RGBA8;
+        m_readFormat = GL_RGBA;
+        m_readType = gl::caps().floatTargets ? GL_FLOAT : GL_UNSIGNED_BYTE;
+        m_readChannels = 4;
+    }
     glGenTextures(2, m_cubemaps.data());
     for (GLuint cubemap : m_cubemaps) {
         glBindTexture(GL_TEXTURE_CUBE_MAP, cubemap);
         for (int level = 0; level <= kShMipLevel; ++level) {
             const int size = std::max(m_faceSize >> level, 1);
             for (int face = 0; face < 6; ++face) {
-                glTexImage2D(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face), level, GL_RGB16F,
-                             size, size, 0, GL_RGB, GL_FLOAT, nullptr);
+                glTexImage2D(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face), level,
+                             static_cast<GLint>(m_internalFormat), size, size, 0, m_readFormat,
+                             m_internalFormat == GL_RGBA8 ? GL_UNSIGNED_BYTE : GL_FLOAT, nullptr);
             }
         }
         glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_BASE_LEVEL, 0);
@@ -122,7 +130,7 @@ Sky::~Sky()
 std::size_t Sky::readbackBytes() const
 {
     const auto size = static_cast<std::size_t>(m_shSize);
-    return kFaces.size() * size * size * 3 * sizeof(float);
+    return kFaces.size() * size * size * m_readChannels * (m_readType == GL_FLOAT ? sizeof(float) : 1);
 }
 
 void Sky::renderNow(const Atmosphere& atmosphere)
@@ -212,10 +220,14 @@ void Sky::startReadback()
     glBindBuffer(GL_PIXEL_PACK_BUFFER, m_readback);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     const std::size_t faceBytes = readbackBytes() / kFaces.size();
+    GLint previousFramebuffer = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousFramebuffer);
     for (std::size_t face = 0; face < kFaces.size(); ++face) {
-        glGetTexImage(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face), kShMipLevel, GL_RGB,
-                      GL_FLOAT, reinterpret_cast<void*>(face * faceBytes));
+        gl::readCubeFace(m_cubemaps[1 - m_front], static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face),
+                         kShMipLevel, m_shSize, m_readFormat, m_readType, static_cast<GLintptr>(face * faceBytes),
+                         m_framebuffer);
     }
+    glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previousFramebuffer));
     glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
     glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
     m_fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
@@ -225,9 +237,10 @@ void Sky::startReadback()
 
 bool Sky::finishReadback(bool wait)
 {
-    const GLuint64 timeout = wait ? 10'000'000'000ull : 0; // 10 s when waiting
+    // WebGL never blocks on a fence (the read below waits for the GPU instead when it must).
+    const GLuint64 timeout = wait && !gl::kGles ? 10'000'000'000ull : 0; // 10 s when waiting
     const GLenum status = glClientWaitSync(m_fence, 0, timeout);
-    if (status != GL_ALREADY_SIGNALED && status != GL_CONDITION_SATISFIED) {
+    if (status != GL_ALREADY_SIGNALED && status != GL_CONDITION_SATISFIED && !(wait && gl::kGles)) {
         if (wait) {
             throw std::runtime_error("Timed out reading back the sky cubemap");
         }
@@ -237,13 +250,16 @@ bool Sky::finishReadback(bool wait)
     m_fence = nullptr;
 
     glBindBuffer(GL_PIXEL_PACK_BUFFER, m_readback);
-    const auto* texels = static_cast<const float*>(glMapBufferRange(
-        GL_PIXEL_PACK_BUFFER, 0, static_cast<GLsizeiptr>(readbackBytes()), GL_MAP_READ_BIT));
-    if (texels) {
-        computeIrradiance(texels);
-        glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
-    }
+    std::vector<unsigned char> bytes(readbackBytes());
+    gl::readBuffer(GL_PIXEL_PACK_BUFFER, static_cast<GLsizeiptr>(bytes.size()), bytes.data());
     glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    std::vector<float> texels(bytes.size() / (m_readType == GL_FLOAT ? sizeof(float) : 1));
+    if (m_readType == GL_FLOAT) {
+        std::memcpy(texels.data(), bytes.data(), bytes.size());
+    } else {
+        std::transform(bytes.begin(), bytes.end(), texels.begin(), [](unsigned char b) { return b / 255.0f; });
+    }
+    computeIrradiance(texels.data(), m_readChannels);
 
     m_front = 1 - m_front;
     m_shown = m_rendering;
@@ -255,14 +271,14 @@ bool Sky::finishReadback(bool wait)
 
 // Projects the cubemap onto 9 SH coefficients (texels weighted by solid angle), then applies the
 // cosine-lobe convolution (Ramamoorthi and Hanrahan) and divides by pi for diffuse radiance.
-void Sky::computeIrradiance(const float* texels)
+void Sky::computeIrradiance(const float* texels, std::size_t channels)
 {
     const auto size = static_cast<std::size_t>(m_shSize);
     std::array<glm::vec3, 9> sh{};
     float totalWeight = 0.0f;
 
     for (std::size_t face = 0; face < kFaces.size(); ++face) {
-        const float* faceTexels = texels + face * size * size * 3;
+        const float* faceTexels = texels + face * size * size * channels;
         for (std::size_t y = 0; y < size; ++y) {
             for (std::size_t x = 0; x < size; ++x) {
                 const float u = 2.0f * (static_cast<float>(x) + 0.5f) / static_cast<float>(size) - 1.0f;
@@ -271,7 +287,7 @@ void Sky::computeIrradiance(const float* texels)
                 const float weight = 4.0f / (static_cast<float>(size * size) * r2 * std::sqrt(r2));
                 const glm::vec3 dir = glm::normalize(faceDirection(face, u, v));
 
-                const std::size_t i = (y * size + x) * 3;
+                const std::size_t i = (y * size + x) * channels;
                 glm::vec3 radiance(faceTexels[i], faceTexels[i + 1], faceTexels[i + 2]);
                 if (dir.y < 0.0f) {
                     radiance *= kGroundBounce;
