@@ -44,6 +44,16 @@ const ViewPreset* findViewPreset(const std::string& name)
     return nullptr;
 }
 
+int viewPresetCount()
+{
+    return static_cast<int>(kPresets.size());
+}
+
+const ViewPreset& viewPreset(int index)
+{
+    return kPresets[static_cast<std::size_t>(index)];
+}
+
 std::string viewPresetNames()
 {
     std::string names;

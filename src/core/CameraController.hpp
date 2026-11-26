@@ -37,6 +37,9 @@ public:
     // Current free-fly speed in m/s: proportional to height above the ground, times the [ ] multiplier
     // and the Shift boost while held.
     float effectiveSpeed() const { return m_effectiveSpeed; }
+    // The [ ] multiplier on free-fly speed, clamped to 1/32-32.
+    float speedMultiplier() const { return m_speedMultiplier; }
+    void setSpeedMultiplier(float multiplier);
 
     // The current pose as a ViewPreset initialiser line, for src/render/ViewPresets.cpp.
     std::string presetLine() const;

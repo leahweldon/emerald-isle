@@ -16,9 +16,16 @@ public:
     bool isDown(int key) const;
     bool wasPressed(int key) const; // went down since the last beginFrame()
     bool isMouseDown(int button) const;
-    glm::vec2 mouseDelta() const { return m_mouseDelta; } // pixels (screen coordinates)
+    glm::vec2 mouseDelta() const { return m_mouseBlocked ? glm::vec2(0.0f) : m_mouseDelta; } // pixels
     // Wheel notches or trackpad scroll units: x horizontal, y vertical (GLFW's sign convention).
-    glm::vec2 scrollDelta() const { return m_scrollDelta; }
+    glm::vec2 scrollDelta() const { return m_mouseBlocked ? glm::vec2(0.0f) : m_scrollDelta; }
+
+    // While blocked (the UI is using them), keys or mouse read as idle. Set once per frame.
+    void setBlocked(bool keyboard, bool mouse)
+    {
+        m_keyboardBlocked = keyboard;
+        m_mouseBlocked = mouse;
+    }
 
     // Forgets the last cursor position so the next move does not register as a jump.
     void resetCursor() { m_haveCursor = false; }
@@ -38,6 +45,8 @@ private:
     glm::vec2 m_mouseDelta{0.0f};
     glm::dvec2 m_lastCursor{0.0};
     bool m_haveCursor = false;
+    bool m_keyboardBlocked = false;
+    bool m_mouseBlocked = false;
     glm::vec2 m_scrollDelta{0.0f};
 };
 

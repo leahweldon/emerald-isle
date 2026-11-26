@@ -2,6 +2,7 @@
 
 #include "core/Screenshot.hpp"
 #include "render/GpuTimer.hpp"
+#include "render/GpuPassTimer.hpp"
 #include "render/OffscreenTarget.hpp"
 #include "render/Rain.hpp"
 #include "render/Shader.hpp"
@@ -13,6 +14,7 @@
 #include "render/Terrain.hpp"
 #include "render/TextureArray.hpp"
 #include "render/ViewPresets.hpp"
+#include "ui/Ui.hpp"
 #include "world/HeightField.hpp"
 
 #include <glad/gl.h>
@@ -68,9 +70,7 @@ constexpr float kAgxExposure = 1.16f;
 constexpr float kNightAdaptationEv = 1.0f;
 // And under full cloud, which is darker than clear sky with the sun out.
 constexpr float kOvercastAdaptationEv = 0.5f;
-// Rain levels for Shift+R, and the time constant of the ease between intensities (seconds).
-constexpr float kLightRain = 0.3f;
-constexpr float kHeavyRain = 1.0f;
+// Time constant of the ease between rain intensities (seconds).
 constexpr float kRainEaseSeconds = 1.2f;
 // The ground is soaked by light rain already; it wets over a couple of seconds, dries more slowly.
 constexpr float kWettingSeconds = 2.0f;
@@ -127,6 +127,8 @@ void printUsage(const char* program)
         "  --exposure <ev>       Exposure offset in stops (default 0)\n"
         "  --tone-mapper <name>  neutral (default, Khronos PBR Neutral) or agx\n"
         "  --rain <0-1>          Rain intensity, 0 dry to 1 heavy (default 0)\n"
+        "  --ui                  Show the panel from the start (F1 toggles it)\n"
+        "  --debug <view>        Debug view: lod, cascades, tiles or wireframe (repeatable)\n"
         "  --gpu-timing          Also measure GPU time per frame (adds ~0.4 ms on macOS)\n"
         "  --validate <tiles>    Check for GL errors and terrain holes, require at least this many\n"
         "                        tiles generated and resident, exit non-zero on failure\n"
@@ -245,6 +247,22 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.exposureEv = parseFloat(arg, argv[++i], -10.0f, 10.0f);
         } else if (std::strcmp(arg, "--rain") == 0 && hasValue) {
             options.rain = parseFloat(arg, argv[++i], 0.0f, 1.0f);
+        } else if (std::strcmp(arg, "--ui") == 0) {
+            options.ui = true;
+        } else if (std::strcmp(arg, "--debug") == 0 && hasValue) {
+            const std::string view = argv[++i];
+            if (view == "lod") {
+                options.debugView = 1;
+            } else if (view == "cascades") {
+                options.debugView = 2;
+            } else if (view == "tiles") {
+                options.debugTiles = true;
+            } else if (view == "wireframe") {
+                options.debugWireframe = true;
+            } else {
+                throw std::invalid_argument("Invalid value for --debug: " + view +
+                                            " (lod, cascades, tiles or wireframe)");
+            }
         } else if (std::strcmp(arg, "--tone-mapper") == 0 && hasValue) {
             const std::string name = argv[++i];
             if (name != "neutral" && name != "agx") {
@@ -400,6 +418,14 @@ Application::Application(AppOptions options)
     }
 
     m_lastCameraPos = m_camera.position;
+    m_debug.view = m_options.debugView;
+    m_debug.tileBorders = m_options.debugTiles;
+    m_debug.wireframe = m_options.debugWireframe;
+    m_passTimer = std::make_unique<GpuPassTimer>();
+    m_ui = std::make_unique<Ui>(m_window.native(), m_options.window.headless, m_window.framebufferHeight(),
+                                m_options.assetDir / "fonts" / "Roboto-Medium.ttf");
+    const bool selfEnding = m_options.frameLimit > 0 || m_options.autoflySeconds > 0.0f;
+    m_ui->setVisible(m_options.ui || (!m_options.window.headless && !selfEnding));
     warmUp();
 }
 
@@ -440,14 +466,22 @@ int Application::run()
         m_window.input().beginFrame();
         m_window.pollEvents();
         const auto afterEvents = Clock::now();
+        updateUi();
         update(delta);
         const auto afterUpdate = Clock::now();
         ++m_frameCount;
-        if (m_gpuTimer) {
+        // Pass timing replaces whole-frame timing while the panel is open: the queries cannot nest.
+        // Every frame: timing only some of them made those frames 2-7 ms slower on macOS.
+        m_passTiming = m_ui->visible();
+        if (m_passTiming) {
+            m_passTimer->beginFrame(m_frameCount);
+        } else if (m_gpuTimer) {
             m_gpuTimer->begin(m_frameCount);
         }
         render();
-        if (m_gpuTimer) {
+        if (m_passTiming) {
+            m_passTimer->endFrame();
+        } else if (m_gpuTimer) {
             m_gpuTimer->end();
         }
         const auto afterRender = Clock::now();
@@ -490,6 +524,7 @@ int Application::run()
         const double totalMs = ms(frameStart, Clock::now());
         const double swapMs = ms(afterRender, afterSwap);
         recordFrameStats(static_cast<float>(totalMs), static_cast<float>(totalMs - swapMs));
+        collectPassTimes();
         if (m_gpuTimer) {
             for (const GpuTimer::Result& r : m_gpuTimer->collect()) {
                 m_gpuMs[static_cast<std::size_t>(r.frame - 1)] = static_cast<float>(r.ms);
@@ -564,7 +599,7 @@ void Application::updateWeather(float deltaSeconds)
 
 void Application::renderRain()
 {
-    if (m_rainIntensity <= 0.0f) {
+    if (m_rainIntensity <= 0.0f || !m_features.rainParticles) {
         return;
     }
     const glm::dvec3& eye = m_camera.position;
@@ -629,6 +664,7 @@ void Application::render()
     m_scene->bind();
 
     // Refreshes the sky one cubemap face per frame while the sun moves.
+    markPass(GpuPassTimer::Sky);
     m_sky->update(m_atmosphere);
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -636,17 +672,30 @@ void Application::render()
 
     const glm::mat4 projection = m_camera.projection(m_window.aspectRatio());
     const glm::mat4 rotationOnly(glm::mat3(m_camera.view()));
+    markPass(GpuPassTimer::Other); // tile uploads
     m_terrain->update(m_camera.position, projection * m_camera.view());
+    markPass(GpuPassTimer::Shadows);
     renderShadows(projection);
+    markPass(GpuPassTimer::Reflection);
     renderSeabed();
     renderReflection(projection);
+    markPass(GpuPassTimer::Rain);
     renderRain();
 
+    // Within the main pass, timer queries split the GPU's render pass (costly on macOS), so its
+    // parts are timed separately only when the panel asks.
+    markPass(m_splitScenePass ? GpuPassTimer::Terrain : GpuPassTimer::Scene);
     m_terrainShader->use();
     setTerrainUniforms(*m_terrainShader);
+    m_terrainShader->set("uDebugView", m_debug.view);
+    m_terrainShader->set("uTileBorders", m_debug.tileBorders ? 1 : 0);
+    if (m_debug.wireframe) {
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    }
     m_terrain->draw(*m_terrainShader, kHeightUnit, kHorizonUnit);
 
     // Sea after terrain so it is hidden behind land, pushed back slightly so land wins at the coast.
+    markScenePart(GpuPassTimer::Sea);
     m_seaShader->use();
     setSceneUniforms(*m_seaShader);
     // Screenshots freeze the waves, so they are reproducible.
@@ -665,13 +714,16 @@ void Application::render()
     glPolygonOffset(1.0f, 1.0f);
     m_sea->draw();
     glDisable(GL_POLYGON_OFFSET_FILL);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
     // Skybox last, at the far plane, so it is only shaded where nothing else was drawn.
     const float pixelAngle = m_camera.fovY / static_cast<float>(m_window.framebufferHeight());
+    markScenePart(GpuPassTimer::Sky);
     m_sky->drawBackground(glm::inverse(projection * rotationOnly), m_atmosphere, pixelAngle);
 
     // Rain after everything opaque, blended into the HDR target.
-    if (m_rainIntensity > 0.0f) {
+    markScenePart(GpuPassTimer::Rain);
+    if (m_rainIntensity > 0.0f && m_features.rainParticles) {
         RainLighting lighting;
         lighting.lightDir = m_atmosphere.lightDir();
         lighting.lightColour = m_atmosphere.lightColour();
@@ -684,7 +736,39 @@ void Application::render()
                      pixelAngle, m_cameraVelocity, lighting);
     }
 
+    markPass(GpuPassTimer::ToneMap);
     toneMap();
+    markPass(GpuPassTimer::Ui);
+    m_ui->draw(); // into the final framebuffer, after tone mapping
+}
+
+void Application::markPass(GpuPassTimer::Pass pass)
+{
+    if (m_passTiming) {
+        m_passTimer->mark(pass);
+    }
+}
+
+void Application::markScenePart(GpuPassTimer::Pass pass)
+{
+    if (m_splitScenePass) {
+        markPass(pass);
+    }
+}
+
+void Application::collectPassTimes()
+{
+    for (const GpuPassTimer::Result& r : m_passTimer->collect()) {
+        // Smoothed over a few dozen frames, so the readout is steady enough to read.
+        constexpr float kSmoothing = 0.05f;
+        for (std::size_t i = 0; i < m_passMs.size(); ++i) {
+            m_passMs[i] += (r.ms[i] - m_passMs[i]) * kSmoothing;
+        }
+        m_passTotalMs += (r.total - m_passTotalMs) * kSmoothing;
+        if (m_gpuTimer) {
+            m_gpuMs[static_cast<std::size_t>(r.frame - 1)] = r.total;
+        }
+    }
 }
 
 void Application::toneMap()
@@ -715,7 +799,7 @@ void Application::renderShadows(const glm::mat4& projection)
 {
     // Twilight has no direct light to shadow; the maps keep their last contents meanwhile.
     const glm::vec3 light = m_atmosphere.lightColour();
-    if (std::max(light.r, std::max(light.g, light.b)) < 1e-4f) {
+    if (!m_features.shadows || std::max(light.r, std::max(light.g, light.b)) < 1e-4f) {
         return;
     }
     const glm::dvec3& eye = m_camera.position;
@@ -763,7 +847,11 @@ void Application::renderReflection(const glm::mat4& projection)
     mirror[1][1] = -1.0f;
     mirror[3][1] = -2.0f * static_cast<float>(m_camera.position.y);
 
-    m_reflection->begin();
+    m_reflection->begin(); // clears: with reflections off, the sea reflects only the sky
+    if (!m_features.reflections) {
+        m_reflection->end();
+        return;
+    }
     m_reflectionShader->use();
     setTerrainUniforms(*m_reflectionShader);
     m_reflectionShader->set("uMirror", mirror);
@@ -796,12 +884,16 @@ void Application::setSceneUniforms(Shader& shader)
     shader.set("uCameraXZ", glm::vec2(m_camera.position.x, m_camera.position.z));
     shader.set("uCameraHeight", static_cast<float>(m_camera.position.y));
     m_atmosphere.apply(shader, static_cast<float>(m_camera.position.y));
+    shader.set("uShadowsOff", m_features.shadows ? 0 : 1);
+    shader.set("uHorizonShadowsOff", m_features.horizonShadows ? 0 : 1);
 }
 
 void Application::recordFrameStats(float frameMs, float cpuMs)
 {
     const Terrain::Stats& stats = m_terrain->stats();
     m_frameMs.push_back(frameMs);
+    m_frameHistory[m_historyNext] = frameMs;
+    m_historyNext = (m_historyNext + 1) % m_frameHistory.size();
     m_cpuMs.push_back(cpuMs);
     m_gpuMs.push_back(-1.0f);
     m_terrainMs.push_back(static_cast<float>(stats.updateMs));

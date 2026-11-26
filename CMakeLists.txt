@@ -43,7 +43,12 @@ FetchContent_Declare(stb
     GIT_TAG        f58f558c120e9b32c217290b80bad1a0729fbb2c
     GIT_SHALLOW    FALSE)
 
-FetchContent_MakeAvailable(glfw glm)
+FetchContent_Declare(imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG        v1.91.8
+    GIT_SHALLOW    TRUE)
+
+FetchContent_MakeAvailable(glfw glm imgui)
 
 FetchContent_GetProperties(stb)
 if(NOT stb_POPULATED)
@@ -51,6 +56,19 @@ if(NOT stb_POPULATED)
 endif()
 add_library(stb INTERFACE)
 target_include_directories(stb SYSTEM INTERFACE ${stb_SOURCE_DIR})
+
+# Dear ImGui with the GLFW and OpenGL 3 backends (its own GL loader), for the in-app panel
+add_library(imgui STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
+target_include_directories(imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+target_compile_definitions(imgui PUBLIC IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
+# GLFW's headers only: the executable links GLFW itself.
+target_include_directories(imgui SYSTEM PRIVATE $<TARGET_PROPERTY:glfw,INTERFACE_INCLUDE_DIRECTORIES>)
 
 # glad: OpenGL 3.3 core loader, generated with glad2 and kept in-tree
 add_library(glad STATIC external/glad/src/gl.c)
@@ -65,6 +83,7 @@ find_package(Threads REQUIRED)
 add_executable(emerald-isle
     src/main.cpp
     src/core/Application.cpp
+    src/core/Panel.cpp
     src/core/CameraController.cpp
     src/core/Window.cpp
     src/core/FrameTimer.cpp
@@ -74,6 +93,7 @@ add_executable(emerald-isle
     src/render/Atmosphere.cpp
     src/render/Camera.cpp
     src/render/GpuTimer.cpp
+    src/render/GpuPassTimer.cpp
     src/render/OffscreenTarget.cpp
     src/render/Rain.cpp
     src/render/ReflectionTarget.cpp
@@ -85,13 +105,14 @@ add_executable(emerald-isle
     src/render/Terrain.cpp
     src/render/TextureArray.cpp
     src/render/ViewPresets.cpp
+    src/ui/Ui.cpp
     src/world/HeightField.cpp
     src/world/Noise.cpp
     src/world/SolarPosition.cpp
     src/world/TileStreamer.cpp)
 
 target_include_directories(emerald-isle PRIVATE src)
-target_link_libraries(emerald-isle PRIVATE glfw glad glm::glm stb OpenGL::GL Threads::Threads)
+target_link_libraries(emerald-isle PRIVATE glfw glad glm::glm stb imgui OpenGL::GL Threads::Threads)
 target_compile_definitions(emerald-isle PRIVATE
     GLFW_INCLUDE_NONE
     EMERALD_VERSION="${PROJECT_VERSION}")
@@ -112,6 +133,10 @@ endif()
 add_custom_target(emerald-assets ALL
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:emerald-isle>/assets"
+    # The panel's font ships with Dear ImGui (Roboto, Apache 2.0).
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${imgui_SOURCE_DIR}/misc/fonts/Roboto-Medium.ttf"
+            "$<TARGET_FILE_DIR:emerald-isle>/assets/fonts/Roboto-Medium.ttf"
     COMMENT "Copying assets"
     VERBATIM)
 add_dependencies(emerald-isle emerald-assets)

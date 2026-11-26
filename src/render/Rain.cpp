@@ -205,7 +205,9 @@ void Rain::simulate(float dt, const glm::dvec3& cameraPos, const glm::vec3& wind
     const glm::dvec3 centre = cameraPos - glm::dvec3(0.0, kCentreDrop, 0.0);
     m_boxOrigin = glm::vec3(centre - glm::floor(centre / size) * size);
     m_cameraHeight = static_cast<float>(cameraPos.y);
-    if (m_activeDrops == 0) {
+    // A still step changes nothing, and must not advance the seeds: screenshot runs hold the rain
+    // for however many frames the terrain takes to load, and still capture the same image.
+    if (m_activeDrops == 0 || dt <= 0.0f) {
         return;
     }
     ++m_frame;

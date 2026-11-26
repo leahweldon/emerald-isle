@@ -44,6 +44,8 @@ public:
     void apply(Shader& shader, GLuint unit) const;
 
     float distance() const { return m_cascadeEnd[kCascades - 1]; }
+    // View depth (metres) where each cascade ends, for the panel's legend.
+    float cascadeEnd(int cascade) const { return m_cascadeEnd[static_cast<std::size_t>(cascade)]; }
 
 private:
     GLuint m_texture = 0;

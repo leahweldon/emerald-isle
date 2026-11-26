@@ -512,6 +512,7 @@ void Terrain::drawNodes(Shader& shader, GLuint heightTileUnit, int horizonUnit,
     const GLint materialLoc = shader.uniformLocation("uNodeMaterialOrigin");
     const GLint sizeLoc = shader.uniformLocation("uNodeSize");
     const GLint morphLoc = shader.uniformLocation("uMorphRange");
+    const GLint levelLoc = shader.uniformLocation("uNodeLevel"); // debug view only
 
     glBindVertexArray(m_vao);
     for (const DrawNode& node : nodes) {
@@ -524,6 +525,7 @@ void Terrain::drawNodes(Shader& shader, GLuint heightTileUnit, int horizonUnit,
         glUniform2f(materialLoc, static_cast<float>(ox - kMaterialPeriod * std::floor(ox / kMaterialPeriod)),
                     static_cast<float>(oz - kMaterialPeriod * std::floor(oz / kMaterialPeriod)));
         glUniform1f(sizeLoc, static_cast<float>(size));
+        glUniform1f(levelLoc, static_cast<float>(node.key.level));
         if (horizonUnit >= 0) {
             glActiveTexture(GL_TEXTURE0 + static_cast<GLuint>(horizonUnit));
             glBindTexture(GL_TEXTURE_2D_ARRAY, node.horizon != 0 ? node.horizon : m_flatHorizon);

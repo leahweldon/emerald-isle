@@ -26,6 +26,7 @@ struct Atmosphere {
     // also sets the cloud cover, and how wet the ground is (it dries more slowly than rain stops).
     float rain = 0.0f;
     float wetness = 0.0f;
+    bool fog = true; // panel toggle
 
     // Always full, opposite the sun: up at night, down by day.
     glm::vec3 moonDir() const { return -sunDir; }

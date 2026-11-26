@@ -6,7 +6,9 @@
 #include "core/Window.hpp"
 #include "render/Atmosphere.hpp"
 #include "render/Camera.hpp"
+#include "render/GpuPassTimer.hpp"
 
+#include <array>
 #include <filesystem>
 #include <cstdint>
 #include <cstdio>
@@ -29,6 +31,7 @@ class ShadowMaps;
 class OffscreenTarget;
 class TextureArray;
 class Rain;
+class Ui;
 
 struct AppOptions {
     WindowConfig window;
@@ -47,6 +50,14 @@ struct AppOptions {
     float exposureEv = 0.0f;
     // Final tone curve: false for Khronos PBR Neutral, true for AgX.
     bool agx = false;
+    // Show the panel from the start. Otherwise it starts open only in interactive sessions (not
+    // in runs that end by themselves); F1 toggles it.
+    bool ui = false;
+    // --debug: terrain colouring (0 off, 1 level of detail, 2 shadow cascades), node outlines and
+    // wireframe, as in the panel's debug views.
+    int debugView = 0;
+    bool debugTiles = false;
+    bool debugWireframe = false;
     // Starting rain intensity, 0 (dry) to 1 (heavy); R and Shift+R change it while running.
     float rain = 0.0f;
     // --sun-bearing or --sun-elevation fix the sun in place of the time of day (degrees).
@@ -79,6 +90,10 @@ public:
     int run();
 
 private:
+    // Rain levels for Shift+R and the panel's buttons.
+    static constexpr float kLightRain = 0.3f;
+    static constexpr float kHeavyRain = 1.0f;
+
     void warmUp();
     void update(float deltaSeconds);
     void updateTime(float deltaSeconds);
@@ -96,6 +111,20 @@ private:
     void printRunStats() const;
     void flushFrameLog(bool all);
     void validateFrame();
+    // Starts the UI frame and builds the panel (Panel.cpp), and keeps its input from the camera.
+    void updateUi();
+    void buildPanel();
+    void panelPerformance();
+    void panelTime();
+    void panelWeather();
+    void panelRendering();
+    void panelCamera();
+    void panelDebug();
+    void panelHelp();
+    // Starts a GPU timing segment for pass while the panel is open.
+    void markPass(GpuPassTimer::Pass pass);
+    void collectPassTimes();
+    void markScenePart(GpuPassTimer::Pass pass); // only when the scene pass is split
     // Reads every pending GL error into count (recording the first), for --validate.
     static void drainGlErrors(int& count, unsigned& first);
     bool reportValidation() const;
@@ -123,6 +152,30 @@ private:
     std::unique_ptr<OffscreenTarget> m_scene;     // linear HDR, multisampled
     std::unique_ptr<Shader> m_toneMapShader;
     std::unique_ptr<Rain> m_rain;
+    std::unique_ptr<Ui> m_ui;
+    // Features the panel can switch off, to see what each contributes.
+    struct Features {
+        bool shadows = true;
+        bool horizonShadows = true;
+        bool reflections = true;
+        bool rainParticles = true;
+    } m_features;
+    // Debug views: they show how the systems work.
+    struct DebugViews {
+        int view = 0; // terrain colouring: 0 off, 1 level of detail, 2 shadow cascades
+        bool tileBorders = false;
+        bool wireframe = false;
+        bool reflectionPreview = false;
+    } m_debug;
+    // Per-pass GPU timing while the panel is open (it then stands in for m_gpuTimer).
+    std::unique_ptr<GpuPassTimer> m_passTimer;
+    bool m_passTiming = false;
+    bool m_splitScenePass = false; // time terrain, sea, sky and rain drops separately
+    GpuPassTimer::Times m_passMs{}; // smoothed for display
+    float m_passTotalMs = 0.0f;
+    std::array<float, 480> m_frameHistory{}; // recent frame times for the panel's graph, a ring
+    std::size_t m_historyNext = 0;
+    double m_copiedAt = -10.0; // when the panel last copied the pose, seconds
     unsigned m_fullscreenVao = 0; // GL vertex array name
     Camera m_camera;
     std::unique_ptr<CameraController> m_controller;

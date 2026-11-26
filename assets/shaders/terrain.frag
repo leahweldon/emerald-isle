@@ -37,6 +37,11 @@ uniform sampler2DArray uMaterialNormal;
 
 uniform sampler2DArray uHorizon; // the node's horizon map: 8 directions in two RGBA layers
 uniform float uTileBorder;
+uniform bool uHorizonShadowsOff; // panel toggle
+// Debug views (panel): 0 off, 1 level of detail, 2 shadow cascades; node outlines on their own.
+uniform int uDebugView;
+uniform bool uTileBorders;
+uniform float uNodeLevel; // CDLOD level of the node being drawn, 0 finest
 
 // Soft edge for distant shadows, also hiding the 8-bit angle steps: about a degree.
 const float kHorizonSoftness = 0.018;
@@ -210,6 +215,42 @@ float ggxSpecular(vec3 n, vec3 v, vec3 l, float alpha)
     return d * fresnel * vis * 0.25 * nl;
 }
 
+const vec3 kBeyondCascades = vec3(0.55);
+
+// Debug palette, by index; fractions blend towards the next colour.
+vec3 debugPalette(float index)
+{
+    const vec3 kPalette[9] = vec3[9](vec3(0.85, 0.20, 0.20), vec3(0.95, 0.55, 0.15), vec3(0.90, 0.85, 0.20),
+                                     vec3(0.35, 0.80, 0.30), vec3(0.20, 0.70, 0.80), vec3(0.25, 0.40, 0.90),
+                                     vec3(0.60, 0.35, 0.85), vec3(0.85, 0.40, 0.70), vec3(0.85, 0.85, 0.85));
+    int i = int(clamp(floor(index), 0.0, 8.0));
+    return mix(kPalette[i], kPalette[min(i + 1, 8)], fract(index));
+}
+
+// Level of detail: one colour per CDLOD level, blending towards the next coarser level's colour
+// as the vertices geomorph; or which shadow cascade covers the pixel (the fifth colour is beyond
+// them, where the horizon maps take over).
+vec3 debugColour()
+{
+    if (uDebugView == 1) {
+        return debugPalette(uNodeLevel + vMorph * 0.999);
+    }
+    // Every other palette colour, cross-fading as the cascades do.
+    float cascade = shadowCascade(vRelPos);
+    int i = int(cascade);
+    vec3 from = i < 4 ? debugPalette(2.0 * float(i)) : kBeyondCascades;
+    vec3 to = i + 1 < 4 ? debugPalette(2.0 * float(i + 1)) : kBeyondCascades;
+    return mix(from, to, fract(cascade));
+}
+
+// 1 on the outline of the node being drawn, about a pixel wide.
+float nodeOutline()
+{
+    vec2 local = (vTileUV * uTileSamples - uTileBorder - 0.5) / uTileQuads; // 0-1 across the node
+    vec2 edge = min(local, 1.0 - local) / max(fwidth(local), vec2(1e-6));
+    return 1.0 - smoothstep(0.5, 1.5, min(edge.x, edge.y));
+}
+
 // Night vision: as the light fails, colours fade and shift towards blue (the Purkinje effect),
 // so moonlit land reads blue-grey rather than green.
 vec3 nightVision(vec3 c)
@@ -248,8 +289,9 @@ void main()
         discard;
     }
 
-    // Fully fogged (distant islands at the horizon): the fog colour is all that shows.
-    float fog = fogAmount(vRelPos);
+    // Fully fogged (distant islands at the horizon): the fog colour is all that shows. Debug views
+    // show through the fog.
+    float fog = uDebugView == 0 ? fogAmount(vRelPos) : 0.0;
     if (fog > 0.995) {
         fragColour = vec4(fogColour(vRelPos), 1.0);
         return;
@@ -367,12 +409,15 @@ void main()
         shallow = mix(shallow, shallowLuminance * vec3(0.85, 1.05, 0.95), 0.7 * uOvercast);
     }
     albedo = mix(shallow, albedo, smoothstep(0.0, 2.5, metres));
+    if (uDebugView != 0) {
+        albedo = debugColour();
+    }
 
     // Shadows dim direct light only; the sky's ambient light reaches into them.
     float diffuse = max(dot(shadingNormal, uLightDir), 0.0);
     float lit = 0.0;
     if (diffuse > 0.0) {
-        float far = dot(vRelPos, uViewForward) > uCascadeStart.w ? horizonVisibility() : 1.0;
+        float far = !uHorizonShadowsOff && dot(vRelPos, uViewForward) > uCascadeStart.w ? horizonVisibility() : 1.0;
         lit = mix(shadowVisibility(vRelPos, n, max(dot(n, uLightDir), 0.0), far), 1.0, 0.5 * uRain);
         diffuse *= lit;
     }
@@ -396,6 +441,9 @@ void main()
         colour += uWetness * wetFilm * mix(0.3, 1.0, flat_) * sheen;
     }
     colour = nightVision(colour);
+    if (uTileBorders) {
+        colour = mix(colour, vec3(0.01, 0.01, 0.015), nodeOutline());
+    }
 
     colour = mix(colour, fogColour(vRelPos), fog);
     fragColour = vec4(colour, 1.0); // linear HDR, tone mapped in tonemap.frag
