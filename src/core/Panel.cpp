@@ -351,8 +351,10 @@ void Application::panelDebug()
     ImGui::RadioButton("Cascades", &m_debug.view, 2);
     const float column = ImGui::GetContentRegionAvail().x * 0.5f;
     ImGui::Checkbox("Tile borders", &m_debug.tileBorders);
-    ImGui::SameLine(column);
-    ImGui::Checkbox("Wireframe", &m_debug.wireframe);
+    if (gl::caps().wireframe) { // not in WebGL
+        ImGui::SameLine(column);
+        ImGui::Checkbox("Wireframe", &m_debug.wireframe);
+    }
 
     if (m_debug.view == 1) {
         // Node size per CDLOD level; colours blend to the next level where vertices geomorph.
