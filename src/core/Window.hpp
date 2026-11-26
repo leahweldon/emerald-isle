@@ -2,6 +2,7 @@
 
 #include "core/Input.hpp"
 
+#include <functional>
 #include <string>
 
 struct GLFWwindow;
@@ -17,6 +18,8 @@ struct WindowConfig {
     // Hidden window that never takes focus; the final image goes to an OffscreenTarget instead.
     // The framebuffer size is then width x height exactly, with no HiDPI scaling.
     bool headless = false;
+    // A left click captures the pointer for mouse look (the web build, where Tab moves focus).
+    bool clickToCapture = false;
 };
 
 // Owns the GLFW window and its OpenGL 3.3 core context.
@@ -43,15 +46,21 @@ public:
     int framebufferHeight() const { return m_framebufferHeight; }
     int refreshRate() const { return m_refreshRate; } // primary display, 0 if unknown
     float aspectRatio() const;
+    // Device pixels per window unit (2 on a Retina display or a HiDPI browser); 1 headless.
+    float pixelRatio() const;
 
     GLFWwindow* native() const { return m_handle; }
 
     Input& input() { return m_input; }
     const Input& input() const { return m_input; }
 
+    // With clickToCapture: whether a left click may capture the pointer now (false over the UI).
+    void setCaptureFilter(std::function<bool()> filter) { m_captureFilter = std::move(filter); }
+
     // Hides the cursor and reports unbounded (raw where supported) motion for mouse look.
     void setCursorCaptured(bool captured);
-    bool cursorCaptured() const { return m_cursorCaptured; }
+    // In a browser the pointer lock can also end without us (Escape), so this asks GLFW there.
+    bool cursorCaptured() const;
 
 private:
     static void onFramebufferResize(GLFWwindow* handle, int width, int height);
@@ -66,6 +75,9 @@ private:
     Input m_input;
     bool m_cursorCaptured = false;
     int m_refreshRate = 0;
+    bool m_headless = false;
+    bool m_clickToCapture = false;
+    std::function<bool()> m_captureFilter;
 };
 
 } // namespace emerald

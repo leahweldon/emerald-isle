@@ -1,6 +1,6 @@
 #pragma once
 
-#include <glad/gl.h>
+#include "platform/Gl.hpp"
 #include <glm/glm.hpp>
 
 #include <array>
@@ -17,9 +17,7 @@ class Shader;
 class ShadowMaps {
 public:
     static constexpr int kCascades = 4;
-    static constexpr int kResolution = 2048;
-
-    ShadowMaps();
+    explicit ShadowMaps(int resolution = 2048);
     ~ShadowMaps();
 
     ShadowMaps(const ShadowMaps&) = delete;
@@ -44,10 +42,12 @@ public:
     void apply(Shader& shader, GLuint unit) const;
 
     float distance() const { return m_cascadeEnd[kCascades - 1]; }
+    int resolution() const { return m_resolution; }
     // View depth (metres) where each cascade ends, for the panel's legend.
     float cascadeEnd(int cascade) const { return m_cascadeEnd[static_cast<std::size_t>(cascade)]; }
 
 private:
+    int m_resolution;
     GLuint m_texture = 0;
     GLuint m_framebuffer = 0;
     std::array<glm::mat4, kCascades> m_viewProj{};

@@ -13,9 +13,9 @@ namespace emerald {
 
 namespace {
 
-// A node splits when the camera is within kRangeFactor * child size of it; vertices morph to the
-// coarser grid over the last part of that range so neighbouring levels meet smoothly.
-constexpr double kRangeFactor = 2.5;
+// A node splits when the camera is within the range factor (setLodRange) times the child size of
+// it; vertices morph to the coarser grid over the last part of that range so neighbouring levels
+// meet smoothly.
 constexpr float kMorphStart = 0.75f; // fraction of the range where morphing begins
 constexpr int kRootRadius = 2;       // roots drawn around the camera's root cell (5 x 5)
 // Levels this coarse (131 km nodes and up) are kept loaded even outside the view.
@@ -30,10 +30,6 @@ constexpr float kUnknownMaxY = 5000.0f;
 // Matches kMaterialPeriod in terrain.frag: material patterns repeat exactly every this many metres.
 constexpr double kMaterialPeriod = 360000.0;
 
-double lodRange(int level)
-{
-    return kRangeFactor * nodeSize(level);
-}
 
 // Frustum planes (a, b, c, d) with inward normals, from a camera-relative view-projection.
 void extractPlanes(const glm::mat4& m, glm::vec4 planes[6])
@@ -116,6 +112,11 @@ Terrain::~Terrain()
     glDeleteBuffers(1, &m_ebo);
     glDeleteBuffers(1, &m_vbo);
     glDeleteVertexArrays(1, &m_vao);
+}
+
+double Terrain::lodRange(int level) const
+{
+    return m_rangeFactor * nodeSize(level);
 }
 
 void Terrain::buildGridMesh()
@@ -230,9 +231,7 @@ void Terrain::buildCoastMask(const HeightField& heightField)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     // Outside the DEM is open sea as far as the mask is concerned: border 0, not repeated edges.
     const GLfloat border[] = {0.0f, 0.0f, 0.0f, 0.0f};
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
+    gl::clampToBorder(GL_TEXTURE_2D, border); // the DEM's own edges are sea, so edge texels are 0 too
     glBindTexture(GL_TEXTURE_2D, 0);
     m_demSize = glm::vec2(2.0 * heightField.demHalfWidth(), 2.0 * heightField.demHalfDepth());
 }
@@ -289,8 +288,10 @@ void Terrain::uploadTile(const TileData& tile)
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, kTileSamples, kTileSamples, 0, GL_RED, GL_FLOAT,
-                 tile.heights.data());
+    // 32-bit floats need an extension to be filtered in WebGL; half floats do not (heights are then
+    // stored to about a metre).
+    const GLint format = gl::caps().floatLinear ? GL_R32F : GL_R16F;
+    glTexImage2D(GL_TEXTURE_2D, 0, format, kTileSamples, kTileSamples, 0, GL_RED, GL_FLOAT, tile.heights.data());
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -344,6 +345,7 @@ void Terrain::update(const glm::dvec3& cameraPos, const glm::mat4& viewProjectio
         }
     }
     m_streamer->setRequests(wanted);
+    m_streamer->pump(m_generationBudgetMs); // only without a worker thread
     // A loaded root means the ground under the camera can be drawn at some level.
     m_stats.cameraCovered = m_lookup.count(TileKey{kMaxLevel, cx, cz}) != 0;
 

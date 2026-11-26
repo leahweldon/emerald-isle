@@ -2,6 +2,7 @@
 
 #include "core/CameraController.hpp"
 #include "core/FrameTimer.hpp"
+#include "core/Quality.hpp"
 #include "core/TimeOfDay.hpp"
 #include "core/Window.hpp"
 #include "render/Atmosphere.hpp"
@@ -16,6 +17,12 @@
 #include <memory>
 #include <vector>
 #include <string>
+
+#ifdef __EMSCRIPTEN__
+#define EMERALD_DEFAULT_QUALITY 1
+#else
+#define EMERALD_DEFAULT_QUALITY 2
+#endif
 
 namespace emerald {
 
@@ -53,6 +60,12 @@ struct AppOptions {
     // Show the panel from the start. Otherwise it starts open only in interactive sessions (not
     // in runs that end by themselves); F1 toggles it.
     bool ui = false;
+    // Web build: use every WebGL fallback even where the browser has the feature, to test them.
+    bool webglFallbacks = false;
+    bool orbit = false;  // --orbit: orbit the --view target until the first input
+    bool paused = false; // --paused: time of day starts paused
+    // Index into kQualities: High on desktop, Medium on the web.
+    int quality = EMERALD_DEFAULT_QUALITY;
     // --debug: terrain colouring (0 off, 1 level of detail, 2 shadow cascades), node outlines and
     // wireframe, as in the panel's debug views.
     int debugView = 0;
@@ -87,7 +100,18 @@ public:
     explicit Application(AppOptions options);
     ~Application();
 
+    // Runs frames until the window closes, then finish().
     int run();
+    // One iteration of the frame loop, for hosts that drive it themselves (the browser).
+    void frame();
+    // Prints the run's statistics and validation; returns the exit code.
+    int finish();
+    // True once a run that ends by itself (--frames, --autofly) has finished.
+    bool done() const;
+    // Camera, orbit, panel and pointer state as JSON, for the web build's input test.
+    std::string stateJson() const;
+    // Shows or hides the panel (F1 does the same), for the web page's button.
+    void toggleUi();
 
 private:
     // Rain levels for Shift+R and the panel's buttons.
@@ -105,6 +129,10 @@ private:
     void renderReflection(const glm::mat4& projection);
     // Resolves the HDR scene and tone maps it into the window (or the headless target).
     void toneMap();
+    void applyQuality(int quality);
+    int sceneWidth() const;  // the HDR scene's size: the framebuffer, or less under a pixel-ratio cap
+    int sceneHeight() const;
+    float displayExposure() const; // linear scale before the tone curve
     void setTerrainUniforms(Shader& shader);
     void updateTitle();
     void recordFrameStats(float frameMs, float cpuMs);
@@ -170,7 +198,10 @@ private:
     // Per-pass GPU timing while the panel is open (it then stands in for m_gpuTimer).
     std::unique_ptr<GpuPassTimer> m_passTimer;
     bool m_passTiming = false;
-    bool m_splitScenePass = false; // time terrain, sea, sky and rain drops separately
+    bool m_splitScenePass = false;
+    int m_quality = 0;
+    float m_maxPixelRatio = 16.0f;
+    int m_reflectionDivisor = 2; // time terrain, sea, sky and rain drops separately
     GpuPassTimer::Times m_passMs{}; // smoothed for display
     float m_passTotalMs = 0.0f;
     std::array<float, 480> m_frameHistory{}; // recent frame times for the panel's graph, a ring
@@ -188,6 +219,7 @@ private:
     float m_wetness = 0.0f;
     float m_deltaSeconds = 0.0f;
     bool m_rainWarmedUp = false; // screenshot runs: rain settled before the frames counted
+    bool m_orbitingUntilInput = false; // --orbit, until the first input
     glm::dvec3 m_lastCameraPos{0.0};
     glm::vec3 m_cameraVelocity{0.0f};
     int m_frameCount = 0;
@@ -206,7 +238,8 @@ private:
 
     // --validate counters. Hole checks start once the initial load has covered the view, which
     // does not need streaming to catch up completely (it may never, on a software renderer).
-    bool m_finished = false; // the run reached its frame limit or autofly duration
+    bool m_finished = false;
+    int m_exitCode = 0; // the run reached its frame limit or autofly duration
     bool m_terrainReady = false;
     int m_validatedFrames = 0;
     int m_glErrorCount = 0;

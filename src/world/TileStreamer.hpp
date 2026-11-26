@@ -5,14 +5,20 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <unordered_set>
 #include <vector>
 
+#ifndef EMERALD_THREADS
+#define EMERALD_THREADS 1
+#endif
+
 namespace emerald {
 
 class HeightField;
+class TileJob;
 
 // Terrain quadtree layout shared by the streamer and the renderer. Level 0 is the finest; node
 // (level, x, z) covers [x, x + 1) * size by [z, z + 1) * size metres, size = kLeafSize * 2^level.
@@ -64,7 +70,9 @@ struct TileData {
 
 // Generates height tiles on one background thread. The main thread states which tiles it wants
 // each frame (replacing the previous wish list, so stale requests are dropped) and collects
-// finished tiles without ever blocking on generation.
+// finished tiles without ever blocking on generation. Built without threads (EMERALD_THREADS 0,
+// as on the web, where pages cannot use them without cross-origin isolation), tiles are instead
+// generated on the main thread by pump(), within a time budget each frame.
 class TileStreamer {
 public:
     struct Request {
@@ -87,11 +95,19 @@ public:
     std::size_t outstanding() const;
     std::uint64_t generatedCount() const;
 
+    // Without a worker thread: works on the most urgent tiles, a small step at a time, until
+    // budgetMs has passed; a tile left unfinished continues next frame. With one, does nothing.
+    void pump(double budgetMs);
+    static constexpr bool kThreaded = EMERALD_THREADS != 0;
+
     // Fills one tile synchronously (used by the worker; public for tests).
     static TileData generate(const HeightField& heightField, const TileKey& key);
 
 private:
     void run();
+    // Takes the most urgent request and generates it; lock is held on entry and exit and released
+    // while generating. False if there was nothing to do.
+    bool generateNext(std::unique_lock<std::mutex>& lock);
 
     const HeightField& m_heightField;
     mutable std::mutex m_mutex;
@@ -102,7 +118,11 @@ private:
     TileKey m_inProgress;
     bool m_stop = false;
     std::uint64_t m_generated = 0;
+#if EMERALD_THREADS
     std::thread m_thread;
+#else
+    std::unique_ptr<TileJob> m_job; // the tile being built a step at a time
+#endif
 };
 
 } // namespace emerald

@@ -1,7 +1,10 @@
 #include "core/Window.hpp"
 
-#include <glad/gl.h>
+#include "platform/Gl.hpp"
 #include <GLFW/glfw3.h>
+#ifdef __EMSCRIPTEN__
+#include <GLFW/emscripten_glfw3.h>
+#endif
 
 #include <cstdio>
 #include <stdexcept>
@@ -27,9 +30,16 @@ Window::Window(const WindowConfig& config)
         throw std::runtime_error("Failed to initialise GLFW");
     }
 
+#ifdef __EMSCRIPTEN__
+    // WebGL 2 (OpenGL ES 3.0) on the page's canvas, at the device's pixel density.
+    // (The WebGL version comes from the link flags.)
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
+    glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_TRUE);
+#else
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+#endif
 #ifdef __APPLE__
     // macOS only exposes core profiles through a forward-compatible context.
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
@@ -52,12 +62,20 @@ Window::Window(const WindowConfig& config)
     glfwMakeContextCurrent(m_handle);
     glfwSwapInterval(config.vsync && !config.headless ? 1 : 0);
 
+#ifdef __EMSCRIPTEN__
+    // The canvas follows the browser window.
+    emscripten_glfw_make_canvas_resizable(m_handle, "window", nullptr);
+#else
     if (gladLoadGL(glfwGetProcAddress) == 0) {
         glfwDestroyWindow(m_handle);
         glfwTerminate();
         throw std::runtime_error("Failed to load OpenGL functions");
     }
+#endif
+    gl::initCaps();
 
+    m_headless = config.headless;
+    m_clickToCapture = config.clickToCapture;
     if (config.headless) {
         m_framebufferWidth = config.width;
         m_framebufferHeight = config.height;
@@ -88,6 +106,17 @@ Window::~Window()
     glfwTerminate();
 }
 
+float Window::pixelRatio() const
+{
+    int width = 0;
+    int height = 0;
+    glfwGetWindowSize(m_handle, &width, &height);
+    if (m_headless || width <= 0) {
+        return 1.0f;
+    }
+    return static_cast<float>(m_framebufferWidth) / static_cast<float>(width);
+}
+
 bool Window::shouldClose() const
 {
     return glfwWindowShouldClose(m_handle) != 0;
@@ -105,7 +134,10 @@ void Window::requestClose()
 
 void Window::swapBuffers()
 {
-    glfwSwapBuffers(m_handle);
+    // The browser presents each frame when control returns to it.
+    if (!gl::kGles) {
+        glfwSwapBuffers(m_handle);
+    }
 }
 
 void Window::pollEvents()
@@ -133,9 +165,17 @@ void Window::onFramebufferResize(GLFWwindow* handle, int width, int height)
     glViewport(0, 0, width, height);
 }
 
+bool Window::cursorCaptured() const
+{
+    if (gl::kGles) {
+        return glfwGetInputMode(m_handle, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
+    }
+    return m_cursorCaptured;
+}
+
 void Window::setCursorCaptured(bool captured)
 {
-    if (captured == m_cursorCaptured) {
+    if (captured == cursorCaptured()) {
         return;
     }
     m_cursorCaptured = captured;
@@ -149,7 +189,8 @@ void Window::setCursorCaptured(bool captured)
 
 void Window::onKey(GLFWwindow* handle, int key, int /*scancode*/, int action, int /*mods*/)
 {
-    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
+    // In a browser there is nothing to close; Escape releases the pointer instead.
+    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS && !gl::kGles) {
         glfwSetWindowShouldClose(handle, GLFW_TRUE);
     }
     static_cast<Window*>(glfwGetWindowUserPointer(handle))->m_input.onKey(key, action);
@@ -157,7 +198,14 @@ void Window::onKey(GLFWwindow* handle, int key, int /*scancode*/, int action, in
 
 void Window::onMouseButton(GLFWwindow* handle, int button, int action, int /*mods*/)
 {
-    static_cast<Window*>(glfwGetWindowUserPointer(handle))->m_input.onMouseButton(button, action);
+    auto* window = static_cast<Window*>(glfwGetWindowUserPointer(handle));
+    window->m_input.onMouseButton(button, action);
+    // Browsers grant pointer lock only from inside an input event handler, which is where the
+    // port calls this from.
+    if (window->m_clickToCapture && button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS &&
+        !window->cursorCaptured() && (!window->m_captureFilter || window->m_captureFilter())) {
+        window->setCursorCaptured(true);
+    }
 }
 
 void Window::onCursor(GLFWwindow* handle, double x, double y)

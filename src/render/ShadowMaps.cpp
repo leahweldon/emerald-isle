@@ -23,11 +23,12 @@ constexpr float kConstantBias = 2.0f;
 
 } // namespace
 
-ShadowMaps::ShadowMaps()
+ShadowMaps::ShadowMaps(int resolution)
+    : m_resolution(resolution)
 {
     glGenTextures(1, &m_texture);
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_texture);
-    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT32F, kResolution, kResolution, kCascades, 0,
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT32F, m_resolution, m_resolution, kCascades, 0,
                  GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
     // Hardware comparison with bilinear filtering: each lookup is already a 2 x 2 PCF.
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -36,9 +37,7 @@ ShadowMaps::ShadowMaps()
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
     // Outside a cascade is lit.
     const GLfloat border[] = {1.0f, 1.0f, 1.0f, 1.0f};
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    glTexParameterfv(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BORDER_COLOR, border);
+    gl::clampToBorder(GL_TEXTURE_2D_ARRAY, border);
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
 
     GLint previous = 0;
@@ -46,8 +45,7 @@ ShadowMaps::ShadowMaps()
     glGenFramebuffers(1, &m_framebuffer);
     glBindFramebuffer(GL_FRAMEBUFFER, m_framebuffer);
     glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_texture, 0, 0);
-    glDrawBuffer(GL_NONE);
-    glReadBuffer(GL_NONE);
+    gl::noColourBuffers();
     const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
         glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous));
@@ -108,7 +106,7 @@ void ShadowMaps::update(const glm::dvec3& cameraPos, const glm::vec3& forward, f
         const float centreDepth = std::min(0.5f * (n + f) * (1.0f + k2), f);
         const float radius = std::sqrt((f - centreDepth) * (f - centreDepth) + f * f * k2);
         const glm::vec3 centre = forward * centreDepth;
-        const double texel = 2.0 * static_cast<double>(radius) / kResolution;
+        const double texel = 2.0 * static_cast<double>(radius) / m_resolution;
         m_texelSize[index] = static_cast<float>(texel);
 
         // Snap the centre to the texel grid in world space; the offsets stay small in float.
@@ -142,11 +140,11 @@ void ShadowMaps::begin(int cascade)
     }
     glBindFramebuffer(GL_FRAMEBUFFER, m_framebuffer);
     glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_texture, 0, cascade);
-    glViewport(0, 0, kResolution, kResolution);
+    glViewport(0, 0, m_resolution, m_resolution);
     glClear(GL_DEPTH_BUFFER_BIT);
     // Both faces: a heightfield seen from the light shows its back on slopes facing away.
     glDisable(GL_CULL_FACE);
-    glEnable(GL_DEPTH_CLAMP);
+    gl::setDepthClamp(true);
     glEnable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(kSlopeBias, kConstantBias);
 }
@@ -154,7 +152,7 @@ void ShadowMaps::begin(int cascade)
 void ShadowMaps::end()
 {
     glDisable(GL_POLYGON_OFFSET_FILL);
-    glDisable(GL_DEPTH_CLAMP);
+    gl::setDepthClamp(false);
     glEnable(GL_CULL_FACE);
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(m_savedFramebuffer));
     glViewport(m_savedViewport[0], m_savedViewport[1], m_savedViewport[2], m_savedViewport[3]);
@@ -174,6 +172,7 @@ void ShadowMaps::apply(Shader& shader, GLuint unit) const
     shader.set("uCascadeStart", glm::vec4(m_cascadeStart[0], m_cascadeStart[1], m_cascadeStart[2], m_cascadeStart[3]));
     shader.set("uCascadeEnd", glm::vec4(m_cascadeEnd[0], m_cascadeEnd[1], m_cascadeEnd[2], m_cascadeEnd[3]));
     shader.set("uShadowTexel", glm::vec4(m_texelSize[0], m_texelSize[1], m_texelSize[2], m_texelSize[3]));
+    shader.set("uShadowResolution", static_cast<float>(m_resolution));
     shader.set("uViewForward", m_forward);
 }
 

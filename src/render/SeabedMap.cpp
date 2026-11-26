@@ -27,8 +27,8 @@ SeabedMap::SeabedMap()
     glBindTexture(GL_TEXTURE_2D_ARRAY, m_texture);
     glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT32F, kResolution, kResolution, kLayers, 0,
                  GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, gl::depthValueFilter());
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, gl::depthValueFilter());
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
@@ -38,8 +38,7 @@ SeabedMap::SeabedMap()
     glGenFramebuffers(1, &m_framebuffer);
     glBindFramebuffer(GL_FRAMEBUFFER, m_framebuffer);
     glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_texture, 0, 0);
-    glDrawBuffer(GL_NONE);
-    glReadBuffer(GL_NONE);
+    gl::noColourBuffers();
     const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous));
     if (status != GL_FRAMEBUFFER_COMPLETE) {
@@ -92,12 +91,12 @@ void SeabedMap::begin(int layer)
     glViewport(0, 0, kResolution, kResolution);
     glClear(GL_DEPTH_BUFFER_BIT); // cleared to 1: the bottom of the range, open deep sea
     glDisable(GL_CULL_FACE);
-    glEnable(GL_DEPTH_CLAMP); // heights beyond the range clamp to its ends
+    gl::setDepthClamp(true); // heights beyond the range clamp to its ends
 }
 
 void SeabedMap::end()
 {
-    glDisable(GL_DEPTH_CLAMP);
+    gl::setDepthClamp(false);
     glEnable(GL_CULL_FACE);
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(m_savedFramebuffer));
     glViewport(m_savedViewport[0], m_savedViewport[1], m_savedViewport[2], m_savedViewport[3]);

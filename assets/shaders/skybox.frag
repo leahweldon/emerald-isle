@@ -13,6 +13,8 @@ uniform float uStarBrightness;     // 0 by day, 1 in full darkness
 uniform mat3 uStarRotation;        // world directions to the rotating celestial sphere
 uniform float uPixelAngle;         // radians per pixel, so stars stay about a pixel wide
 
+#include "tonemap.glsl"
+
 const float kSunAngularRadius = 0.0047;  // matches sky.frag
 const float kMoonAngularRadius = 0.008; // drawn larger than the real 0.0045, as the eye sees it
 const float kStarCells = 150.0;          // star grid cells per unit of direction
@@ -75,5 +77,5 @@ void main()
         colour += uMoonDiscColour * ((1.0 - maria) * disc + halo);
     }
 
-    fragColour = vec4(colour, 1.0); // linear HDR, tone mapped in tonemap.frag
+    fragColour = vec4(sceneOutput(colour), 1.0); // linear HDR, tone mapped in tonemap.frag
 }

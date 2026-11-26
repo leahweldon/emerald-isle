@@ -129,6 +129,10 @@ void main()
     vec4 clip = atHead ? headClip : tailClip;
     vec2 offset = (side * s + dir * (atHead ? 1.0 : -1.0)) * 0.5 * drawn;
     gl_Position = clip + vec4(offset / halfViewport * clip.w, 0.0, 0.0);
+#ifdef NO_DEPTH_CLAMP
+    // Without depth clamping (WebGL), drops nearer than the near plane are put on it.
+    gl_Position.z = max(gl_Position.z, -gl_Position.w);
+#endif
 
     // Light the drop passes on to the eye, added to the scene (streaks never darken it): the sky
     // refracted from all around, and forward scattering of whatever bright light is behind it,

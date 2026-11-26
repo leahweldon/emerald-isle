@@ -39,13 +39,10 @@ std::vector<GpuTimer::Result> GpuTimer::collect()
     std::vector<Result> results;
     // Queries complete in submission order, so stop at the first one still in flight.
     while (m_pending[m_oldest]) {
-        GLint available = 0;
-        glGetQueryObjectiv(m_queries[m_oldest], GL_QUERY_RESULT_AVAILABLE, &available);
-        if (!available) {
+        if (!gl::queryAvailable(m_queries[m_oldest])) {
             break;
         }
-        GLuint64 ns = 0;
-        glGetQueryObjectui64v(m_queries[m_oldest], GL_QUERY_RESULT, &ns);
+        const GLuint64 ns = gl::queryNanoseconds(m_queries[m_oldest]);
         results.push_back({m_frames[m_oldest], static_cast<double>(ns) / 1e6});
         m_pending[m_oldest] = false;
         m_oldest = (m_oldest + 1) % kQueries;

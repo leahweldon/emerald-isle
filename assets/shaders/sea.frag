@@ -34,6 +34,7 @@ uniform vec2 uViewportSize;      // pixels, for screen coordinates
 uniform float uWaveTime;         // seconds; frozen for screenshots
 
 #include "shadow.glsl"
+#include "tonemap.glsl"
 
 // Linear space. Saturated so distant water stays blue-green through the haze.
 const vec3 kSea     = vec3(0.004, 0.055, 0.085);
@@ -290,5 +291,5 @@ void main()
     float edge = smoothstep(0.0, 1.0, clamp((1.0 / nearEdge - 1.0 / d) /
                                             (1.0 / nearEdge - 1.0 / uSeaRadius), 0.0, 1.0));
     colour = mix(colour, fogColour(vRelPos), max(fogAmount(vRelPos), edge));
-    fragColour = vec4(colour, 1.0); // linear HDR, tone mapped in tonemap.frag
+    fragColour = vec4(sceneOutput(colour), 1.0); // linear HDR, tone mapped in tonemap.frag
 }

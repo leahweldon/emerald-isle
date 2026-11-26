@@ -2,7 +2,7 @@
 
 #include "world/TileStreamer.hpp"
 
-#include <glad/gl.h>
+#include "platform/Gl.hpp"
 #include <glm/glm.hpp>
 
 #include <cstddef>
@@ -67,6 +67,12 @@ public:
     void bindCoastMask(GLuint unit) const;
     glm::vec2 demSize() const { return m_demSize; }
 
+    // Split distance in child-node sizes: lower gives coarser terrain sooner (default 2.5).
+    void setLodRange(double factor) { m_rangeFactor = factor; }
+
+    // Main-thread time per frame for generating tiles when there is no worker thread (the web).
+    void setGenerationBudget(double ms) { m_generationBudgetMs = ms; }
+
     // True when everything the last update() wanted is loaded and nothing is queued.
     bool settled() const { return m_settled; }
     const Stats& stats() const { return m_stats; }
@@ -102,6 +108,7 @@ private:
     int residentSlot(const TileKey& key);
     void uploadTile(const TileData& tile);
     void buildGridMesh();
+    double lodRange(int level) const;
     void buildCoastMask(const HeightField& heightField);
 
     std::unique_ptr<TileStreamer> m_streamer;
@@ -128,6 +135,8 @@ private:
     std::int64_t m_rootX = 0; // root cell under the camera
     std::int64_t m_rootZ = 0;
     bool m_settled = false;
+    double m_generationBudgetMs = 4.0;
+    double m_rangeFactor = 2.5;
     Stats m_stats;
 };
 

@@ -34,6 +34,12 @@ public:
                         float pixelAngle);
 
     void bindCubemap(GLuint unit) const;
+    // Exposure and tone curve for shaders that tone map themselves (TONEMAP_IN_SCENE).
+    void setDisplay(float exposure, int toneMapper)
+    {
+        m_displayExposure = exposure;
+        m_displayToneMapper = toneMapper;
+    }
 
     // Sets uSkyCube (bound to unit) and uIrradianceSH[9] for terrain and sea shading.
     void applyEnvironment(Shader& shader, GLuint unit) const;
@@ -51,8 +57,9 @@ private:
     // Computes the SH and swaps the cubemaps once the readback is done. Returns false if the
     // GPU has not finished and wait is false.
     bool finishReadback(bool wait);
-    void computeIrradiance(const float* texels);
-    std::size_t readbackBytes() const; // six faces of RGB floats at the SH mip level
+    // texels: six faces at the SH mip level, channels floats per texel.
+    void computeIrradiance(const float* texels, std::size_t channels);
+    std::size_t readbackBytes() const;
 
     Shader m_skyShader;
     Shader m_skyboxShader;
@@ -64,6 +71,12 @@ private:
     GLsync m_fence = nullptr;
     int m_faceSize = 0;
     int m_shSize = 0;        // face size of the mip level read back for the SH
+    // Cubemap format and how it is read back: RGB floats on desktop; RGBA (GLES cannot render to
+    // RGB16F), as bytes where float targets are unsupported.
+    GLenum m_internalFormat = GL_RGB16F;
+    GLenum m_readFormat = GL_RGB;
+    GLenum m_readType = GL_FLOAT;
+    std::size_t m_readChannels = 3;
 
     Stage m_stage = Stage::Idle;
     std::size_t m_nextFace = 0;
@@ -71,6 +84,8 @@ private:
     Atmosphere m_shown;      // inputs of the displayed cubemap
     Atmosphere m_rendering;  // inputs of the cubemap being refreshed
     int m_refreshes = 0;
+    float m_displayExposure = 1.0f;
+    int m_displayToneMapper = 0;
     // Diffuse radiance coefficients: evaluate with the SH basis and multiply by albedo.
     std::array<glm::vec3, 9> m_irradianceSH{};
 };

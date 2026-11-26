@@ -17,7 +17,7 @@
 #include "ui/Ui.hpp"
 #include "world/HeightField.hpp"
 
-#include <glad/gl.h>
+#include "platform/Gl.hpp"
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -60,7 +60,11 @@ constexpr GLuint kRainDropUnit = 12;
 // Packed floats, 32 bits a pixel like RGBA8: unclamped HDR with ~6-bit mantissas, which the
 // tone mapping and dither cannot tell from RGBA16F (at most 3/255 apart, no banding), at a
 // quarter of its frame cost with 4x MSAA (0.1-0.3 ms against 1 ms of GPU time at 2560 x 1440).
-constexpr GLenum kSceneFormat = GL_R11F_G11F_B10F;
+// Where float render targets are missing (some WebGL), 8-bit, with the scene shaders tone mapping.
+GLenum sceneFormat()
+{
+    return gl::caps().floatTargets ? GL_R11F_G11F_B10F : GL_RGBA8;
+}
 // Linear scale before each tone curve at --exposure 0, fitted so noon terrain, sea and sky match
 // the earlier display transform (linear up to 0.8) as closely as the curve allows.
 constexpr float kNeutralExposure = 1.18f;
@@ -78,9 +82,8 @@ constexpr float kDryingSeconds = 6.0f;
 // Screenshot runs step the rain at this fixed rate, after a warm-up, so captures repeat exactly.
 constexpr float kRainFixedStep = 1.0f / 60.0f;
 constexpr int kRainWarmUpSteps = 90;
-// The reflection is rendered at this fraction of the screen size, and with this level-of-detail
-// scale (< 1 is coarser): rippled and seen at grazing angles, it does not need more.
-constexpr int kReflectionDivisor = 2;
+// The reflection is rendered with this level-of-detail scale (< 1 is coarser), and smaller than
+// the scene (the quality's divisor): rippled and seen at grazing angles, it does not need more.
 constexpr float kReflectionLodScale = 0.5f;
 
 // MSVC deprecates fopen (C4996, an error with warnings as errors); fopen_s is its replacement.
@@ -128,6 +131,9 @@ void printUsage(const char* program)
         "  --tone-mapper <name>  neutral (default, Khronos PBR Neutral) or agx\n"
         "  --rain <0-1>          Rain intensity, 0 dry to 1 heavy (default 0)\n"
         "  --ui                  Show the panel from the start (F1 toggles it)\n"
+        "  --orbit               With --view, orbit its target until the first key, click or scroll\n"
+        "  --paused              Start with the time of day paused (T resumes it)\n"
+        "  --quality <level>     low, medium or high (default high; medium on the web)\n"
         "  --debug <view>        Debug view: lod, cascades, tiles or wireframe (repeatable)\n"
         "  --gpu-timing          Also measure GPU time per frame (adds ~0.4 ms on macOS)\n"
         "  --validate <tiles>    Check for GL errors and terrain holes, require at least this many\n"
@@ -247,6 +253,18 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.exposureEv = parseFloat(arg, argv[++i], -10.0f, 10.0f);
         } else if (std::strcmp(arg, "--rain") == 0 && hasValue) {
             options.rain = parseFloat(arg, argv[++i], 0.0f, 1.0f);
+        } else if (std::strcmp(arg, "--webgl-fallbacks") == 0) {
+            options.webglFallbacks = true;
+        } else if (std::strcmp(arg, "--quality") == 0 && hasValue) {
+            const std::string name = argv[++i];
+            options.quality = name == "low" ? 0 : name == "medium" ? 1 : name == "high" ? 2 : -1;
+            if (options.quality < 0) {
+                throw std::invalid_argument("Invalid value for --quality: " + name + " (low, medium or high)");
+            }
+        } else if (std::strcmp(arg, "--orbit") == 0) {
+            options.orbit = true;
+        } else if (std::strcmp(arg, "--paused") == 0) {
+            options.paused = true;
         } else if (std::strcmp(arg, "--ui") == 0) {
             options.ui = true;
         } else if (std::strcmp(arg, "--debug") == 0 && hasValue) {
@@ -294,7 +312,7 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
         options.frameLimit = 10;
     }
     // Runs that end by themselves keep the sun still, so they are reproducible.
-    options.timeRunning = options.frameLimit == 0 && options.autoflySeconds <= 0.0f;
+    options.timeRunning = options.frameLimit == 0 && options.autoflySeconds <= 0.0f && !options.paused;
     if (options.window.headless) {
         // A hidden window gets no input, so nothing could end the run.
         if (options.frameLimit == 0 && options.autoflySeconds <= 0.0f) {
@@ -318,7 +336,7 @@ Application::Application(AppOptions options)
     } else {
         glViewport(0, 0, m_window.framebufferWidth(), m_window.framebufferHeight());
     }
-    glEnable(GL_MULTISAMPLE);
+    gl::enableMultisample();
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
 
@@ -331,7 +349,7 @@ Application::Application(AppOptions options)
     m_seaShader = std::make_unique<Shader>(shaderDir / "sea.vert", shaderDir / "sea.frag");
     m_shadowShader = std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "shadow.frag",
                                               "#define SHADOW_PASS\n");
-    m_shadows = std::make_unique<ShadowMaps>();
+    m_shadows = std::make_unique<ShadowMaps>(kQualities[static_cast<std::size_t>(m_options.quality)].shadowResolution);
     m_seabed = std::make_unique<SeabedMap>();
     m_reflectionShader = std::make_unique<Shader>(shaderDir / "terrain.vert", shaderDir / "terrain.frag",
                                                   "#define REFLECTION_PASS\n");
@@ -345,7 +363,7 @@ Application::Application(AppOptions options)
     m_atmosphere.rain = m_rainIntensity;
     m_atmosphere.wetness = m_wetness;
     m_rainLevel = m_options.rain > 0.0f ? m_options.rain : kLightRain;
-    if (m_options.gpuTiming) {
+    if (m_options.gpuTiming && gl::caps().timerQueries) {
         m_gpuTimer = std::make_unique<GpuTimer>();
     }
 
@@ -399,11 +417,17 @@ Application::Application(AppOptions options)
         m_camera, [this](double x, double z) { return m_heightField->groundHeight(x, z); });
 
     // No --view: slow orbit from the overview. With --view: free-fly from that pose, still
-    // until there is input, so screenshots are reproducible.
+    // until there is input, so screenshots are reproducible; with --orbit as well, a slow orbit
+    // from that pose until the first input, then free-fly from wherever it has got to.
     if (m_options.view.empty()) {
         const ViewPreset& overview = *findViewPreset("overview");
         m_controller->startOrbit(overview.target, overview.azimuth, overview.elevation,
                                  overview.distance, true);
+    } else if (m_options.orbit) {
+        const ViewPreset& preset = *findViewPreset(m_options.view);
+        applyViewPreset(preset, m_camera);
+        m_controller->startOrbit(glm::dvec3(preset.target), preset.azimuth, preset.elevation, preset.distance, true);
+        m_orbitingUntilInput = true;
     } else {
         applyViewPreset(*findViewPreset(m_options.view), m_camera);
         m_controller->startFreeFly();
@@ -425,7 +449,14 @@ Application::Application(AppOptions options)
     m_ui = std::make_unique<Ui>(m_window.native(), m_options.window.headless, m_window.framebufferHeight(),
                                 m_options.assetDir / "fonts" / "Roboto-Medium.ttf");
     const bool selfEnding = m_options.frameLimit > 0 || m_options.autoflySeconds > 0.0f;
-    m_ui->setVisible(m_options.ui || (!m_options.window.headless && !selfEnding));
+    // In the browser it starts closed, out of the first view; F1 or the page's button opens it.
+    m_ui->setVisible(m_options.ui || (!m_options.window.headless && !selfEnding && !gl::kGles));
+    // Clicks on the panel never capture the pointer.
+    m_window.setCaptureFilter([this] {
+        const glm::dvec2 cursor = m_window.input().cursor();
+        return !m_ui->wantsMouse() && !m_ui->covers(cursor.x, cursor.y);
+    });
+    applyQuality(m_options.quality);
     warmUp();
 }
 
@@ -455,100 +486,114 @@ Application::~Application()
 
 int Application::run()
 {
+    while (!m_window.shouldClose()) {
+        frame();
+    }
+    return finish();
+}
+
+void Application::frame()
+{
     using Clock = std::chrono::steady_clock;
     const auto ms = [](Clock::time_point a, Clock::time_point b) {
         return std::chrono::duration<double, std::milli>(b - a).count();
     };
-    while (!m_window.shouldClose()) {
-        const auto frameStart = Clock::now();
-        const float delta = m_timer.tick();
+    const auto frameStart = Clock::now();
+    const float delta = m_timer.tick();
 
-        m_window.input().beginFrame();
-        m_window.pollEvents();
-        const auto afterEvents = Clock::now();
-        updateUi();
-        update(delta);
-        const auto afterUpdate = Clock::now();
-        ++m_frameCount;
-        // Pass timing replaces whole-frame timing while the panel is open: the queries cannot nest.
-        // Every frame: timing only some of them made those frames 2-7 ms slower on macOS.
-        m_passTiming = m_ui->visible();
-        if (m_passTiming) {
-            m_passTimer->beginFrame(m_frameCount);
-        } else if (m_gpuTimer) {
-            m_gpuTimer->begin(m_frameCount);
-        }
-        render();
-        if (m_passTiming) {
-            m_passTimer->endFrame();
-        } else if (m_gpuTimer) {
-            m_gpuTimer->end();
-        }
-        const auto afterRender = Clock::now();
+    m_window.pollEvents();
+    const auto afterEvents = Clock::now();
+    updateUi();
+    update(delta);
+    const auto afterUpdate = Clock::now();
+    ++m_frameCount;
+    // Pass timing replaces whole-frame timing while the panel is open: the queries cannot nest.
+    // Every frame: timing only some of them made those frames 2-7 ms slower on macOS.
+    m_passTiming = m_ui->visible() && gl::caps().timerQueries;
+    if (m_passTiming) {
+        m_passTimer->beginFrame(m_frameCount);
+    } else if (m_gpuTimer) {
+        m_gpuTimer->begin(m_frameCount);
+    }
+    render();
+    if (m_passTiming) {
+        m_passTimer->endFrame();
+    } else if (m_gpuTimer) {
+        m_gpuTimer->end();
+    }
+    const auto afterRender = Clock::now();
 
-        // Screenshots count only frames with the terrain fully streamed in (or give up after 60 s),
-        // so they never capture half-loaded tiles. Plain --frames runs count every frame.
-        if (m_terrain->settled()) {
-            ++m_settledFrames;
-        }
-        const bool screenshot = !m_options.screenshotPath.empty();
-        const bool timedOut = screenshot && m_timer.elapsedSeconds() > 60.0;
-        if (timedOut && m_settledFrames < m_options.frameLimit) {
-            std::fprintf(stderr, "Terrain still streaming after 60 s; capturing anyway\n");
-        }
-        const int counted = screenshot ? m_settledFrames : m_frameCount;
-        const bool autoflyDone = m_options.autoflySeconds > 0.0f &&
-                                 m_timer.elapsedSeconds() >= static_cast<double>(m_options.autoflySeconds);
-        const bool lastFrame = autoflyDone ||
-                               (m_options.frameLimit > 0 && (counted >= m_options.frameLimit || timedOut));
-        if (lastFrame && !m_options.screenshotPath.empty()) {
-            // Read the back buffer before it is presented, so the capture matches this frame.
-            const unsigned source = m_offscreen ? m_offscreen->readFramebuffer() : 0;
-            if (!saveFramebufferPng(source, m_window.framebufferWidth(), m_window.framebufferHeight(),
-                                    m_options.screenshotPath)) {
-                return EXIT_FAILURE;
-            }
-        }
-
-        m_window.swapBuffers();
-        const auto afterSwap = Clock::now();
-        if (m_options.validateMinTiles > 0) {
-            validateFrame();
-        }
-
-        if (m_timer.hasNewSample()) {
-            updateTitle();
-        }
-
-        // Timed per loop iteration, so every phase belongs to the frame it is reported with.
-        const double totalMs = ms(frameStart, Clock::now());
-        const double swapMs = ms(afterRender, afterSwap);
-        recordFrameStats(static_cast<float>(totalMs), static_cast<float>(totalMs - swapMs));
-        collectPassTimes();
-        if (m_gpuTimer) {
-            for (const GpuTimer::Result& r : m_gpuTimer->collect()) {
-                m_gpuMs[static_cast<std::size_t>(r.frame - 1)] = static_cast<float>(r.ms);
-            }
-        }
-        if (m_frameLog) {
-            const Terrain::Stats& st = m_terrain->stats();
-            char row[256];
-            std::snprintf(row, sizeof(row),
-                          "%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%zu,%d,%zu,%d,%.1f,%.1f,%.1f,%d,",
-                          m_frameCount, totalMs, ms(frameStart, afterEvents), ms(afterEvents, afterUpdate),
-                          st.updateMs, ms(afterUpdate, afterRender) - st.updateMs, swapMs,
-                          st.uploadsThisFrame, st.outstandingTiles, st.residentTiles, st.triangles,
-                          st.drawCalls, m_camera.position.x, m_camera.position.y, m_camera.position.z,
-                          m_window.focused() ? 1 : 0);
-            m_pendingLogRows.emplace_back(m_frameCount, row);
-            flushFrameLog(false);
-        }
-        if (lastFrame) {
-            m_finished = true;
+    // Screenshots count only frames with the terrain fully streamed in (or give up after 60 s),
+    // so they never capture half-loaded tiles. Plain --frames runs count every frame.
+    if (m_terrain->settled()) {
+        ++m_settledFrames;
+    }
+    const bool screenshot = !m_options.screenshotPath.empty();
+    const bool timedOut = screenshot && m_timer.elapsedSeconds() > 60.0;
+    if (timedOut && m_settledFrames < m_options.frameLimit) {
+        std::fprintf(stderr, "Terrain still streaming after 60 s; capturing anyway\n");
+    }
+    const int counted = screenshot ? m_settledFrames : m_frameCount;
+    const bool autoflyDone = m_options.autoflySeconds > 0.0f &&
+                             m_timer.elapsedSeconds() >= static_cast<double>(m_options.autoflySeconds);
+    const bool lastFrame = autoflyDone ||
+                           (m_options.frameLimit > 0 && (counted >= m_options.frameLimit || timedOut));
+    if (lastFrame && !m_options.screenshotPath.empty()) {
+        // Read the back buffer before it is presented, so the capture matches this frame.
+        const unsigned source = m_offscreen ? m_offscreen->readFramebuffer() : 0;
+        if (!saveFramebufferPng(source, m_window.framebufferWidth(), m_window.framebufferHeight(),
+                                m_options.screenshotPath)) {
+            m_exitCode = EXIT_FAILURE;
             m_window.requestClose();
+            return;
         }
     }
 
+    m_window.swapBuffers();
+    const auto afterSwap = Clock::now();
+    if (m_options.validateMinTiles > 0) {
+        validateFrame();
+    }
+
+    if (m_timer.hasNewSample()) {
+        updateTitle();
+    }
+
+    // Timed per loop iteration, so every phase belongs to the frame it is reported with.
+    const double totalMs = ms(frameStart, Clock::now());
+    const double swapMs = ms(afterRender, afterSwap);
+    recordFrameStats(static_cast<float>(totalMs), static_cast<float>(totalMs - swapMs));
+    collectPassTimes();
+    if (m_gpuTimer) {
+        for (const GpuTimer::Result& r : m_gpuTimer->collect()) {
+            m_gpuMs[static_cast<std::size_t>(r.frame - 1)] = static_cast<float>(r.ms);
+        }
+    }
+    if (m_frameLog) {
+        const Terrain::Stats& st = m_terrain->stats();
+        char row[256];
+        std::snprintf(row, sizeof(row),
+                      "%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%zu,%d,%zu,%d,%.1f,%.1f,%.1f,%d,",
+                      m_frameCount, totalMs, ms(frameStart, afterEvents), ms(afterEvents, afterUpdate),
+                      st.updateMs, ms(afterUpdate, afterRender) - st.updateMs, swapMs,
+                      st.uploadsThisFrame, st.outstandingTiles, st.residentTiles, st.triangles,
+                      st.drawCalls, m_camera.position.x, m_camera.position.y, m_camera.position.z,
+                      m_window.focused() ? 1 : 0);
+        m_pendingLogRows.emplace_back(m_frameCount, row);
+        flushFrameLog(false);
+    }
+    if (lastFrame) {
+        m_finished = true;
+        m_window.requestClose();
+    }
+    m_window.input().endFrame();
+}
+
+int Application::finish()
+{
+    if (m_exitCode != EXIT_SUCCESS) {
+        return m_exitCode;
+    }
     std::printf("Rendered %d frames, last average %.1f FPS (%.2f ms/frame)\n",
                 m_frameCount, m_timer.framesPerSecond(), m_timer.frameTimeMs());
     printRunStats();
@@ -560,6 +605,11 @@ int Application::run()
 
 void Application::update(float deltaSeconds)
 {
+    Input& input = m_window.input();
+    if (m_orbitingUntilInput && input.anyActivity()) {
+        m_orbitingUntilInput = false;
+        m_controller->startFreeFly();
+    }
     m_controller->update(m_window, deltaSeconds);
     updateTime(deltaSeconds);
     updateWeather(deltaSeconds);
@@ -568,6 +618,29 @@ void Application::update(float deltaSeconds)
     }
     m_lastCameraPos = m_camera.position;
     m_deltaSeconds = deltaSeconds;
+}
+
+std::string Application::stateJson() const
+{
+    char json[256];
+    std::snprintf(json, sizeof(json),
+                  "{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f,\"yaw\":%.5f,\"pitch\":%.5f,\"orbiting\":%s,"
+                  "\"panel\":%s,\"captured\":%s,\"frames\":%d}",
+                  m_camera.position.x, m_camera.position.y, m_camera.position.z, static_cast<double>(m_camera.yaw),
+                  static_cast<double>(m_camera.pitch),
+                  m_controller->mode() == CameraController::Mode::Orbit ? "true" : "false",
+                  m_ui->visible() ? "true" : "false", m_window.cursorCaptured() ? "true" : "false", m_frameCount);
+    return json;
+}
+
+bool Application::done() const
+{
+    return m_window.shouldClose();
+}
+
+void Application::toggleUi()
+{
+    m_ui->toggle();
 }
 
 void Application::updateWeather(float deltaSeconds)
@@ -655,11 +728,16 @@ void Application::updateTime(float deltaSeconds)
 
 void Application::render()
 {
-    // The scene goes into a linear HDR target that follows the drawable size.
-    const int width = m_window.framebufferWidth();
-    const int height = m_window.framebufferHeight();
-    if (!m_scene || m_scene->width() != width || m_scene->height() != height) {
-        m_scene = std::make_unique<OffscreenTarget>(width, height, m_options.window.samples, kSceneFormat);
+    // The scene goes into a linear HDR target that follows the drawable size (or less, under the
+    // quality's pixel-ratio cap; the tone mapping then scales it up).
+    const int width = sceneWidth();
+    const int height = sceneHeight();
+    if (!m_scene || m_scene->width() != width || m_scene->height() != height ||
+        m_scene->samples() != gl::samplesFor(sceneFormat(), m_options.window.samples)) {
+        m_scene = std::make_unique<OffscreenTarget>(width, height, m_options.window.samples, sceneFormat());
+        if (width != m_window.framebufferWidth()) {
+            m_scene->setFilter(GL_LINEAR);
+        }
     }
     m_scene->bind();
 
@@ -690,7 +768,7 @@ void Application::render()
     m_terrainShader->set("uDebugView", m_debug.view);
     m_terrainShader->set("uTileBorders", m_debug.tileBorders ? 1 : 0);
     if (m_debug.wireframe) {
-        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        gl::setWireframe(true);
     }
     m_terrain->draw(*m_terrainShader, kHeightUnit, kHorizonUnit);
 
@@ -704,8 +782,7 @@ void Application::render()
     m_seabed->apply(*m_seaShader, kSeabedUnit);
     m_reflection->bindTexture(kReflectionUnit);
     m_seaShader->set("uReflection", static_cast<int>(kReflectionUnit));
-    m_seaShader->set("uViewportSize", glm::vec2(static_cast<float>(m_window.framebufferWidth()),
-                                                static_cast<float>(m_window.framebufferHeight())));
+    m_seaShader->set("uViewportSize", glm::vec2(static_cast<float>(width), static_cast<float>(height)));
     m_seaShader->set("uExaggeration", m_heightField->verticalExaggeration());
     m_shadows->apply(*m_seaShader, kShadowUnit);
     m_terrain->bindCoastMask(kCoastUnit);
@@ -714,11 +791,12 @@ void Application::render()
     glPolygonOffset(1.0f, 1.0f);
     m_sea->draw();
     glDisable(GL_POLYGON_OFFSET_FILL);
-    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    gl::setWireframe(false);
 
     // Skybox last, at the far plane, so it is only shaded where nothing else was drawn.
-    const float pixelAngle = m_camera.fovY / static_cast<float>(m_window.framebufferHeight());
+    const float pixelAngle = m_camera.fovY / static_cast<float>(height);
     markScenePart(GpuPassTimer::Sky);
+    m_sky->setDisplay(displayExposure(), m_options.agx ? 1 : 0);
     m_sky->drawBackground(glm::inverse(projection * rotationOnly), m_atmosphere, pixelAngle);
 
     // Rain after everything opaque, blended into the HDR target.
@@ -731,6 +809,8 @@ void Application::render()
         lighting.night = m_atmosphere.night();
         lighting.overcast = m_atmosphere.overcast();
         lighting.skyUnit = static_cast<int>(kSkyUnit);
+        lighting.displayExposure = displayExposure();
+        lighting.displayToneMapper = m_options.agx ? 1 : 0;
         m_sky->bindCubemap(kSkyUnit);
         m_rain->draw(m_camera.view(), projection, glm::vec2(static_cast<float>(width), static_cast<float>(height)),
                      pixelAngle, m_cameraVelocity, lighting);
@@ -784,15 +864,47 @@ void Application::toneMap()
     m_toneMapShader->use();
     m_scene->bindTexture(kSceneUnit);
     m_toneMapShader->set("uScene", static_cast<int>(kSceneUnit));
-    const float base = m_options.agx ? kAgxExposure : kNeutralExposure;
-    const float ev = m_options.exposureEv + kNightAdaptationEv * m_atmosphere.night() +
-                     kOvercastAdaptationEv * m_atmosphere.overcast() * (1.0f - m_atmosphere.night());
-    m_toneMapShader->set("uExposure", base * std::exp2(ev));
+    m_toneMapShader->set("uExposure", displayExposure());
     m_toneMapShader->set("uToneMapper", m_options.agx ? 1 : 0);
     glBindVertexArray(m_fullscreenVao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindVertexArray(0);
     glEnable(GL_DEPTH_TEST);
+}
+
+void Application::applyQuality(int quality)
+{
+    m_quality = quality;
+    const Quality& q = kQualities[static_cast<std::size_t>(quality)];
+    m_maxPixelRatio = q.maxPixelRatio;
+    m_reflectionDivisor = q.reflectionDivisor;
+    m_options.window.samples = q.msaa;
+    if (m_shadows->resolution() != q.shadowResolution) {
+        m_shadows = std::make_unique<ShadowMaps>(q.shadowResolution);
+    }
+    m_rain->setDropFraction(q.rainDrops);
+    m_terrain->setLodRange(q.lodRange);
+    m_terrain->setGenerationBudget(q.tileBudgetMs);
+}
+
+int Application::sceneWidth() const
+{
+    const float scale = std::min(1.0f, m_maxPixelRatio / m_window.pixelRatio());
+    return std::max(static_cast<int>(std::lround(static_cast<float>(m_window.framebufferWidth()) * scale)), 1);
+}
+
+int Application::sceneHeight() const
+{
+    const float scale = std::min(1.0f, m_maxPixelRatio / m_window.pixelRatio());
+    return std::max(static_cast<int>(std::lround(static_cast<float>(m_window.framebufferHeight()) * scale)), 1);
+}
+
+float Application::displayExposure() const
+{
+    const float base = m_options.agx ? kAgxExposure : kNeutralExposure;
+    const float ev = m_options.exposureEv + kNightAdaptationEv * m_atmosphere.night() +
+                     kOvercastAdaptationEv * m_atmosphere.overcast() * (1.0f - m_atmosphere.night());
+    return base * std::exp2(ev);
 }
 
 void Application::renderShadows(const glm::mat4& projection)
@@ -840,8 +952,8 @@ void Application::setTerrainUniforms(Shader& shader)
 
 void Application::renderReflection(const glm::mat4& projection)
 {
-    m_reflection->resize(std::max(m_window.framebufferWidth() / kReflectionDivisor, 1),
-                         std::max(m_window.framebufferHeight() / kReflectionDivisor, 1));
+    m_reflection->resize(std::max(sceneWidth() / m_reflectionDivisor, 1),
+                         std::max(sceneHeight() / m_reflectionDivisor, 1));
     // Camera-relative position to its mirror image in the sea (y = 0): y -> -y - 2 * camera height.
     glm::mat4 mirror(1.0f);
     mirror[1][1] = -1.0f;
@@ -885,6 +997,8 @@ void Application::setSceneUniforms(Shader& shader)
     shader.set("uCameraHeight", static_cast<float>(m_camera.position.y));
     m_atmosphere.apply(shader, static_cast<float>(m_camera.position.y));
     shader.set("uShadowsOff", m_features.shadows ? 0 : 1);
+    shader.set("uDisplayExposure", displayExposure()); // shaders that tone map themselves
+    shader.set("uDisplayToneMapper", m_options.agx ? 1 : 0);
     shader.set("uHorizonShadowsOff", m_features.horizonShadows ? 0 : 1);
 }
 
@@ -942,7 +1056,8 @@ void Application::printRunStats() const
                 static_cast<double>(times.back()), over120Hz, over60Hz);
     // With vsync, swaps can return early and then block for two refreshes, so single frames look
     // slow while every refresh still gets a new frame. The average rate shows dropped refreshes.
-    if (m_options.window.vsync) {
+    // Not in a browser, which presents after frame() returns and reports no refresh rate.
+    if (m_options.window.vsync && m_window.refreshRate() > 0) {
         std::printf("Presentation: %.1f frames per second on average (display %d Hz)\n",
                     static_cast<double>(times.size()) * 1000.0 / totalMs, m_window.refreshRate());
     }

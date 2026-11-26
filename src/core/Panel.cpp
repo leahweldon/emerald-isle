@@ -3,6 +3,7 @@
 #include "core/Application.hpp"
 
 #include "core/CameraController.hpp"
+#include "render/OffscreenTarget.hpp"
 #include "render/Rain.hpp"
 #include "render/ReflectionTarget.hpp"
 #include "render/ShadowMaps.hpp"
@@ -10,6 +11,7 @@
 #include "world/HeightField.hpp"
 #include "render/Terrain.hpp"
 #include "world/SolarPosition.hpp"
+#include "platform/Gl.hpp"
 #include "ui/Ui.hpp"
 
 #include <GLFW/glfw3.h>
@@ -59,7 +61,11 @@ void Application::updateUi()
 {
     Input& input = m_window.input();
     input.setBlocked(false, false);
-    if (input.wasPressed(GLFW_KEY_F1)) {
+    // F1, H or ` (F1 is a brightness key on Mac keyboards, and some browsers take it), but not
+    // while typing into a panel field.
+    const bool toggle = input.wasPressed(GLFW_KEY_F1) || input.wasPressed(GLFW_KEY_H) ||
+                        input.wasPressed(GLFW_KEY_GRAVE_ACCENT);
+    if (toggle && !m_ui->wantsTextInput()) {
         m_ui->toggle();
     }
     if (m_ui->beginFrame(m_window.framebufferWidth(), m_window.framebufferHeight())) {
@@ -77,6 +83,9 @@ void Application::buildPanel()
         ImGui::End();
         return;
     }
+    const ImVec2 position = ImGui::GetWindowPos();
+    const ImVec2 size = ImGui::GetWindowSize();
+    m_ui->setPanelRect(position.x, position.y, size.x, size.y);
     ImGui::PushItemWidth(-kLabelWidth * scale);
     // Debug views asked for on the command line open their section instead of this one.
     const bool debugOn = m_options.debugView != 0 || m_options.debugTiles || m_options.debugWireframe;
@@ -104,7 +113,7 @@ void Application::buildPanel()
         panelHelp();
     }
     ImGui::PopItemWidth();
-    ImGui::TextDisabled("F1 hides this panel");
+    ImGui::TextDisabled("H or F1 hides this panel");
     ImGui::End();
 }
 
@@ -125,31 +134,35 @@ void Application::panelPerformance()
     ImGui::TextDisabled("Last %zu frames, 0-20 ms (120 Hz: 8.3 ms)", m_frameHistory.size());
 
     ImGui::SeparatorText("GPU time per pass");
-    if (ImGui::Checkbox("Split the scene pass", &m_splitScenePass)) {
-        m_passMs = {}; // the passes being timed change
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Times terrain, sea, sky and rain drops separately. Each extra timer query\n"
-                          "splits the GPU's render pass, which costs about 0.5 ms a frame on macOS.");
-    }
-    const float total = std::max(m_passTotalMs, 1e-3f);
-    for (int i = 0; i < GpuPassTimer::kPassCount; ++i) {
-        const auto pass = static_cast<GpuPassTimer::Pass>(i);
-        const bool scenePart = pass == GpuPassTimer::Terrain || pass == GpuPassTimer::Sea;
-        if ((pass == GpuPassTimer::Scene && m_splitScenePass) || (scenePart && !m_splitScenePass)) {
-            continue;
+    if (!gl::caps().timerQueries) {
+        ImGui::TextDisabled("Not available: this browser has no GPU timer queries");
+    } else {
+        if (ImGui::Checkbox("Split the scene pass", &m_splitScenePass)) {
+            m_passMs = {}; // the passes being timed change
         }
-        const float ms = m_passMs[static_cast<std::size_t>(i)];
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(GpuPassTimer::name(pass));
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Times terrain, sea, sky and rain drops separately. Each extra timer query\n"
+                              "splits the GPU's render pass, which costs about 0.5 ms a frame on macOS.");
+        }
+        const float total = std::max(m_passTotalMs, 1e-3f);
+        for (int i = 0; i < GpuPassTimer::kPassCount; ++i) {
+            const auto pass = static_cast<GpuPassTimer::Pass>(i);
+            const bool scenePart = pass == GpuPassTimer::Terrain || pass == GpuPassTimer::Sea;
+            if ((pass == GpuPassTimer::Scene && m_splitScenePass) || (scenePart && !m_splitScenePass)) {
+                continue;
+            }
+            const float ms = m_passMs[static_cast<std::size_t>(i)];
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(GpuPassTimer::name(pass));
+            ImGui::SameLine(kValueColumn * scale);
+            char text[16];
+            std::snprintf(text, sizeof(text), "%.2f ms", static_cast<double>(ms));
+            ImGui::ProgressBar(ms / total, ImVec2(-1.0f, 0.0f), text);
+        }
+        ImGui::Text("Total");
         ImGui::SameLine(kValueColumn * scale);
-        char text[16];
-        std::snprintf(text, sizeof(text), "%.2f ms", static_cast<double>(ms));
-        ImGui::ProgressBar(ms / total, ImVec2(-1.0f, 0.0f), text);
+        ImGui::Text("%.2f ms", static_cast<double>(m_passTotalMs));
     }
-    ImGui::Text("Total");
-    ImGui::SameLine(kValueColumn * scale);
-    ImGui::Text("%.2f ms", static_cast<double>(m_passTotalMs));
 
     ImGui::SeparatorText("Terrain");
     const Terrain::Stats& stats = m_terrain->stats();
@@ -248,6 +261,17 @@ void Application::panelWeather()
 
 void Application::panelRendering()
 {
+    const float scale = m_ui->scale();
+    if (ImGui::BeginCombo("Quality", kQualities[static_cast<std::size_t>(m_quality)].name)) {
+        for (int i = 0; i < static_cast<int>(kQualities.size()); ++i) {
+            if (ImGui::Selectable(kQualities[static_cast<std::size_t>(i)].name, i == m_quality)) {
+                applyQuality(i);
+            }
+        }
+        ImGui::EndCombo();
+    }
+    label("Scene", scale);
+    ImGui::Text("%d x %d, %dx MSAA", sceneWidth(), sceneHeight(), m_scene ? m_scene->samples() : 0);
     int mapper = m_options.agx ? 1 : 0;
     if (ImGui::Combo("Tone mapper", &mapper, "PBR Neutral\0AgX\0")) {
         m_options.agx = mapper == 1;
@@ -334,8 +358,10 @@ void Application::panelDebug()
     ImGui::RadioButton("Cascades", &m_debug.view, 2);
     const float column = ImGui::GetContentRegionAvail().x * 0.5f;
     ImGui::Checkbox("Tile borders", &m_debug.tileBorders);
-    ImGui::SameLine(column);
-    ImGui::Checkbox("Wireframe", &m_debug.wireframe);
+    if (gl::caps().wireframe) { // not in WebGL
+        ImGui::SameLine(column);
+        ImGui::Checkbox("Wireframe", &m_debug.wireframe);
+    }
 
     if (m_debug.view == 1) {
         // Node size per CDLOD level; colours blend to the next level where vertices geomorph.
@@ -394,7 +420,7 @@ void Application::panelHelp()
         {"Time", "T pause, , / . 15 min (Shift: 1 hour)"},
         {"Rain", "R on / off, Shift+R light / heavy"},
         {"Print pose", "P"},
-        {"Panel", "F1"},
+        {"Panel", "H, ` or F1"},
         {"Quit", "Esc"},
     };
     if (ImGui::BeginTable("controls", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {

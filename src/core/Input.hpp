@@ -7,15 +7,22 @@
 namespace emerald {
 
 // Keyboard, mouse button, cursor and scroll state collected from GLFW callbacks (see Window).
-// Key and button codes are GLFW's. Per-frame values reset in beginFrame().
+// Key and button codes are GLFW's. Per-frame values reset in endFrame().
 class Input {
 public:
-    // Call once per frame before polling events.
-    void beginFrame();
+    // Call once per frame after the frame has read its input. Events arriving afterwards (polled
+    // at the start of the next frame on desktop, delivered between frames by a browser) count
+    // towards the next frame.
+    void endFrame();
 
     bool isDown(int key) const;
-    bool wasPressed(int key) const; // went down since the last beginFrame()
+    bool wasPressed(int key) const; // went down since the last endFrame()
     bool isMouseDown(int button) const;
+    bool mousePressed(int button) const; // went down since the last endFrame()
+    // Any key or button pressed, or any scroll, this frame (pointer movement alone does not count).
+    bool anyActivity() const;
+    // Last cursor position in window coordinates (unaffected by blocking).
+    glm::dvec2 cursor() const { return m_lastCursor; }
     glm::vec2 mouseDelta() const { return m_mouseBlocked ? glm::vec2(0.0f) : m_mouseDelta; } // pixels
     // Wheel notches or trackpad scroll units: x horizontal, y vertical (GLFW's sign convention).
     glm::vec2 scrollDelta() const { return m_mouseBlocked ? glm::vec2(0.0f) : m_scrollDelta; }
@@ -42,6 +49,7 @@ private:
     std::array<bool, kKeyCount> m_down{};
     std::array<bool, kKeyCount> m_pressed{};
     std::array<bool, kButtonCount> m_buttons{};
+    std::array<bool, kButtonCount> m_buttonPressed{};
     glm::vec2 m_mouseDelta{0.0f};
     glm::dvec2 m_lastCursor{0.0};
     bool m_haveCursor = false;

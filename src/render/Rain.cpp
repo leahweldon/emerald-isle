@@ -26,6 +26,11 @@ constexpr float kDropOpacity = 0.6f;
 constexpr float kSplashOpacity = 0.6f;
 constexpr int kDropVec4s = 3;         // position, velocity, hit
 constexpr int kSplashVec4s = 2;       // position, velocity
+// Drops as a 2D texture of RGBA32F texels where buffer textures are missing; matches
+// splash_update.vert.
+constexpr int kDropTextureWidth = 1024;
+constexpr int kDropTextureHeight = Rain::kMaxDrops * kDropVec4s / kDropTextureWidth;
+static_assert(Rain::kMaxDrops * kDropVec4s % kDropTextureWidth == 0, "drops fill whole texture rows");
 
 // Gunn and Kinzer as fitted by Atlas; matches rain_common.glsl.
 float terminalVelocity(float diameterMm)
@@ -89,18 +94,29 @@ Rain::Rain(const std::filesystem::path& shaderDir, GLuint groundUnit, GLuint dro
         setupAttributes(m_dropDrawVaos[i], m_dropBuffers[i], kDropVec4s, true);
         setupAttributes(m_splashUpdateVaos[i], m_splashBuffers[i], kSplashVec4s, false);
         setupAttributes(m_splashDrawVaos[i], m_splashBuffers[i], kSplashVec4s, true);
-        glBindTexture(GL_TEXTURE_BUFFER, m_dropTextures[i]);
-        glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, m_dropBuffers[i]);
+        if (gl::caps().bufferTextures) {
+            glBindTexture(GL_TEXTURE_BUFFER, m_dropTextures[i]);
+            gl::bufferTextureRgba32f(m_dropBuffers[i]);
+            glBindTexture(GL_TEXTURE_BUFFER, 0);
+        }
     }
-    glBindTexture(GL_TEXTURE_BUFFER, 0);
+    if (!gl::caps().bufferTextures) {
+        // No buffer textures (WebGL): landings are copied into a 2D texture each step instead.
+        glBindTexture(GL_TEXTURE_2D, m_dropTextures[0]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, kDropTextureWidth, kDropTextureHeight, 0, GL_RGBA, GL_FLOAT,
+                     nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     glGenTextures(1, &m_groundTexture);
     glBindTexture(GL_TEXTURE_2D, m_groundTexture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, kGroundResolution, kGroundResolution, 0,
                  GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl::depthValueFilter());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl::depthValueFilter());
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -110,8 +126,7 @@ Rain::Rain(const std::filesystem::path& shaderDir, GLuint groundUnit, GLuint dro
     glGenFramebuffers(1, &m_groundFramebuffer);
     glBindFramebuffer(GL_FRAMEBUFFER, m_groundFramebuffer);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_groundTexture, 0);
-    glDrawBuffer(GL_NONE);
-    glReadBuffer(GL_NONE);
+    gl::noColourBuffers();
     const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous));
     if (status != GL_FRAMEBUFFER_COMPLETE) {
@@ -187,12 +202,12 @@ void Rain::updateGround(Terrain& terrain, Shader& depthShader, GLuint heightTile
     glViewport(0, 0, kGroundResolution, kGroundResolution);
     glClear(GL_DEPTH_BUFFER_BIT);
     glDisable(GL_CULL_FACE);
-    glEnable(GL_DEPTH_CLAMP); // ground above or below the range clamps to its ends
+    gl::setDepthClamp(true); // ground above or below the range clamps to its ends
     depthShader.use();
     depthShader.set("uCameraHeight", static_cast<float>(cameraPos.y));
     depthShader.set("uShadowViewProj", viewProj);
     terrain.drawShadowCasters(depthShader, heightTileUnit, viewProj, 1.0f);
-    glDisable(GL_DEPTH_CLAMP);
+    gl::setDepthClamp(false);
     glEnable(GL_CULL_FACE);
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous));
     glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
@@ -200,7 +215,8 @@ void Rain::updateGround(Terrain& terrain, Shader& depthShader, GLuint heightTile
 
 void Rain::simulate(float dt, const glm::dvec3& cameraPos, const glm::vec3& wind, float intensity)
 {
-    m_activeDrops = static_cast<int>(std::lround(static_cast<double>(kMaxDrops) * std::clamp(intensity, 0.0f, 1.0f)));
+    m_activeDrops = static_cast<int>(std::lround(static_cast<double>(kMaxDrops) * m_dropFraction *
+                                                  std::clamp(intensity, 0.0f, 1.0f)));
     const glm::dvec3 size(2.0 * kHalfWidth, 2.0 * kHalfHeight, 2.0 * kHalfWidth);
     const glm::dvec3 centre = cameraPos - glm::dvec3(0.0, kCentreDrop, 0.0);
     m_boxOrigin = glm::vec3(centre - glm::floor(centre / size) * size);
@@ -236,10 +252,21 @@ void Rain::simulate(float dt, const glm::dvec3& cameraPos, const glm::vec3& wind
     glBeginTransformFeedback(GL_POINTS);
     glDrawArrays(GL_POINTS, 0, kMaxDrops);
     glEndTransformFeedback();
+    glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, 0);
     if (query) {
         glEndQuery(GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN);
         m_queryPending[m_nextQuery] = true;
         m_nextQuery = 1 - m_nextQuery;
+    }
+    // Without buffer textures, a GPU-side copy of the drops into a texture; only when something
+    // can land, which is also the only time the splash pass reads them.
+    const GLenum dropTarget = gl::caps().bufferTextures ? GL_TEXTURE_BUFFER : GL_TEXTURE_2D;
+    const GLuint dropTexture = gl::caps().bufferTextures ? m_dropTextures[next] : m_dropTextures[0];
+    if (!gl::caps().bufferTextures && m_groundValid) {
+        glBindTexture(GL_TEXTURE_2D, dropTexture);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, m_dropBuffers[next]);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kDropTextureWidth, kDropTextureHeight, GL_RGBA, GL_FLOAT, nullptr);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     }
 
     // Splashes read this step's landings from the drops just written.
@@ -249,7 +276,7 @@ void Rain::simulate(float dt, const glm::dvec3& cameraPos, const glm::vec3& wind
     m_splashUpdate.set("uActiveDrops", m_activeDrops);
     m_splashUpdate.set("uFrame", m_frame);
     glActiveTexture(GL_TEXTURE0 + m_dropUnit);
-    glBindTexture(GL_TEXTURE_BUFFER, m_dropTextures[next]);
+    glBindTexture(dropTarget, dropTexture);
     glBindVertexArray(m_splashUpdateVaos[m_current]);
     glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, m_splashBuffers[next]);
     glBeginTransformFeedback(GL_POINTS);
@@ -257,7 +284,7 @@ void Rain::simulate(float dt, const glm::dvec3& cameraPos, const glm::vec3& wind
     glEndTransformFeedback();
 
     glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, 0);
-    glBindTexture(GL_TEXTURE_BUFFER, 0);
+    glBindTexture(dropTarget, 0);
     glBindVertexArray(0);
     glDisable(GL_RASTERIZER_DISCARD);
     m_current = next;
@@ -292,7 +319,7 @@ void Rain::draw(const glm::mat4& view, const glm::mat4& projection, const glm::v
     glDepthMask(GL_FALSE);
     // Drops nearer than the scene's near plane (often hundreds of metres from a high camera) are
     // clamped onto it rather than clipped, so they pass the depth test in front of everything.
-    glEnable(GL_DEPTH_CLAMP);
+    gl::setDepthClamp(true);
     glDisable(GL_CULL_FACE);
 
     struct Pass {
@@ -320,6 +347,8 @@ void Rain::draw(const glm::mat4& view, const glm::mat4& projection, const glm::v
         shader.set("uAmbient", lighting.ambient);
         shader.set("uNight", lighting.night);
         shader.set("uOvercast", lighting.overcast);
+        shader.set("uDisplayExposure", lighting.displayExposure);
+        shader.set("uDisplayToneMapper", lighting.displayToneMapper);
         shader.set("uSkyCube", lighting.skyUnit);
         glBindVertexArray(pass.vao);
         glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, pass.count);
@@ -327,7 +356,7 @@ void Rain::draw(const glm::mat4& view, const glm::mat4& projection, const glm::v
     glBindVertexArray(0);
 
     glEnable(GL_CULL_FACE);
-    glDisable(GL_DEPTH_CLAMP);
+    gl::setDepthClamp(false);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
 }
