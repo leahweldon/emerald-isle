@@ -33,6 +33,14 @@ public:
 
     void update(Window& window, float deltaSeconds);
 
+    // Touch gestures, as drags in CSS pixels and pinches as a scale (> 1 is fingers apart).
+    // Orbiting: a drag rotates around the target, a pinch moves closer or further, a two-finger
+    // drag moves the target; the automatic rotation stops. Free-fly: a drag looks around, a pinch
+    // moves forward or back, a two-finger drag moves sideways and up or down.
+    void touchDrag(const glm::vec2& pixels);
+    void touchPinch(float scale);
+    void touchPan(const glm::vec2& pixels);
+
     Mode mode() const { return m_mode; }
     // Current free-fly speed in m/s: proportional to height above the ground, times the [ ] multiplier
     // and the Shift boost while held.
@@ -48,6 +56,7 @@ private:
     void updateFreeFly(Window& window, float dt);
     void updateOrbit(float dt);
     void applyOrbit();
+    void applyOrbitAboveGround();
     void keepAboveGround();
     float heightAboveGround() const;
     void updateNearPlane();

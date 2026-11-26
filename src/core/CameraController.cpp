@@ -34,6 +34,16 @@ constexpr float kScrollSensitivity = 0.02f; // radians per scroll unit
 constexpr float kMaxScrollPerFrame = 15.0f; // scroll units
 constexpr float kScrollSmoothing = 25.0f;   // 1/s
 constexpr float kOrbitSpeed = 0.05f;       // radians per second
+// Touch: radians per CSS pixel for orbiting and looking, metres per pixel per metre of height or
+// orbit distance for panning, and metres per unit of log pinch scale per metre of height.
+constexpr float kTouchOrbitRate = 0.006f;
+constexpr float kTouchLookRate = 0.004f;
+constexpr double kTouchPanRate = 0.0015;
+constexpr double kTouchPinchDistance = 1.5;
+constexpr float kMinOrbitElevation = 0.01f;
+constexpr float kMaxOrbitElevation = 1.45f;
+constexpr float kMinOrbitDistance = 300.0f;
+constexpr float kMaxOrbitDistance = 2.0e6f;
 constexpr float kMaxStep = 0.1f;           // seconds; larger frame gaps are clamped
 constexpr float kTargetFallback = 20000.0f; // metres, when the view ray misses the ground
 
@@ -108,6 +118,73 @@ void CameraController::update(Window& window, float deltaSeconds)
         updateFreeFly(window, dt);
     } else {
         updateOrbit(dt);
+    }
+}
+
+void CameraController::touchDrag(const glm::vec2& pixels)
+{
+    if (m_mode == Mode::Orbit) {
+        // The scene follows the finger.
+        m_orbitAnimate = false;
+        m_orbitAzimuth -= pixels.x * kTouchOrbitRate;
+        m_orbitElevation = std::clamp(m_orbitElevation + pixels.y * kTouchOrbitRate, kMinOrbitElevation,
+                                      kMaxOrbitElevation);
+        applyOrbitAboveGround();
+        return;
+    }
+    m_camera.yaw -= pixels.x * kTouchLookRate;
+    m_camera.pitch += pixels.y * kTouchLookRate;
+    m_camera.clampPitch();
+}
+
+void CameraController::touchPinch(float scale)
+{
+    if (!(scale > 0.0f)) {
+        return;
+    }
+    if (m_mode == Mode::Orbit) {
+        m_orbitAnimate = false;
+        m_orbitDistance = std::clamp(m_orbitDistance / scale, kMinOrbitDistance, kMaxOrbitDistance);
+        applyOrbitAboveGround();
+        return;
+    }
+    // Spreading the fingers flies forward; the step grows with height, like the free-fly speed.
+    const double step = std::log(static_cast<double>(scale)) * std::max(static_cast<double>(heightAboveGround()), 30.0) *
+                        kTouchPinchDistance;
+    m_camera.position += glm::dvec3(m_camera.forward()) * step;
+    keepAboveGround();
+    updateNearPlane();
+}
+
+void CameraController::touchPan(const glm::vec2& pixels)
+{
+    if (m_mode == Mode::Orbit) {
+        // The ground follows the fingers: the target moves the other way, level with the ground.
+        m_orbitAnimate = false;
+        const glm::dvec3 right(m_camera.right());
+        const glm::dvec3 ahead = glm::normalize(glm::dvec3(m_camera.forward().x, 0.0, m_camera.forward().z));
+        const double metresPerPixel = static_cast<double>(m_orbitDistance) * kTouchPanRate;
+        m_orbitTarget += (-right * static_cast<double>(pixels.x) + ahead * static_cast<double>(pixels.y)) * metresPerPixel;
+        applyOrbitAboveGround();
+        return;
+    }
+    const double metresPerPixel = std::max(static_cast<double>(heightAboveGround()), 30.0) * kTouchPanRate;
+    m_camera.position += (-glm::dvec3(m_camera.right()) * static_cast<double>(pixels.x) +
+                          glm::dvec3(0.0, 1.0, 0.0) * static_cast<double>(pixels.y)) *
+                         metresPerPixel;
+    keepAboveGround();
+    updateNearPlane();
+}
+
+void CameraController::applyOrbitAboveGround()
+{
+    // Steepen the orbit until the camera clears the ground, rather than pass under a hill.
+    applyOrbit();
+    for (int i = 0; i < 32 && m_camera.position.y < m_groundHeight(m_camera.position.x, m_camera.position.z) +
+                                                         static_cast<double>(kMinClearance);
+         ++i) {
+        m_orbitElevation = std::min(m_orbitElevation + 0.02f, kMaxOrbitElevation);
+        applyOrbit();
     }
 }
 
