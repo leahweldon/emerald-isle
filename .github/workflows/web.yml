@@ -59,7 +59,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Loads the page in headless Chromium (software WebGL 2) and fails on any console or WebGL
-      # error, or if the app does not start.
+      # error, or if the app does not start; then checks that input reaches the app.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -71,6 +71,11 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
           node test/smoke.mjs ../site 10
+      # Clicks the scene and presses keys, checking through the app's state that the orbit stops,
+      # the camera moves and turns, pointer lock is requested from the click, and the panel toggles.
+      - name: Input test
+        working-directory: web
+        run: node test/input.mjs ../site
 
       - name: Upload smoke test screenshot
         if: always()

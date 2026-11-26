@@ -18,6 +18,14 @@ emerald::Application* g_app = nullptr;
 
 } // namespace
 
+// For the input test: the app's state as JSON (valid until the next call).
+extern "C" EMSCRIPTEN_KEEPALIVE const char* emerald_state()
+{
+    static std::string state;
+    state = g_app ? g_app->stateJson() : "{}";
+    return state.c_str();
+}
+
 // Called by the page's panel button.
 extern "C" EMSCRIPTEN_KEEPALIVE void emerald_toggle_panel()
 {

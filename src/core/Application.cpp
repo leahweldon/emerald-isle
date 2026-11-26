@@ -620,6 +620,19 @@ void Application::update(float deltaSeconds)
     m_deltaSeconds = deltaSeconds;
 }
 
+std::string Application::stateJson() const
+{
+    char json[256];
+    std::snprintf(json, sizeof(json),
+                  "{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f,\"yaw\":%.5f,\"pitch\":%.5f,\"orbiting\":%s,"
+                  "\"panel\":%s,\"captured\":%s,\"frames\":%d}",
+                  m_camera.position.x, m_camera.position.y, m_camera.position.z, static_cast<double>(m_camera.yaw),
+                  static_cast<double>(m_camera.pitch),
+                  m_controller->mode() == CameraController::Mode::Orbit ? "true" : "false",
+                  m_ui->visible() ? "true" : "false", m_window.cursorCaptured() ? "true" : "false", m_frameCount);
+    return json;
+}
+
 bool Application::done() const
 {
     return m_window.shouldClose();

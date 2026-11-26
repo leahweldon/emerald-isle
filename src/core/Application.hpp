@@ -108,6 +108,8 @@ public:
     int finish();
     // True once a run that ends by itself (--frames, --autofly) has finished.
     bool done() const;
+    // Camera, orbit, panel and pointer state as JSON, for the web build's input test.
+    std::string stateJson() const;
     // Shows or hides the panel (F1 does the same), for the web page's button.
     void toggleUi();
 
