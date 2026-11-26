@@ -60,7 +60,11 @@ constexpr GLuint kRainDropUnit = 12;
 // Packed floats, 32 bits a pixel like RGBA8: unclamped HDR with ~6-bit mantissas, which the
 // tone mapping and dither cannot tell from RGBA16F (at most 3/255 apart, no banding), at a
 // quarter of its frame cost with 4x MSAA (0.1-0.3 ms against 1 ms of GPU time at 2560 x 1440).
-constexpr GLenum kSceneFormat = GL_R11F_G11F_B10F;
+// Where float render targets are missing (some WebGL), 8-bit, with the scene shaders tone mapping.
+GLenum sceneFormat()
+{
+    return gl::caps().floatTargets ? GL_R11F_G11F_B10F : GL_RGBA8;
+}
 // Linear scale before each tone curve at --exposure 0, fitted so noon terrain, sea and sky match
 // the earlier display transform (linear up to 0.8) as closely as the curve allows.
 constexpr float kNeutralExposure = 1.18f;
@@ -247,6 +251,8 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.exposureEv = parseFloat(arg, argv[++i], -10.0f, 10.0f);
         } else if (std::strcmp(arg, "--rain") == 0 && hasValue) {
             options.rain = parseFloat(arg, argv[++i], 0.0f, 1.0f);
+        } else if (std::strcmp(arg, "--webgl-fallbacks") == 0) {
+            options.webglFallbacks = true;
         } else if (std::strcmp(arg, "--ui") == 0) {
             options.ui = true;
         } else if (std::strcmp(arg, "--debug") == 0 && hasValue) {
@@ -345,7 +351,7 @@ Application::Application(AppOptions options)
     m_atmosphere.rain = m_rainIntensity;
     m_atmosphere.wetness = m_wetness;
     m_rainLevel = m_options.rain > 0.0f ? m_options.rain : kLightRain;
-    if (m_options.gpuTiming) {
+    if (m_options.gpuTiming && gl::caps().timerQueries) {
         m_gpuTimer = std::make_unique<GpuTimer>();
     }
 
@@ -479,7 +485,7 @@ void Application::frame()
     ++m_frameCount;
     // Pass timing replaces whole-frame timing while the panel is open: the queries cannot nest.
     // Every frame: timing only some of them made those frames 2-7 ms slower on macOS.
-    m_passTiming = m_ui->visible();
+    m_passTiming = m_ui->visible() && gl::caps().timerQueries;
     if (m_passTiming) {
         m_passTimer->beginFrame(m_frameCount);
     } else if (m_gpuTimer) {
@@ -673,7 +679,7 @@ void Application::render()
     const int width = m_window.framebufferWidth();
     const int height = m_window.framebufferHeight();
     if (!m_scene || m_scene->width() != width || m_scene->height() != height) {
-        m_scene = std::make_unique<OffscreenTarget>(width, height, m_options.window.samples, kSceneFormat);
+        m_scene = std::make_unique<OffscreenTarget>(width, height, m_options.window.samples, sceneFormat());
     }
     m_scene->bind();
 
@@ -733,6 +739,7 @@ void Application::render()
     // Skybox last, at the far plane, so it is only shaded where nothing else was drawn.
     const float pixelAngle = m_camera.fovY / static_cast<float>(m_window.framebufferHeight());
     markScenePart(GpuPassTimer::Sky);
+    m_sky->setDisplay(displayExposure(), m_options.agx ? 1 : 0);
     m_sky->drawBackground(glm::inverse(projection * rotationOnly), m_atmosphere, pixelAngle);
 
     // Rain after everything opaque, blended into the HDR target.
@@ -745,6 +752,8 @@ void Application::render()
         lighting.night = m_atmosphere.night();
         lighting.overcast = m_atmosphere.overcast();
         lighting.skyUnit = static_cast<int>(kSkyUnit);
+        lighting.displayExposure = displayExposure();
+        lighting.displayToneMapper = m_options.agx ? 1 : 0;
         m_sky->bindCubemap(kSkyUnit);
         m_rain->draw(m_camera.view(), projection, glm::vec2(static_cast<float>(width), static_cast<float>(height)),
                      pixelAngle, m_cameraVelocity, lighting);
@@ -798,15 +807,20 @@ void Application::toneMap()
     m_toneMapShader->use();
     m_scene->bindTexture(kSceneUnit);
     m_toneMapShader->set("uScene", static_cast<int>(kSceneUnit));
-    const float base = m_options.agx ? kAgxExposure : kNeutralExposure;
-    const float ev = m_options.exposureEv + kNightAdaptationEv * m_atmosphere.night() +
-                     kOvercastAdaptationEv * m_atmosphere.overcast() * (1.0f - m_atmosphere.night());
-    m_toneMapShader->set("uExposure", base * std::exp2(ev));
+    m_toneMapShader->set("uExposure", displayExposure());
     m_toneMapShader->set("uToneMapper", m_options.agx ? 1 : 0);
     glBindVertexArray(m_fullscreenVao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindVertexArray(0);
     glEnable(GL_DEPTH_TEST);
+}
+
+float Application::displayExposure() const
+{
+    const float base = m_options.agx ? kAgxExposure : kNeutralExposure;
+    const float ev = m_options.exposureEv + kNightAdaptationEv * m_atmosphere.night() +
+                     kOvercastAdaptationEv * m_atmosphere.overcast() * (1.0f - m_atmosphere.night());
+    return base * std::exp2(ev);
 }
 
 void Application::renderShadows(const glm::mat4& projection)
@@ -899,6 +913,8 @@ void Application::setSceneUniforms(Shader& shader)
     shader.set("uCameraHeight", static_cast<float>(m_camera.position.y));
     m_atmosphere.apply(shader, static_cast<float>(m_camera.position.y));
     shader.set("uShadowsOff", m_features.shadows ? 0 : 1);
+    shader.set("uDisplayExposure", displayExposure()); // shaders that tone map themselves
+    shader.set("uDisplayToneMapper", m_options.agx ? 1 : 0);
     shader.set("uHorizonShadowsOff", m_features.horizonShadows ? 0 : 1);
 }
 

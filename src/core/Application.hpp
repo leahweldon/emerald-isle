@@ -53,6 +53,8 @@ struct AppOptions {
     // Show the panel from the start. Otherwise it starts open only in interactive sessions (not
     // in runs that end by themselves); F1 toggles it.
     bool ui = false;
+    // Web build: use every WebGL fallback even where the browser has the feature, to test them.
+    bool webglFallbacks = false;
     // --debug: terrain colouring (0 off, 1 level of detail, 2 shadow cascades), node outlines and
     // wireframe, as in the panel's debug views.
     int debugView = 0;
@@ -110,6 +112,7 @@ private:
     void renderReflection(const glm::mat4& projection);
     // Resolves the HDR scene and tone maps it into the window (or the headless target).
     void toneMap();
+    float displayExposure() const; // linear scale before the tone curve
     void setTerrainUniforms(Shader& shader);
     void updateTitle();
     void recordFrameStats(float frameMs, float cpuMs);

@@ -34,6 +34,7 @@ uniform sampler2DArray uMaterialColour;
 uniform sampler2DArray uMaterialNormal;
 
 #include "shadow.glsl"
+#include "tonemap.glsl"
 
 uniform sampler2DArray uHorizon; // the node's horizon map: 8 directions in two RGBA layers
 uniform float uTileBorder;
@@ -293,7 +294,7 @@ void main()
     // show through the fog.
     float fog = uDebugView == 0 ? fogAmount(vRelPos) : 0.0;
     if (fog > 0.995) {
-        fragColour = vec4(fogColour(vRelPos), 1.0);
+        fragColour = vec4(sceneOutput(fogColour(vRelPos)), 1.0);
         return;
     }
 
@@ -446,5 +447,5 @@ void main()
     }
 
     colour = mix(colour, fogColour(vRelPos), fog);
-    fragColour = vec4(colour, 1.0); // linear HDR, tone mapped in tonemap.frag
+    fragColour = vec4(sceneOutput(colour), 1.0); // linear HDR, tone mapped in tonemap.frag
 }

@@ -15,6 +15,7 @@ namespace emerald::gl {
 namespace {
 
 Caps g_caps;
+bool g_forceFallbacks = false;
 
 #ifdef __EMSCRIPTEN__
 bool hasExtension(const char* name)
@@ -38,10 +39,10 @@ bool hasExtension(const char* name)
 void initCaps()
 {
 #ifdef __EMSCRIPTEN__
-    g_caps.floatTargets = hasExtension("EXT_color_buffer_float");
-    g_caps.floatLinear = hasExtension("OES_texture_float_linear");
-    g_caps.anisotropy = hasExtension("EXT_texture_filter_anisotropic");
-    g_caps.timerQueries = hasExtension("EXT_disjoint_timer_query_webgl2");
+    g_caps.floatTargets = !g_forceFallbacks && hasExtension("EXT_color_buffer_float");
+    g_caps.floatLinear = !g_forceFallbacks && hasExtension("OES_texture_float_linear");
+    g_caps.anisotropy = !g_forceFallbacks && hasExtension("EXT_texture_filter_anisotropic");
+    g_caps.timerQueries = !g_forceFallbacks && hasExtension("EXT_disjoint_timer_query_webgl2");
     g_caps.depthClamp = false;
     g_caps.bufferTextures = false;
     g_caps.depthLinear = false;
@@ -55,6 +56,11 @@ void initCaps()
 #else
     g_caps.anisotropy = GLAD_GL_ARB_texture_filter_anisotropic || GLAD_GL_EXT_texture_filter_anisotropic;
 #endif
+}
+
+void requestFallbacks()
+{
+    g_forceFallbacks = true;
 }
 
 const Caps& caps()

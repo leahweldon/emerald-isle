@@ -346,6 +346,8 @@ void Rain::draw(const glm::mat4& view, const glm::mat4& projection, const glm::v
         shader.set("uAmbient", lighting.ambient);
         shader.set("uNight", lighting.night);
         shader.set("uOvercast", lighting.overcast);
+        shader.set("uDisplayExposure", lighting.displayExposure);
+        shader.set("uDisplayToneMapper", lighting.displayToneMapper);
         shader.set("uSkyCube", lighting.skyUnit);
         glBindVertexArray(pass.vao);
         glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, pass.count);

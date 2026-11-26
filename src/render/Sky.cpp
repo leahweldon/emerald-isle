@@ -341,6 +341,8 @@ void Sky::drawBackground(const glm::mat4& invViewProjRotation, const Atmosphere&
     m_skyboxShader.set("uStarRotation", atmosphere.starRotation);
     m_skyboxShader.set("uPixelAngle", pixelAngle);
     m_skyboxShader.set("uSkyCube", 0);
+    m_skyboxShader.set("uDisplayExposure", m_displayExposure);
+    m_skyboxShader.set("uDisplayToneMapper", m_displayToneMapper);
     bindCubemap(0);
 
     // At the far plane: fills only where terrain and sea left the cleared depth.

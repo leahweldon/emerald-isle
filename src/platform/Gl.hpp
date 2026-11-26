@@ -49,6 +49,9 @@ struct Caps {
 
 // Probes the current context once; call right after creating it.
 void initCaps();
+// Before initCaps: act as if every optional WebGL feature were missing (no float targets, float
+// filtering, anisotropy or timer queries), to test the fallbacks. No effect on desktop.
+void requestFallbacks();
 const Caps& caps();
 
 // The shader's first line for this context: "#version 330 core", or "#version 300 es" with

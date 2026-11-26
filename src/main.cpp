@@ -1,4 +1,5 @@
 #include "core/Application.hpp"
+#include "platform/Gl.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -15,6 +16,9 @@ int main(int argc, char** argv)
         emerald::AppOptions options;
         if (!emerald::parseOptions(argc, argv, options)) {
             return EXIT_SUCCESS;
+        }
+        if (options.webglFallbacks) {
+            emerald::gl::requestFallbacks();
         }
 
 #ifdef __EMSCRIPTEN__

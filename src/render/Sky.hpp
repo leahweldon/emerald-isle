@@ -34,6 +34,12 @@ public:
                         float pixelAngle);
 
     void bindCubemap(GLuint unit) const;
+    // Exposure and tone curve for shaders that tone map themselves (TONEMAP_IN_SCENE).
+    void setDisplay(float exposure, int toneMapper)
+    {
+        m_displayExposure = exposure;
+        m_displayToneMapper = toneMapper;
+    }
 
     // Sets uSkyCube (bound to unit) and uIrradianceSH[9] for terrain and sea shading.
     void applyEnvironment(Shader& shader, GLuint unit) const;
@@ -78,6 +84,8 @@ private:
     Atmosphere m_shown;      // inputs of the displayed cubemap
     Atmosphere m_rendering;  // inputs of the cubemap being refreshed
     int m_refreshes = 0;
+    float m_displayExposure = 1.0f;
+    int m_displayToneMapper = 0;
     // Diffuse radiance coefficients: evaluate with the SH basis and multiply by albedo.
     std::array<glm::vec3, 9> m_irradianceSH{};
 };

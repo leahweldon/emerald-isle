@@ -20,6 +20,8 @@ struct RainLighting {
     float night = 0.0f;
     float overcast = 0.0f;
     int skyUnit = 0; // texture unit holding the sky cubemap
+    float displayExposure = 1.0f; // for TONEMAP_IN_SCENE
+    int displayToneMapper = 0;
 };
 
 // GPU rain in a box around the camera. Drops and splash droplets live in vertex buffers advanced
