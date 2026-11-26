@@ -1,6 +1,10 @@
 # Emerald Isle
 
 [![Build](https://github.com/leahweldon/emerald-isle/actions/workflows/build.yml/badge.svg)](https://github.com/leahweldon/emerald-isle/actions/workflows/build.yml)
+[![Web](https://github.com/leahweldon/emerald-isle/actions/workflows/web.yml/badge.svg)](https://github.com/leahweldon/emerald-isle/actions/workflows/web.yml)
+[![Live demo](https://img.shields.io/badge/live%20demo-WebGL%202-3fb47a)](https://leahweldon.github.io/emerald-isle/)
+
+**[Live demo](https://leahweldon.github.io/emerald-isle/)**: the renderer in your browser (WebGL 2; about 7 MB to download).
 
 A real-time terrain renderer of Ireland, written in C++17 and modern shader-based OpenGL.
 
@@ -19,7 +23,7 @@ A real-time terrain renderer of Ireland, written in C++17 and modern shader-base
 - [x] **7. Water:** Gerstner waves, drifting ripples, planar reflections, depth-tinted shallows, foam and a sun and moon glint
 - [x] **8. Weather:** GPU rain simulated with transform feedback and drawn as instanced streaks, with splashes, overcast skies, wet ground and raindrop rings on the sea
 - [x] **9. Tools:** in-app panel (Dear ImGui) with live stats and GPU time per pass, controls for time, weather, rendering and camera, and debug views of the level of detail and shadow cascades
-- [ ] **10. Web:** WebGL build with a live demo
+- [x] **10. Web:** WebGL 2 build from the same source, deployed to GitHub Pages as a [live demo](https://leahweldon.github.io/emerald-isle/)
 
 ## Screenshots
 
@@ -109,6 +113,40 @@ flowchart LR
 
 While the pointer is over the panel or a widget is in use, the camera and shortcuts do not see the mouse or keys. Text is rasterised at full pixel resolution, so it stays sharp on HiDPI screens; headless captures scale the panel to the image as a 1280 × 720 window would show it.
 
+## Web build
+
+The [live demo](https://leahweldon.github.io/emerald-isle/) is the same C++ source compiled with Emscripten to WebAssembly and WebGL 2 (OpenGL ES 3.0), using Emscripten's contrib GLFW port (HiDPI canvas, resizing, pointer lock) and the same Dear ImGui panel. CI builds and smoke-tests it on every push and pull request (headless Chromium, failing on any console or WebGL error) and deploys it to GitHub Pages from `main`.
+
+- **One source:** platform differences are confined to `src/platform/Gl` (GL header, capabilities probed at startup, and wrappers for the calls that differ), the window setup and the main loop, which the browser drives one frame at a time. Shaders are shared too: the `#version 330 core` line is replaced with `#version 300 es`, default precisions and defines for whatever the browser lacks. The desktop build renders exactly as before.
+- **Threads:** pages can only use threads (SharedArrayBuffer) when served with cross-origin isolation headers, which GitHub Pages cannot send. A service worker shim (coi-serviceworker) can fake them, but it reloads the page on the first visit, and it breaks embedding and caching in ways that are hard to debug, so the web build is single-threaded instead. Terrain tiles are generated on the main thread in small steps (a row of heights, a horizon direction), within a few milliseconds a frame, so streaming never stalls a frame; it takes a little longer to fill in than on desktop.
+- **WebGL 2 differences**, and what the web build does instead:
+
+  | Missing in WebGL 2 | Instead |
+  |---|---|
+  | Depth clamping (shadow casters past a cascade, rain nearer than the near plane) | Depth clamped per vertex in the shaders |
+  | Buffer textures (rain landings read by the splash pass) | The drops are copied GPU-side into a 2D texture, only when rain can reach the ground |
+  | Border colours (lit outside a shadow cascade) | The shader treats samples outside a cascade as lit |
+  | Linear filtering of depth textures (seabed and rain-ground height maps) | Nearest filtering |
+  | Reading a texture back (`glGetTexImage`; the sky's ambient light) | The cubemap face is read through a framebuffer into a pixel buffer, which is read when its fence has passed |
+  | Rendering to RGB16F (the sky cubemap) | RGBA16F |
+  | Wireframe (`glPolygonMode`) | Not available |
+  | Clip distances | Not needed: the reflection pass already discards below sea level |
+
+  Some features depend on extensions, used when present: float render targets (`EXT_color_buffer_float`; without them the scene is drawn into 8-bit targets with tone mapping in the scene shaders), linear filtering of float textures (`OES_texture_float_linear`; without it terrain heights are stored as half floats), anisotropic filtering, and GPU timer queries for the panel (`EXT_disjoint_timer_query_webgl2`, usually only in Chrome). Add `?webgl-fallbacks` to the demo's address to try every fallback at once.
+- **Quality:** a **Quality** setting in the panel (and `--quality`) trades detail for speed. The web build starts at Medium; the desktop build is High.
+
+  | | Low | Medium (web) | High (desktop) |
+  |---|---|---|---|
+  | Pixel ratio cap | 1 | 1.5 | none |
+  | Shadow cascades | 1024² | 1536² | 2048² |
+  | Reflection | 1/4 size | 1/3 size | 1/2 size |
+  | Rain drops | 25% | 50% | 100% |
+  | Level of detail range | 1.75× | 2× | 2.5× |
+  | MSAA | off | 2× | 4× |
+
+- **Download:** about 7 MB in all: `index.wasm` 0.9 MB (0.4 MB compressed), `index.js` 0.15 MB, and `index.data` 6.5 MB of assets. The material textures are re-encoded for the web by `tools/make_web_assets.py` (15 MB down to 2.5 MB); the 16-bit heightmap (2.5 MB) is kept as it is.
+- **Options in the address:** any option can be passed as a URL parameter, for example [`?view=shore&rain=1&time=13:30`](https://leahweldon.github.io/emerald-isle/?view=shore&rain=1&time=13:30). Without any, the demo opens on golden hour over Dingle Bay, orbiting slowly until you press a key, click or scroll.
+
 ## Building
 
 Requirements: a C++17 compiler, CMake 3.20+ and Git. All libraries are downloaded automatically when you configure.
@@ -125,6 +163,16 @@ On Linux, install the X11 and OpenGL headers first:
 ```bash
 sudo apt-get install libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl-dev
 ```
+
+For the web build, install [Emscripten](https://emscripten.org/docs/getting_started/downloads.html) (3.1.74 is what CI uses) and Python with Pillow (`pip install pillow`, for preparing the assets), then:
+
+```bash
+emcmake cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release
+cmake --build build-web
+python3 -m http.server -d build-web 8000   # then open http://localhost:8000
+```
+
+`cmake -DEMERALD_THREADS=OFF` builds the desktop app with the web's single-threaded tile generation, for testing it natively. `web/test/smoke.mjs` is the headless browser test CI runs (`cd web && npm ci && npx playwright install chromium && node test/smoke.mjs ../build-web`).
 
 ## Running
 
@@ -151,6 +199,10 @@ build\Release\emerald-isle.exe       # Windows (Visual Studio generator)
 | `--exposure <ev>` | Exposure offset in stops for the final tone mapping (default 0) |
 | `--tone-mapper <name>` | `neutral` (default, Khronos PBR Neutral) or `agx` |
 | `--ui` | Show the panel from the start, also in runs that end by themselves (it is drawn into `--headless` captures) |
+| `--quality <level>` | `low`, `medium` or `high` (default `high`; `medium` on the web); see [Web build](#web-build) |
+| `--orbit` | With `--view`, orbit the view's target slowly until the first key press, click or scroll, then fly from there |
+| `--paused` | Start with the time of day paused (**T** resumes it) |
+| `--webgl-fallbacks` | Web build only: use every WebGL fallback even where the browser has the feature, to test them |
 | `--debug <view>` | Start with a debug view: `lod` (level-of-detail colouring), `cascades` (shadow-cascade colouring), `tiles` (node outlines) or `wireframe`; repeatable. With `--ui`, the panel opens on its debug section |
 | `--rain <0-1>` | Start with rain of this intensity, 0 dry to 1 heavy (default 0); with `--validate`, also checks that every simulation step wrote the whole drop pool |
 | `--gpu-timing` | Also measure GPU time per frame with timer queries (exit stats and `gpu_ms` in the frame log); costs ~0.4 ms a frame on macOS |
@@ -190,6 +242,7 @@ Time runs at one minute per second in interactive sessions, and the window title
 src/
   core/     window and context, frame timing, application loop, screenshots
   render/   shaders, atmosphere and sky, shadow maps, camera and view presets, CDLOD terrain, materials, sea surface, reflections and seabed map, rain
+  platform/ OpenGL and OpenGL ES (WebGL 2) differences: header, capabilities, wrappers
   ui/       Dear ImGui setup, styling and HiDPI scaling (the panel's sections are in core/Panel.cpp)
   world/    height field (DEM + procedural islands), noise, solar position, tile streaming and horizon maps
 assets/
@@ -198,6 +251,7 @@ assets/
     materials/  CC0 colour and normal maps from ambientCG
     water/      ripple normal maps (built by tools/make_water_normals.py)
 tools/      data preparation scripts
+web/        the web page (shell.html) and the headless browser smoke test
 external/
   glad/     OpenGL 3.3 core loader (generated with glad2)
 ```
