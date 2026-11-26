@@ -1,5 +1,6 @@
 # Build output
 build/
+build-web/
 out/
 cmake-build-*/
 
@@ -17,3 +18,5 @@ cmake-build-*/
 # Tool environments and downloaded data
 tools/.venv/
 tools/.cache/
+web/node_modules/
+web/test-results/

@@ -53,7 +53,14 @@ FetchContent_Declare(imgui
     GIT_TAG        v1.91.8
     GIT_SHALLOW    TRUE)
 
-FetchContent_MakeAvailable(glfw glm imgui)
+if(EMSCRIPTEN)
+    # The browser build gets GLFW from Emscripten's contrib port (emscripten-glfw), which handles
+    # HiDPI canvases, resizing and pointer lock; GL comes from WebGL 2, so there is no loader.
+    set(EMERALD_WEB_GLFW "--use-port=contrib.glfw3")
+    FetchContent_MakeAvailable(glm imgui)
+else()
+    FetchContent_MakeAvailable(glfw glm imgui)
+endif()
 
 FetchContent_GetProperties(stb)
 if(NOT stb_POPULATED)
@@ -72,15 +79,21 @@ add_library(imgui STATIC
     ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
 target_include_directories(imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
 target_compile_definitions(imgui PUBLIC IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
-# GLFW's headers only: the executable links GLFW itself.
-target_include_directories(imgui SYSTEM PRIVATE $<TARGET_PROPERTY:glfw,INTERFACE_INCLUDE_DIRECTORIES>)
+if(EMSCRIPTEN)
+    target_compile_options(imgui PRIVATE ${EMERALD_WEB_GLFW})
+else()
+    # GLFW's headers only: the executable links GLFW itself.
+    target_include_directories(imgui SYSTEM PRIVATE $<TARGET_PROPERTY:glfw,INTERFACE_INCLUDE_DIRECTORIES>)
+endif()
 
-# glad: OpenGL 3.3 core loader, generated with glad2 and kept in-tree
-add_library(glad STATIC external/glad/src/gl.c)
-target_include_directories(glad SYSTEM PUBLIC external/glad/include)
+if(NOT EMSCRIPTEN)
+    # glad: OpenGL 3.3 core loader, generated with glad2 and kept in-tree
+    add_library(glad STATIC external/glad/src/gl.c)
+    target_include_directories(glad SYSTEM PUBLIC external/glad/include)
 
-find_package(OpenGL REQUIRED)
-find_package(Threads REQUIRED)
+    find_package(OpenGL REQUIRED)
+    find_package(Threads REQUIRED)
+endif()
 
 # ---------------------------------------------------------------------------
 # Application
@@ -118,7 +131,11 @@ add_executable(emerald-isle
     src/world/TileStreamer.cpp)
 
 target_include_directories(emerald-isle PRIVATE src)
-target_link_libraries(emerald-isle PRIVATE glfw glad glm::glm stb imgui OpenGL::GL Threads::Threads)
+if(EMSCRIPTEN)
+    target_link_libraries(emerald-isle PRIVATE glm::glm stb imgui)
+else()
+    target_link_libraries(emerald-isle PRIVATE glfw glad glm::glm stb imgui OpenGL::GL Threads::Threads)
+endif()
 target_compile_definitions(emerald-isle PRIVATE
     GLFW_INCLUDE_NONE
     EMERALD_THREADS=$<BOOL:${EMERALD_THREADS}>
@@ -136,6 +153,33 @@ else()
     endif()
 endif()
 
+if(EMSCRIPTEN)
+    # The page (web/shell.html) plus index.js, index.wasm and index.data: the assets, prepared for
+    # download by tools/make_web_assets.py (materials re-encoded, the panel font added).
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(EMERALD_WEB_ASSETS "${CMAKE_BINARY_DIR}/web-assets")
+    add_custom_target(emerald-web-assets
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/make_web_assets.py"
+                "${CMAKE_SOURCE_DIR}/assets" "${imgui_SOURCE_DIR}/misc/fonts/Roboto-Medium.ttf"
+                "${EMERALD_WEB_ASSETS}"
+        COMMENT "Preparing web assets"
+        VERBATIM)
+    add_dependencies(emerald-isle emerald-web-assets)
+    set_target_properties(emerald-isle PROPERTIES OUTPUT_NAME index SUFFIX ".html"
+                          LINK_DEPENDS "${CMAKE_SOURCE_DIR}/web/shell.html")
+    target_compile_options(emerald-isle PRIVATE ${EMERALD_WEB_GLFW} -fwasm-exceptions)
+    target_link_options(emerald-isle PRIVATE
+        ${EMERALD_WEB_GLFW}
+        -fwasm-exceptions
+        -sMIN_WEBGL_VERSION=2
+        -sMAX_WEBGL_VERSION=2
+        -sALLOW_MEMORY_GROWTH=1
+        -sINITIAL_MEMORY=128MB
+        -sSTACK_SIZE=1MB
+        -sEXPORTED_RUNTIME_METHODS=callMain
+        "--shell-file=${CMAKE_SOURCE_DIR}/web/shell.html"
+        "--preload-file=${EMERALD_WEB_ASSETS}@/assets")
+else()
 # Copy runtime assets next to the executable on every build, so shader-only edits are picked up
 add_custom_target(emerald-assets ALL
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
@@ -147,3 +191,4 @@ add_custom_target(emerald-assets ALL
     COMMENT "Copying assets"
     VERBATIM)
 add_dependencies(emerald-isle emerald-assets)
+endif()

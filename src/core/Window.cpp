@@ -2,6 +2,9 @@
 
 #include "platform/Gl.hpp"
 #include <GLFW/glfw3.h>
+#ifdef __EMSCRIPTEN__
+#include <GLFW/emscripten_glfw3.h>
+#endif
 
 #include <cstdio>
 #include <stdexcept>
@@ -27,9 +30,16 @@ Window::Window(const WindowConfig& config)
         throw std::runtime_error("Failed to initialise GLFW");
     }
 
+#ifdef __EMSCRIPTEN__
+    // WebGL 2 (OpenGL ES 3.0) on the page's canvas, at the device's pixel density.
+    // (The WebGL version comes from the link flags.)
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
+    glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_TRUE);
+#else
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+#endif
 #ifdef __APPLE__
     // macOS only exposes core profiles through a forward-compatible context.
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
@@ -52,11 +62,16 @@ Window::Window(const WindowConfig& config)
     glfwMakeContextCurrent(m_handle);
     glfwSwapInterval(config.vsync && !config.headless ? 1 : 0);
 
+#ifdef __EMSCRIPTEN__
+    // The canvas follows the browser window.
+    emscripten_glfw_make_canvas_resizable(m_handle, "window", nullptr);
+#else
     if (gladLoadGL(glfwGetProcAddress) == 0) {
         glfwDestroyWindow(m_handle);
         glfwTerminate();
         throw std::runtime_error("Failed to load OpenGL functions");
     }
+#endif
     gl::initCaps();
 
     if (config.headless) {
@@ -106,7 +121,10 @@ void Window::requestClose()
 
 void Window::swapBuffers()
 {
-    glfwSwapBuffers(m_handle);
+    // The browser presents each frame when control returns to it.
+    if (!gl::kGles) {
+        glfwSwapBuffers(m_handle);
+    }
 }
 
 void Window::pollEvents()
@@ -150,7 +168,8 @@ void Window::setCursorCaptured(bool captured)
 
 void Window::onKey(GLFWwindow* handle, int key, int /*scancode*/, int action, int /*mods*/)
 {
-    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
+    // In a browser there is nothing to close; Escape releases the pointer instead.
+    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS && !gl::kGles) {
         glfwSetWindowShouldClose(handle, GLFW_TRUE);
     }
     static_cast<Window*>(glfwGetWindowUserPointer(handle))->m_input.onKey(key, action);
