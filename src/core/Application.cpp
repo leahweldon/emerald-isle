@@ -1042,7 +1042,8 @@ void Application::printRunStats() const
                 static_cast<double>(times.back()), over120Hz, over60Hz);
     // With vsync, swaps can return early and then block for two refreshes, so single frames look
     // slow while every refresh still gets a new frame. The average rate shows dropped refreshes.
-    if (m_options.window.vsync) {
+    // Not in a browser, which presents after frame() returns and reports no refresh rate.
+    if (m_options.window.vsync && m_window.refreshRate() > 0) {
         std::printf("Presentation: %.1f frames per second on average (display %d Hz)\n",
                     static_cast<double>(times.size()) * 1000.0 / totalMs, m_window.refreshRate());
     }
