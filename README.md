@@ -18,12 +18,14 @@ A real-time terrain renderer of Ireland, written in C++17 and modern shader-base
 - [x] **6. Shadows:** cascaded shadow maps and horizon-map distant shadows from a moving sun, with a day/night cycle
 - [x] **7. Water:** Gerstner waves, drifting ripples, planar reflections, depth-tinted shallows, foam and a sun and moon glint
 - [x] **8. Weather:** GPU rain simulated with transform feedback and drawn as instanced streaks, with splashes, overcast skies, wet ground and raindrop rings on the sea
-- [ ] **9. Tools:** in-app panel for toggling features and viewing frame timings
+- [x] **9. Tools:** in-app panel (Dear ImGui) with live stats and GPU time per pass, controls for time, weather, rendering and camera, and debug views of the level of detail and shadow cascades
 - [ ] **10. Web:** WebGL build with a live demo
 
 ## Screenshots
 
-The image at the top is milestone 6 at golden hour. Milestone 6, 7 and 8 images are reproducible with `--view <name> --screenshot <file>` plus the options shown (rendered at 2560 × 1440 and downscaled; screenshots freeze the waves and step the rain at a fixed rate).
+The image at the top is milestone 6 at golden hour. Milestone 6 to 9 images are reproducible with `--view <name> --screenshot <file>` plus the options shown (rendered at 2560 × 1440 and downscaled; screenshots freeze the waves and step the rain at a fixed rate; panel readings vary from run to run).
+
+![Milestone 9, tools: the in-app panel over Dingle Bay at golden hour, with the frame-time graph, GPU time per pass and terrain stats (--view glenbeigh --time 21:30 --ui --frames 600)](docs/images/milestone-09.png)
 
 ![Milestone 8, weather: heavy rain over Dingle Bay from the Glenbeigh hills, with the far shore fading into the rain under an overcast sky (--view glenbeigh --time 13:30 --rain 1)](docs/images/milestone-08.png)
 
@@ -56,6 +58,8 @@ flowchart LR
 
 - **Height:** inside Ireland's rectangle the world is the Copernicus DEM. Outside it, domain-warped fractal noise is shaped into islands with a falloff to sea level. The two are cross-faded near the DEM border, with a ring of open sea around Ireland so there is no seam. The same `--seed` always gives the same world.
 - **Level of detail (CDLOD):** the world is a quadtree of square nodes from 4 km to 524 km across, with roots tiled around the camera. A node splits into four when the camera is within 2.5× the child size, so every node covers a similar part of the screen. Grid vertices morph onto the next coarser grid as they approach a node's range, so levels meet without popping or cracks; skirts cover any gap while a level is still loading. Nodes outside the view frustum are skipped.
+
+  ![Level-of-detail debug view over Kerry: each CDLOD level in its own colour, blending towards the next where vertices geomorph, with node outlines (--view kerry --time 13:30 --ui --debug lod --debug tiles)](docs/images/debug-lod.png)
 - **Streaming:** missing tiles are generated on a background thread, coarsest first, and uploaded a few per frame. A node is drawn with its parent's coarser tile until its own detail arrives, so a frame never waits for the worker.
 - **Precision:** the camera position is double precision and everything is rendered relative to it (a floating origin). Material textures and noise repeat every 360 km, so their coordinates are wrapped per node. Thousands of kilometres out, there is no jitter.
 
@@ -85,7 +89,23 @@ flowchart LR
   ![Glenbeigh at 21:30 tone mapped with PBR Neutral (left, the default) and AgX (right)](docs/images/tone-mapping-comparison.png)
 - **Sky:** the sky is rendered into a cubemap, which also gives the ambient light (spherical harmonics) and the fog colour. While the sun moves, a second cubemap is rendered one face per frame and its small mip is read back asynchronously for the ambient light, then both are swapped in together, so the sky never causes a frame spike.
 - **Cascaded shadow maps:** four 2048² cascades cover the view from about half the camera's height above the ground out to ten times that height (30–150 km). Each cascade is fitted to the bounding sphere of its slice of the view and snapped to whole texels in world space, so shadows do not shimmer as the camera moves or turns. The depth pass reuses the CDLOD node selection, culled to each cascade and coarser in the outer ones, and clamps casters between a cascade and the sun onto its near plane. Receivers use a 3 × 3 hardware-filtered PCF, a normal offset that grows as the light grazes the surface, and a slope-scaled depth bias, and neighbouring cascades are cross-faded. Shadows dim only direct light, so the sky still lights the shade; they fall on the sea too.
+
+  ![Shadow-cascade debug view over the archipelago: cascades 1–3 cross-fading with distance and, grey, the horizon maps beyond them; cascade 0 covers the ground just under the camera, out of this view (--view archipelago --time 13:30 --ui --debug cascades)](docs/images/debug-cascades.png)
 - **Distant shadows:** beyond the last cascade, each terrain tile (4 km nodes and coarser) carries a horizon map, made on the worker thread when the tile is generated: for every other grid point, the elevation of the horizon in eight compass directions, found by marching outwards over the tile and over a coarser grid of heights reaching two node widths beyond it. The shader interpolates the horizon angle at the light's bearing and compares it with the light's elevation, and the last cascade fades into it. This costs two texture fetches per pixel, about 2 ms more work per coarse tile on the worker and nothing measurable on the GPU; ray-marching the height texture towards the sun would need a dozen or more fetches per pixel every frame and could not see casters past the edge of the node's own tile. The sea gets cascade shadows on its light and glint only; beyond them the haze dominates.
+
+## The panel
+
+**F1** opens an in-app panel, built on [Dear ImGui](https://github.com/ocornut/imgui) and drawn after tone mapping, so it is not tone mapped. It is open from the start in interactive sessions and closed in runs that end by themselves, unless `--ui` is passed. Its sections:
+
+- **Performance:** frame rate, a frame-time graph of the last 480 frames, GPU time per pass from timer queries, and terrain stats: triangles and draw calls (also for the shadow and reflection passes), resident and generated tiles, and the streaming queue. Timer queries run only while the panel is open. They are placed between render passes. Inside the main HDR pass they would split it, which costs extra on macOS, so terrain, sea, sky and rain drops are timed together as "Scene" unless **Split the scene pass** is ticked.
+- **Time & sky:** clock, date, time speed and pause, and the sun's elevation and bearing.
+- **Weather:** rain intensity, with dry, light and heavy buttons.
+- **Rendering:** tone mapper and exposure, and switches for shadows, horizon shadows, reflections, fog and rain particles.
+- **Camera:** view presets, speed, position, height and heading, and a button that copies the current pose as a `ViewPresets.cpp` line.
+- **Debug views:** terrain coloured by level of detail or by shadow cascade (with legends of node sizes and cascade distances), node outlines, wireframe, and a preview of the reflection texture.
+- **Controls:** the keyboard and trackpad controls.
+
+While the pointer is over the panel or a widget is in use, the camera and shortcuts do not see the mouse or keys. Text is rasterised at full pixel resolution, so it stays sharp on HiDPI screens; headless captures scale the panel to the image as a 1280 × 720 window would show it.
 
 ## Building
 
@@ -128,6 +148,8 @@ build\Release\emerald-isle.exe       # Windows (Visual Studio generator)
 | `--validate <tiles>` | Check correctness during the run: no GL errors (counted separately inside the shadow passes), shadow casters drawn, no holes in the visible terrain once it has loaded, ground always loaded under the camera, and at least *tiles* tiles generated and resident. Prints PASS/FAIL per check and exits non-zero on failure (used by CI) |
 | `--exposure <ev>` | Exposure offset in stops for the final tone mapping (default 0) |
 | `--tone-mapper <name>` | `neutral` (default, Khronos PBR Neutral) or `agx` |
+| `--ui` | Show the panel from the start, also in runs that end by themselves (it is drawn into `--headless` captures) |
+| `--debug <view>` | Start with a debug view: `lod` (level-of-detail colouring), `cascades` (shadow-cascade colouring), `tiles` (node outlines) or `wireframe`; repeatable. With `--ui`, the panel opens on its debug section |
 | `--rain <0-1>` | Start with rain of this intensity, 0 dry to 1 heavy (default 0); with `--validate`, also checks that every simulation step wrote the whole drop pool |
 | `--gpu-timing` | Also measure GPU time per frame with timer queries (exit stats and `gpu_ms` in the frame log); costs ~0.4 ms a frame on macOS |
 
@@ -153,6 +175,7 @@ On a MacBook's ProMotion display, GLFW with OpenGL presents at 120 Hz (measured 
 | Rain on / off | **R** | **R** |
 | Light ↔ heavy rain | **Shift**+**R** | **Shift**+**R** |
 | Print pose as a `--view` preset line | **P** | **P** |
+| Show / hide the panel | **F1** | **F1** |
 | Quit | **Esc** | **Esc** |
 
 Flying speed follows your height above the ground, like a map viewer: about 50 m/s skimming the hills at 30 m, about 2.4 km/s at a 1.5 km cruising height (Kerry to the edge of the DEM in about 12 s), and faster still from orbit. The multiplier keys scale that, and the window title shows the current speed (or "orbit"). Without `--view` the app starts in a slow orbit of the island; press **C** to take control. The camera stays at least 30 m above the ground and sea.
@@ -165,6 +188,7 @@ Time runs at one minute per second in interactive sessions, and the window title
 src/
   core/     window and context, frame timing, application loop, screenshots
   render/   shaders, atmosphere and sky, shadow maps, camera and view presets, CDLOD terrain, materials, sea surface, reflections and seabed map, rain
+  ui/       Dear ImGui setup, styling and HiDPI scaling (the panel's sections are in core/Panel.cpp)
   world/    height field (DEM + procedural islands), noise, solar position, tile streaming and horizon maps
 assets/
   shaders/  GLSL source
@@ -184,8 +208,8 @@ Contains modified Copernicus DEM data, © DLR e.V. 2010–2014 and © Airbus Def
 
 ## Built with
 
-[GLFW](https://www.glfw.org/) · [glad](https://github.com/Dav1dde/glad) · [GLM](https://github.com/g-truc/glm) · [stb](https://github.com/nothings/stb)
+[GLFW](https://www.glfw.org/) · [glad](https://github.com/Dav1dde/glad) · [GLM](https://github.com/g-truc/glm) · [stb](https://github.com/nothings/stb) · [Dear ImGui](https://github.com/ocornut/imgui)
 
 ## Credits
 
-Terrain textures are CC0 from [ambientCG](https://ambientcg.com/); elevation data is from Copernicus DEM. Every asset, with its source URL and licence, is listed in [CREDITS.md](CREDITS.md).
+Terrain textures are CC0 from [ambientCG](https://ambientcg.com/); elevation data is from Copernicus DEM; the panel's font is Roboto (Apache 2.0). Every asset, with its source URL and licence, is listed in [CREDITS.md](CREDITS.md).
