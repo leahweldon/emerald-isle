@@ -4,22 +4,144 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Emerald Isle</title>
+<meta name="description" content="A real-time terrain renderer of Ireland in C++ and OpenGL, running in the browser on WebGL 2.">
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #101416; }
-  #canvas { display: block; width: 100vw; height: 100vh; }
+  :root {
+    --bg: #0e1214;
+    --panel: rgba(16, 21, 23, 0.82);
+    --text: #e3e9e7;
+    --muted: #9aa6a3;
+    --accent: #3fb47a;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); }
+  #canvas { display: block; position: fixed; inset: 0; width: 100vw; height: 100vh; outline: none; }
+
+  /* Loading screen, until the first frame is on screen. */
+  #loading { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+             gap: 18px; background: var(--bg); transition: opacity 0.8s ease; z-index: 3; }
+  #loading.done { opacity: 0; pointer-events: none; }
+  #loading h1 { margin: 0; font-weight: 600; font-size: 28px; letter-spacing: 0.02em; }
+  #loading p { margin: 0; color: var(--muted); font-size: 14px; }
+  .bar { width: min(320px, 70vw); height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+  .bar div { width: 0; height: 100%; background: var(--accent); transition: width 0.2s ease; }
+
+  /* Title and controls, fading out after a few seconds. */
+  #intro { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); padding: 12px 18px; border-radius: 10px;
+           background: var(--panel); text-align: center; transition: opacity 1.2s ease; z-index: 2; pointer-events: none;
+           max-width: calc(100vw - 32px); box-sizing: border-box; }
+  #intro.hidden { opacity: 0; }
+  #intro strong { display: block; font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+  #intro span { color: var(--muted); font-size: 13px; line-height: 1.5; }
+  kbd { font-family: var(--font); font-size: 12px; padding: 1px 5px; border-radius: 4px; border: 1px solid rgba(255, 255, 255, 0.25); }
+
+  /* Corner links and the panel button. */
+  .corner { position: fixed; top: 12px; right: 12px; display: flex; gap: 8px; z-index: 2; }
+  .corner a, .corner button { font: 13px var(--font); color: var(--text); background: var(--panel); border: 0; border-radius: 8px;
+                              padding: 7px 11px; text-decoration: none; cursor: pointer; }
+  .corner a:hover, .corner button:hover { background: rgba(40, 60, 52, 0.9); }
+
+  /* Shown instead of the app when it cannot run. */
+  #unsupported { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px;
+                 background: var(--bg); z-index: 4; }
+  #unsupported div { max-width: 460px; text-align: center; line-height: 1.6; }
+  #unsupported h1 { font-size: 22px; font-weight: 600; }
+  #unsupported p { color: var(--muted); }
+  #unsupported a { color: var(--accent); }
 </style>
 </head>
 <body>
-<canvas id="canvas" tabindex="-1"></canvas>
+<canvas id="canvas" tabindex="-1" aria-label="Emerald Isle, a 3D view of Ireland"></canvas>
+
+<div id="loading">
+  <h1>Emerald Isle</h1>
+  <div class="bar"><div id="progress"></div></div>
+  <p id="status">Loading…</p>
+</div>
+
+<div id="intro" class="hidden">
+  <strong>Emerald Isle</strong>
+  <span>Click to look around · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to fly, <kbd>Q</kbd>/<kbd>E</kbd> down / up ·
+    scroll to turn · <kbd>F1</kbd> for the panel</span>
+</div>
+
+<div class="corner">
+  <button id="panel-button" type="button" title="Show or hide the panel (F1)">Panel</button>
+  <a href="https://github.com/leahweldon/emerald-isle" target="_blank" rel="noopener">GitHub</a>
+</div>
+
+<div id="unsupported">
+  <div>
+    <h1>This browser can't show Emerald Isle</h1>
+    <p id="unsupported-reason">It needs WebGL 2, which this browser or device doesn't offer.
+      Recent Chrome, Edge, Firefox and Safari all support it, on most computers made in the last decade.</p>
+    <p><a href="https://github.com/leahweldon/emerald-isle">See the project and screenshots on GitHub</a></p>
+  </div>
+</div>
+
 <script>
-  // URL parameters become options: ?view=shore&rain=1 runs with --view shore --rain 1.
-  var args = [];
-  new URLSearchParams(location.search).forEach(function (value, key) {
-    args.push('--' + key);
-    if (value !== '') args.push(value);
-  });
-  var Module = { canvas: document.getElementById('canvas'), arguments: args };
+  (function () {
+    var canvas = document.getElementById('canvas');
+    var unsupported = function (reason) {
+      if (reason) document.getElementById('unsupported-reason').textContent = reason;
+      document.getElementById('unsupported').style.display = 'flex';
+      document.getElementById('loading').classList.add('done');
+    };
+    // Checked before downloading anything.
+    var probe = document.createElement('canvas').getContext('webgl2');
+    if (!probe) {
+      unsupported();
+      return;
+    }
+
+    // URL parameters become options: ?view=shore&rain=1 runs with --view shore --rain 1.
+    var args = [];
+    new URLSearchParams(location.search).forEach(function (value, key) {
+      args.push('--' + key);
+      if (value !== '') args.push(value);
+    });
+
+    var progress = document.getElementById('progress');
+    var status = document.getElementById('status');
+    window.Module = {
+      canvas: canvas,
+      arguments: args,
+      // Emscripten reports downloads as "Downloading data... (done/total)".
+      setStatus: function (text) {
+        var match = text && text.match(/\((\d+(?:\.\d+)?)\/(\d+)\)/);
+        if (match) {
+          var done = Number(match[1]), total = Number(match[2]);
+          progress.style.width = (100 * done / total).toFixed(1) + '%';
+          status.textContent = 'Downloading ' + (done / 1e6).toFixed(1) + ' of ' + (total / 1e6).toFixed(1) + ' MB';
+        } else if (text) {
+          status.textContent = 'Preparing the island…';
+        }
+      },
+      printErr: function (text) { console.error(text); },
+      onAbort: function (what) {
+        unsupported('Something went wrong while starting: ' + what + '. Reloading the page may help.');
+      },
+    };
+
+    window.emeraldReady = function () {
+      document.getElementById('loading').classList.add('done');
+      var intro = document.getElementById('intro');
+      intro.classList.remove('hidden');
+      setTimeout(function () { intro.classList.add('hidden'); }, 8000);
+      canvas.focus();
+    };
+    document.getElementById('panel-button').addEventListener('click', function () {
+      if (window.Module.ccall) window.Module.ccall('emerald_toggle_panel', null, [], []);
+      canvas.focus();
+    });
+    canvas.addEventListener('mousedown', function () { canvas.focus(); });
+
+    var script = document.createElement('script');
+    script.src = 'index.js';
+    script.async = true;
+    document.body.appendChild(script);
+  })();
 </script>
-{{{ SCRIPT }}}
+<!-- Emscripten's loader is added by the script above, after the WebGL 2 check: {{{ SCRIPT }}} -->
 </body>
 </html>

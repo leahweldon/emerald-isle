@@ -176,7 +176,8 @@ if(EMSCRIPTEN)
         -sALLOW_MEMORY_GROWTH=1
         -sINITIAL_MEMORY=128MB
         -sSTACK_SIZE=1MB
-        -sEXPORTED_RUNTIME_METHODS=callMain
+        -sEXPORTED_RUNTIME_METHODS=ccall
+        -sEXPORTED_FUNCTIONS=_main,_emerald_toggle_panel
         "--shell-file=${CMAKE_SOURCE_DIR}/web/shell.html"
         "--preload-file=${EMERALD_WEB_ASSETS}@/assets")
 else()
