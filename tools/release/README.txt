@@ -20,10 +20,13 @@ Windows
 
 macOS (Apple silicon and Intel, macOS 11 or later)
   The app is not signed, so macOS blocks it the first time. Either:
-    - right-click (or Control-click) emerald-isle in Finder, choose Open, then Open again
+    - in Terminal, clear the quarantine flag on the whole unpacked folder, from the folder you
+      unpacked it into:
+        xattr -dr com.apple.quarantine emerald-isle-@VERSION@-macos
+      (or type "xattr -dr com.apple.quarantine " and drag this folder onto the Terminal window);
+    - or right-click (or Control-click) emerald-isle in Finder, choose Open, then Open again
       (on macOS 15 and later: try to open it once, then System Settings > Privacy & Security >
-      Open Anyway); or
-    - in Terminal, from this folder:  xattr -d com.apple.quarantine emerald-isle
+      Open Anyway).
   Then double-click it, or run ./emerald-isle in Terminal.
 
 Linux (x86-64, X11 or XWayland)
