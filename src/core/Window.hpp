@@ -74,6 +74,9 @@ private:
     int m_framebufferHeight = 0;
     Input m_input;
     bool m_cursorCaptured = false;
+#ifdef __EMSCRIPTEN__
+    bool m_wasLocked = false; // browser pointer lock at the last poll
+#endif
     int m_refreshRate = 0;
     bool m_headless = false;
     bool m_clickToCapture = false;

@@ -36,6 +36,8 @@ public:
 
     // Forgets the last cursor position so the next move does not register as a jump.
     void resetCursor() { m_haveCursor = false; }
+    // Relative motion reported directly, as from browser pointer lock (pixels).
+    void addMouseDelta(const glm::vec2& delta) { m_mouseDelta += delta; }
 
     void onKey(int key, int action);
     void onMouseButton(int button, int action);

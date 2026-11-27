@@ -4,6 +4,7 @@
 #include <GLFW/glfw3.h>
 #ifdef __EMSCRIPTEN__
 #include <GLFW/emscripten_glfw3.h>
+#include <emscripten/em_js.h>
 #endif
 
 #include <cstdio>
@@ -19,6 +20,30 @@ void logGlfwError(int code, const char* description)
 }
 
 } // namespace
+
+#ifdef __EMSCRIPTEN__
+// Mouse look under pointer lock. The GLFW port reports each event's movementX/Y as the cursor
+// position, so differences between positions lose the motion. Instead the page sums movementX/Y
+// as events arrive and the app takes the sum once per frame. Module.mouseLook.onMove and onTake
+// are hooks for the page's measurements (?lookstats).
+EM_JS(void, installPointerLockMovement, (), {
+    var look = Module.mouseLook = { x: 0, y: 0, onMove: null, onTake: null };
+    document.addEventListener('mousemove', function (e) {
+        if (!document.pointerLockElement) return;
+        look.x += e.movementX;
+        look.y += e.movementY;
+        if (look.onMove) look.onMove(e);
+    });
+});
+
+EM_JS(void, takePointerLockMovement, (float* out), {
+    var look = Module.mouseLook;
+    HEAPF32[out >> 2] = look.x;
+    HEAPF32[(out >> 2) + 1] = look.y;
+    look.x = look.y = 0;
+    if (look.onTake) look.onTake();
+});
+#endif
 
 Window::Window(const WindowConfig& config)
 {
@@ -90,6 +115,9 @@ Window::Window(const WindowConfig& config)
     glfwSetMouseButtonCallback(m_handle, onMouseButton);
     glfwSetCursorPosCallback(m_handle, onCursor);
     glfwSetScrollCallback(m_handle, onScroll);
+#ifdef __EMSCRIPTEN__
+    installPointerLockMovement();
+#endif
 
     const GLFWvidmode* mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
     m_refreshRate = mode ? mode->refreshRate : 0;
@@ -143,6 +171,19 @@ void Window::swapBuffers()
 void Window::pollEvents()
 {
     glfwPollEvents();
+#ifdef __EMSCRIPTEN__
+    float movement[2];
+    takePointerLockMovement(movement);
+    const bool locked = cursorCaptured();
+    if (locked) {
+        m_input.addMouseDelta(glm::vec2(movement[0], movement[1]));
+    }
+    // Locked or released by the browser (Escape): the next cursor position is not a move.
+    if (locked != m_wasLocked) {
+        m_input.resetCursor();
+        m_wasLocked = locked;
+    }
+#endif
 }
 
 void Window::setTitle(const std::string& title)
@@ -210,6 +251,11 @@ void Window::onMouseButton(GLFWwindow* handle, int button, int action, int /*mod
 
 void Window::onCursor(GLFWwindow* handle, double x, double y)
 {
+#ifdef __EMSCRIPTEN__
+    if (static_cast<Window*>(glfwGetWindowUserPointer(handle))->cursorCaptured()) {
+        return; // taken from movementX/Y in pollEvents()
+    }
+#endif
     static_cast<Window*>(glfwGetWindowUserPointer(handle))->m_input.onCursor(x, y);
 }
 

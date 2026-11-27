@@ -581,6 +581,7 @@ void Application::frame()
     const double totalMs = ms(frameStart, Clock::now());
     const double swapMs = ms(afterRender, afterSwap);
     recordFrameStats(static_cast<float>(totalMs), static_cast<float>(totalMs - swapMs));
+    m_lastWorkMs = static_cast<float>(totalMs - swapMs);
     collectPassTimes();
     if (m_gpuTimer) {
         for (const GpuTimer::Result& r : m_gpuTimer->collect()) {
@@ -656,17 +657,19 @@ void Application::update(float deltaSeconds)
 
 std::string Application::stateJson() const
 {
-    char json[384];
+    const Terrain::Stats& terrain = m_terrain->stats();
+    char json[512];
     std::snprintf(json, sizeof(json),
                   "{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f,\"yaw\":%.5f,\"pitch\":%.5f,\"orbiting\":%s,"
                   "\"panel\":%s,\"captured\":%s,\"frames\":%d,\"view\":\"%s\",\"minutes\":%.1f,"
-                  "\"rain\":%.2f,\"quality\":\"%s\",\"touch\":%s}",
+                  "\"rain\":%.2f,\"quality\":\"%s\",\"touch\":%s,\"workMs\":%.3f,\"terrainMs\":%.3f}",
                   m_camera.position.x, m_camera.position.y, m_camera.position.z, static_cast<double>(m_camera.yaw),
                   static_cast<double>(m_camera.pitch),
                   m_controller->mode() == CameraController::Mode::Orbit ? "true" : "false",
                   m_ui->visible() ? "true" : "false", m_window.cursorCaptured() ? "true" : "false", m_frameCount,
                   m_options.view.c_str(), m_time.minutes(), static_cast<double>(m_rainTarget),
-                  kQualities[static_cast<std::size_t>(m_quality)].name, m_options.touch ? "true" : "false");
+                  kQualities[static_cast<std::size_t>(m_quality)].name, m_options.touch ? "true" : "false",
+                  static_cast<double>(m_lastWorkMs), terrain.updateMs);
     return json;
 }
 

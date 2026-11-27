@@ -2,7 +2,8 @@
 // scene, presses keys, and reads the app's state through emerald_state(). Fails if the orbit does
 // not stop, the camera does not move or turn, pointer lock is not requested from inside the
 // click's event handler (browsers refuse it elsewhere), or the panel shortcuts do not toggle the
-// panel. Headless Chromium cannot lock the pointer, so the request is recorded, not granted.
+// panel. Headless Chromium cannot lock the pointer, so the request is recorded, not granted; a
+// lock is then faked to check that locked mouse movement turns the camera by the full amount.
 // Then, as an iPhone (touch, coarse pointer): touch mode at Low quality, the first gesture stops
 // the orbit, a drag rotates, a pinch and a two-finger drag move the camera, each overlay button
 // changes the state, and the page never scrolls.
@@ -43,6 +44,12 @@ await page.addInitScript(() => {
   Element.prototype.requestPointerLock = function () {
     pointerLockRequests.push(window.event ? window.event.type : 'outside an event handler');
     return Promise.resolve();
+  };
+  let locked = null;
+  Object.defineProperty(Document.prototype, 'pointerLockElement', { get() { return locked; } });
+  window.fakePointerLock = (on) => {
+    locked = on ? document.getElementById('canvas') : null;
+    document.dispatchEvent(new Event('pointerlockchange'));
   };
 });
 page.on('console', (m) => { if (m.type() === 'error') console.log(`[console error] ${m.text()}`); });
@@ -91,6 +98,23 @@ await settle(6);
 const afterScroll = await state();
 check(Math.abs(afterScroll.yaw - beforeScroll.yaw) + Math.abs(afterScroll.pitch - beforeScroll.pitch) > 1e-3,
       'scrolling (wheel or trackpad) turns the camera');
+
+// Locked movement arrives as movementX/Y only: 40 moves of 5 px, a few per frame, must turn the
+// camera by 200 px at 0.0025 rad per px.
+await page.evaluate(() => fakePointerLock(true));
+await settle(2);
+const beforeLook = await state();
+await page.evaluate(async () => {
+  for (let i = 0; i < 40; ++i) {
+    document.dispatchEvent(new MouseEvent('mousemove', { movementX: 5, bubbles: true }));
+    if (i % 3 === 2) await new Promise((r) => requestAnimationFrame(r));
+  }
+});
+await settle(3);
+const lookPx = ((await state()).yaw - beforeLook.yaw) / 0.0025;
+check(beforeLook.captured && Math.abs(lookPx - 200) < 1, `locked mouse movement turns the camera fully (${lookPx.toFixed(1)} of 200 px)`);
+await page.evaluate(() => fakePointerLock(false));
+await settle(2);
 
 for (const key of ['KeyH', 'Backquote', 'F1']) {
   const was = (await state()).panel;
