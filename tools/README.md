@@ -35,7 +35,7 @@ On Windows use `tools\.venv\Scripts\python`. Options:
 | Pixel size | whole metres, printed by the script (230 m at the default size) |
 | Row 0 | north |
 
-The renderer reads these as `kHeightmapMetresPerUnit` and `kHeightmapMetresPerPixel` in `src/render/TerrainMesh.hpp`. If `--long-side` changes the pixel size, update `kHeightmapMetresPerPixel` to match.
+The renderer reads these as `kHeightmapMetresPerUnit` and `kHeightmapMetresPerPixel` in `src/world/HeightField.hpp`. If `--long-side` changes the pixel size, update `kHeightmapMetresPerPixel` to match.
 
 Average resampling smooths peaks: the highest pixel at 230 m is about 945 m, against Carrauntoohil's 1039 m.
 
@@ -62,3 +62,18 @@ tools/.venv/bin/python tools/make_water_normals.py
 | `--size <px>` | `512` | Width and height of each map |
 
 The seeds and spectrum shapes are fixed in the script, so the output is the same on every run. Normals are OpenGL convention (+Y in green).
+
+## Recording the README flight
+
+`--record <dir>` saves every frame as `frame_00000.png`, `frame_00001.png`, … at a fixed timestep of 1/30 s. Before saving each frame it waits until every tile the view wants has streamed in (at most 300 frames), so the clip has no half-loaded terrain however fast the camera moves; the waves, rain and camera all advance by exactly one step per saved frame. It needs `--frames` or `--autofly` to end, and works with `--headless`, `--orbit` and any `--view`.
+
+`docs/images/flight.gif` is a 9 s golden-hour flight west over Kerry, recorded at 1920 × 1080 and turned into a looping 960 px GIF with [ffmpeg](https://ffmpeg.org/) and [gifski](https://gif.ski/) (`brew install ffmpeg gifski`). From the repository root:
+
+```bash
+./build/emerald-isle --headless --width 1920 --height 1080 --view kerry --time 21:00 --autofly 9 --record /tmp/flight
+mkdir -p /tmp/flight-960
+ffmpeg -framerate 30 -i /tmp/flight/frame_%05d.png -vf "fps=20,scale=960:-1:flags=lanczos" /tmp/flight-960/f_%04d.png
+gifski --fps 20 --quality 70 --width 960 -o docs/images/flight.gif /tmp/flight-960/f_*.png
+```
+
+That takes about a minute to record on an M5 and gives 181 frames and 5.9 MB; quality 80 is sharper but about 8.7 MB. A rain clip works the same way, for example `--view shore --time 13:30 --rain 1 --orbit --frames 240`.
