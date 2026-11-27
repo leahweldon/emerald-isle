@@ -20,6 +20,9 @@ struct AppOptions {
     int frameLimit = 0;
     // When set, the final frame is saved to this PNG path before exiting.
     std::string screenshotPath;
+    // When set, every frame is saved here as frame_00000.png, frame_00001.png, ... at a fixed
+    // 30 frames per second of simulated time, each once the terrain has fully streamed in.
+    std::string recordDir;
     // Fixed camera preset name; empty means the default slow orbit.
     std::string view;
     // Local clock time and date driving the sun (default 18:00 at midsummer). Time runs in

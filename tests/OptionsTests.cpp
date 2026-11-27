@@ -83,6 +83,11 @@ TEST_CASE("Options: defaults and implied settings")
     REQUIRE(parse({"--touch", "--quality", "high"}, touchHigh));
     CHECK(touchHigh.quality == 2);
 
+    AppOptions record;
+    REQUIRE(parse({"--headless", "--autofly", "9", "--record", "frames"}, record));
+    CHECK(record.recordDir == "frames");
+    CHECK_FALSE(record.timeRunning);
+
     AppOptions paused;
     REQUIRE(parse({"--paused"}, paused));
     CHECK_FALSE(paused.timeRunning);
@@ -110,4 +115,5 @@ TEST_CASE("Options: invalid flags fail with an error naming them")
     CHECK(error({"--bogus"}).find("--bogus") != std::string::npos);
     CHECK(error({"--width"}).find("--width") != std::string::npos); // missing value
     CHECK(error({"--headless"}).find("--headless") != std::string::npos); // nothing would end it
+    CHECK(error({"--record", "frames"}).find("--record") != std::string::npos); // nor here
 }

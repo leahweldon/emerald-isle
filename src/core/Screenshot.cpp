@@ -12,7 +12,7 @@
 
 namespace emerald {
 
-bool saveFramebufferPng(unsigned framebuffer, int width, int height, const std::string& path)
+bool saveFramebufferPng(unsigned framebuffer, int width, int height, const std::string& path, bool report)
 {
     if (width <= 0 || height <= 0) {
         return false;
@@ -42,7 +42,9 @@ bool saveFramebufferPng(unsigned framebuffer, int width, int height, const std::
     const bool ok = stbi_write_png(path.c_str(), width, height, 3, pixels.data(),
                                    static_cast<int>(rowBytes)) != 0;
     if (ok) {
-        std::printf("Saved screenshot to %s\n", path.c_str());
+        if (report) {
+            std::printf("Saved screenshot to %s\n", path.c_str());
+        }
     } else {
         std::fprintf(stderr, "Could not write screenshot to %s\n", path.c_str());
     }

@@ -70,6 +70,8 @@ private:
     static constexpr float kHeavyRain = 1.0f;
 
     void warmUp();
+    // --record: saves this frame once the terrain is complete; false if the file cannot be written.
+    bool recordFrame();
     void update(float deltaSeconds);
     void updateTime(float deltaSeconds);
     void updateWeather(float deltaSeconds);
@@ -183,6 +185,14 @@ private:
     glm::vec3 m_cameraVelocity{0.0f};
     int m_frameCount = 0;
     int m_settledFrames = 0; // frames rendered with all wanted terrain tiles loaded
+    // --record: simulated time, frames saved, whether the clock advances next frame, and frames
+    // waited for the terrain since the last save.
+    static constexpr float kRecordStep = 1.0f / 30.0f;
+    static constexpr int kRecordMaxWait = 300;
+    double m_recordSeconds = 0.0;
+    int m_recordedFrames = 0;
+    bool m_recordAdvance = false;
+    int m_recordWait = 0;
 
     // Run statistics, printed on exit.
     std::vector<float> m_frameMs;   // whole loop iteration, per frame
