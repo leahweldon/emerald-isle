@@ -1,0 +1,87 @@
+name: Release
+
+# Builds the desktop app for macOS, Windows and Linux when a release is published, and attaches
+# a package for each to it. Run by hand (workflow_dispatch), it builds the same packages as
+# workflow artefacts instead, to check them before a release.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write # gh release upload
+
+jobs:
+  package:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macos
+            bin: build
+            # One universal binary for Apple silicon and Intel Macs.
+            configure: -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          - os: windows-latest
+            platform: windows
+            bin: build/Release
+            configure: ""
+          - os: ubuntu-latest
+            platform: linux
+            bin: build
+            configure: ""
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The release tag (v1.0.0) must match the version in CMakeLists.txt (1.0.0), which the app
+      # reports in --help. Manual runs use the CMake version.
+      - name: Version
+        id: version
+        run: |
+          cmake_version=$(sed -n 's/^ *VERSION \([0-9.]*\)$/\1/p' CMakeLists.txt | head -1)
+          if [ "${{ github.event_name }}" = release ]; then
+            tag="${{ github.event.release.tag_name }}"
+            if [ "${tag#v}" != "$cmake_version" ]; then
+              echo "::error::Release tag $tag does not match the CMake project version $cmake_version"
+              exit 1
+            fi
+          fi
+          echo "version=$cmake_version" >> "$GITHUB_OUTPUT"
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl-dev
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DEMERALD_WARNINGS_AS_ERRORS=ON ${{ matrix.configure }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package
+        run: tools/release/package.sh "${{ steps.version.outputs.version }}" ${{ matrix.platform }} ${{ matrix.bin }} dist
+
+      - name: Upload to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber
+
+      - name: Upload as a workflow artefact
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: emerald-isle-${{ steps.version.outputs.version }}-${{ matrix.platform }}
+          path: dist/*
