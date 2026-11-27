@@ -9,7 +9,7 @@
 
 namespace emerald {
 
-class Window;
+class InputSource;
 
 // Drives a Camera from input. Free-fly: WASD move, Q/E down/up, arrows turn and pitch, Shift
 // faster, [ ] or - = scale speed (which otherwise follows height above the ground), two-finger scroll (or wheel) turns, mouse look with the right
@@ -31,7 +31,7 @@ public:
     void startAutofly(float speed);
     bool autoflying() const { return m_autoflySpeed > 0.0f; }
 
-    void update(Window& window, float deltaSeconds);
+    void update(InputSource& window, float deltaSeconds);
 
     // Touch gestures, as drags in CSS pixels and pinches as a scale (> 1 is fingers apart).
     // Orbiting: a drag rotates around the target, a pinch moves closer or further, a two-finger
@@ -56,7 +56,7 @@ public:
     std::string presetLine() const;
 
 private:
-    void updateFreeFly(Window& window, float dt);
+    void updateFreeFly(InputSource& window, float dt);
     void updateOrbit(float dt);
     void applyOrbit();
     void applyOrbitAboveGround();

@@ -60,4 +60,13 @@ private:
     glm::vec2 m_scrollDelta{0.0f};
 };
 
+// What the camera controller needs from a window: its input and the pointer capture.
+class InputSource {
+public:
+    virtual ~InputSource() = default;
+    virtual const Input& input() const = 0;
+    virtual bool cursorCaptured() const = 0;
+    virtual void setCursorCaptured(bool captured) = 0;
+};
+
 } // namespace emerald

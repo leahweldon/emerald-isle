@@ -24,7 +24,7 @@ struct WindowConfig {
 
 // Owns the GLFW window and its OpenGL 3.3 core context.
 // Creating a Window also initialises GLFW and loads the GL function pointers.
-class Window {
+class Window final : public InputSource {
 public:
     explicit Window(const WindowConfig& config);
     ~Window();
@@ -52,15 +52,15 @@ public:
     GLFWwindow* native() const { return m_handle; }
 
     Input& input() { return m_input; }
-    const Input& input() const { return m_input; }
+    const Input& input() const override { return m_input; }
 
     // With clickToCapture: whether a left click may capture the pointer now (false over the UI).
     void setCaptureFilter(std::function<bool()> filter) { m_captureFilter = std::move(filter); }
 
     // Hides the cursor and reports unbounded (raw where supported) motion for mouse look.
-    void setCursorCaptured(bool captured);
+    void setCursorCaptured(bool captured) override;
     // In a browser the pointer lock can also end without us (Escape), so this asks GLFW there.
-    bool cursorCaptured() const;
+    bool cursorCaptured() const override;
 
 private:
     static void onFramebufferResize(GLFWwindow* handle, int width, int height);

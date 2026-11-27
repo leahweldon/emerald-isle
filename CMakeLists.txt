@@ -95,6 +95,52 @@ if(NOT EMSCRIPTEN)
     find_package(Threads REQUIRED)
 endif()
 
+# Compiler warnings for the project's own targets.
+function(emerald_warnings target)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /permissive-)
+        if(EMERALD_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE /WX)
+        endif()
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wconversion)
+        if(EMERALD_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE -Werror)
+        endif()
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# Core: logic with no GL or window (world generation, tile cache and CDLOD selection, camera
+# control, sun position, options), shared by the app and the unit tests
+# ---------------------------------------------------------------------------
+add_library(emerald-core STATIC
+    src/core/CameraController.cpp
+    src/core/Input.cpp
+    src/core/Options.cpp
+    src/render/Camera.cpp
+    src/render/ViewPresets.cpp
+    src/world/Cdlod.cpp
+    src/world/HeightField.cpp
+    src/world/Noise.cpp
+    src/world/SolarPosition.cpp
+    src/world/TileCache.cpp
+    src/world/TileStreamer.cpp)
+target_include_directories(emerald-core PUBLIC src)
+target_link_libraries(emerald-core PUBLIC glm::glm PRIVATE stb)
+target_compile_definitions(emerald-core PUBLIC
+    GLFW_INCLUDE_NONE
+    EMERALD_THREADS=$<BOOL:${EMERALD_THREADS}>
+    PRIVATE EMERALD_VERSION="${PROJECT_VERSION}")
+if(EMSCRIPTEN)
+    target_compile_options(emerald-core PRIVATE ${EMERALD_WEB_GLFW} -fwasm-exceptions)
+else()
+    # GLFW's headers only, for key codes.
+    target_include_directories(emerald-core SYSTEM PRIVATE $<TARGET_PROPERTY:glfw,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_link_libraries(emerald-core PUBLIC Threads::Threads)
+endif()
+emerald_warnings(emerald-core)
+
 # ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
@@ -103,14 +149,11 @@ add_executable(emerald-isle
     src/platform/Gl.cpp
     src/core/Application.cpp
     src/core/Panel.cpp
-    src/core/CameraController.cpp
     src/core/Window.cpp
     src/core/FrameTimer.cpp
-    src/core/Input.cpp
     src/core/Screenshot.cpp
     src/core/TimeOfDay.cpp
     src/render/Atmosphere.cpp
-    src/render/Camera.cpp
     src/render/GpuTimer.cpp
     src/render/GpuPassTimer.cpp
     src/render/OffscreenTarget.cpp
@@ -123,35 +166,19 @@ add_executable(emerald-isle
     src/render/Sky.cpp
     src/render/Terrain.cpp
     src/render/TextureArray.cpp
-    src/render/ViewPresets.cpp
-    src/ui/Ui.cpp
-    src/world/HeightField.cpp
-    src/world/Noise.cpp
-    src/world/SolarPosition.cpp
-    src/world/TileStreamer.cpp)
+    src/ui/Ui.cpp)
 
 target_include_directories(emerald-isle PRIVATE src)
 if(EMSCRIPTEN)
-    target_link_libraries(emerald-isle PRIVATE glm::glm stb imgui)
+    target_link_libraries(emerald-isle PRIVATE emerald-core glm::glm stb imgui)
 else()
-    target_link_libraries(emerald-isle PRIVATE glfw glad glm::glm stb imgui OpenGL::GL Threads::Threads)
+    target_link_libraries(emerald-isle PRIVATE emerald-core glfw glad glm::glm stb imgui OpenGL::GL Threads::Threads)
 endif()
 target_compile_definitions(emerald-isle PRIVATE
     GLFW_INCLUDE_NONE
     EMERALD_THREADS=$<BOOL:${EMERALD_THREADS}>
     EMERALD_VERSION="${PROJECT_VERSION}")
-
-if(MSVC)
-    target_compile_options(emerald-isle PRIVATE /W4 /permissive-)
-    if(EMERALD_WARNINGS_AS_ERRORS)
-        target_compile_options(emerald-isle PRIVATE /WX)
-    endif()
-else()
-    target_compile_options(emerald-isle PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wconversion)
-    if(EMERALD_WARNINGS_AS_ERRORS)
-        target_compile_options(emerald-isle PRIVATE -Werror)
-    endif()
-endif()
+emerald_warnings(emerald-isle)
 
 if(EMSCRIPTEN)
     # The page (web/shell.html) plus index.js, index.wasm and index.data: the assets, prepared for
@@ -192,4 +219,36 @@ add_custom_target(emerald-assets ALL
     COMMENT "Copying assets"
     VERBATIM)
 add_dependencies(emerald-isle emerald-assets)
+endif()
+
+# ---------------------------------------------------------------------------
+# Unit tests (native only): emerald-isle-tests, run by ctest
+# ---------------------------------------------------------------------------
+option(EMERALD_BUILD_TESTS "Build the unit tests" ON)
+if(EMERALD_BUILD_TESTS AND NOT EMSCRIPTEN)
+    FetchContent_Declare(doctest
+        GIT_REPOSITORY https://github.com/doctest/doctest.git
+        GIT_TAG        v2.4.11
+        GIT_SHALLOW    TRUE
+        # Header only: no CMakeLists.txt there, so its own project (which needs a CMake older
+        # than 4) is downloaded but not added.
+        SOURCE_SUBDIR  header-only)
+    FetchContent_MakeAvailable(doctest)
+
+    add_executable(emerald-isle-tests
+        tests/main.cpp
+        tests/CameraTests.cpp
+        tests/CdlodTests.cpp
+        tests/HeightFieldTests.cpp
+        tests/OptionsTests.cpp
+        tests/SolarPositionTests.cpp
+        tests/TileCacheTests.cpp)
+    target_include_directories(emerald-isle-tests SYSTEM PRIVATE ${doctest_SOURCE_DIR}
+                               $<TARGET_PROPERTY:glfw,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_link_libraries(emerald-isle-tests PRIVATE emerald-core)
+    target_compile_definitions(emerald-isle-tests PRIVATE EMERALD_TEST_ASSETS="${CMAKE_SOURCE_DIR}/assets")
+    emerald_warnings(emerald-isle-tests)
+
+    enable_testing()
+    add_test(NAME unit-tests COMMAND emerald-isle-tests)
 endif()

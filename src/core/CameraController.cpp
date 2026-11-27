@@ -1,6 +1,6 @@
 #include "core/CameraController.hpp"
 
-#include "core/Window.hpp"
+#include "core/Input.hpp"
 
 #include <GLFW/glfw3.h>
 
@@ -83,7 +83,7 @@ void CameraController::startAutofly(float speed)
     m_autoflySpeed = speed;
 }
 
-void CameraController::update(Window& window, float deltaSeconds)
+void CameraController::update(InputSource& window, float deltaSeconds)
 {
     const Input& input = window.input();
     const float dt = std::min(deltaSeconds, kMaxStep);
@@ -188,7 +188,7 @@ void CameraController::applyOrbitAboveGround()
     }
 }
 
-void CameraController::updateFreeFly(Window& window, float dt)
+void CameraController::updateFreeFly(InputSource& window, float dt)
 {
     const Input& input = window.input();
 

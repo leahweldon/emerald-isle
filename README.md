@@ -189,6 +189,20 @@ python3 -m http.server -d build-web 8000   # then open http://localhost:8000
 
 `cmake -DEMERALD_THREADS=OFF` builds the desktop app with the web's single-threaded tile generation, for testing it natively. `web/test/smoke.mjs` is the headless browser test CI runs (`cd web && npm ci && npx playwright install chromium && node test/smoke.mjs ../build-web`).
 
+## Testing
+
+CI runs three kinds of test on every push and pull request.
+
+- **Unit tests** (`tests/`, [doctest](https://github.com/doctest/doctest)): the logic that needs no window or GPU, built as the `emerald-core` library. They cover the sun's position (Dublin sunrise and sunset at both solstices within 3 minutes of published times, noon elevation within 0.2°), procedural terrain (the same seed gives identical heights, different seeds differ, no step where the DEM meets the procedural world), CDLOD selection (finer nodes near the camera, a node splits only once all four children are loaded, the same view always selects the same nodes), the camera (ground clearance in every mode, pitch clamped short of vertical), the tile cache's least-recently-used eviction, and option parsing. They run on Linux, macOS and Windows in under a second:
+
+  ```bash
+  ctest --test-dir build -C Release --output-on-failure
+  ```
+
+  `-DEMERALD_BUILD_TESTS=OFF` skips building them.
+- **Rendering and streaming** (Linux, software OpenGL through Mesa): a headless frame, then two 10-second flights with `--validate 100`, over the procedural archipelago with the panel open, and west over Kerry across the DEM border in heavy rain. They fail on GL errors, holes in the terrain, ground missing under the camera, too few tiles streamed or rain steps that did not write every drop.
+- **Web** (headless Chromium, software WebGL 2): `web/test/smoke.mjs` loads the page and fails on any console or WebGL error; `web/test/input.mjs` checks keyboard, mouse, pointer lock and the panel, then touch gestures and the overlay as an emulated iPhone.
+
 ## Running
 
 ```bash
@@ -261,7 +275,8 @@ src/
   render/   shaders, atmosphere and sky, shadow maps, camera and view presets, CDLOD terrain, materials, sea surface, reflections and seabed map, rain
   platform/ OpenGL and OpenGL ES (WebGL 2) differences: header, capabilities, wrappers
   ui/       Dear ImGui setup, styling and HiDPI scaling (the panel's sections are in core/Panel.cpp)
-  world/    height field (DEM + procedural islands), noise, solar position, tile streaming and horizon maps
+  world/    height field (DEM + procedural islands), noise, solar position, tile cache, CDLOD selection, tile streaming and horizon maps
+tests/      unit tests of the logic in src that needs no window or GPU (doctest)
 assets/
   shaders/  GLSL source
   textures/ Ireland heightmap (16-bit, built by tools/make_heightmap.py)
