@@ -150,6 +150,7 @@ private:
     void setTerrainUniforms(Shader& shader);
     void updateTitle();
     void recordFrameStats(float frameMs, float cpuMs);
+    float m_lastWorkMs = 0.0f; // CPU work of the last frame (all but the swap), ms
     void printRunStats() const;
     void flushFrameLog(bool all);
     void validateFrame();

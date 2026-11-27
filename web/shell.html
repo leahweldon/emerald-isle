@@ -126,8 +126,14 @@
                 (navigator.maxTouchPoints > 0 && !matchMedia('(any-pointer: fine)').matches);
 
     // URL parameters become options: ?view=shore&rain=1 runs with --view shore --rain 1.
+    // ?lookstats=N is the page's own (see recordMouseLook).
     var args = [];
+    var lookSeconds = 0;
     new URLSearchParams(location.search).forEach(function (value, key) {
+      if (key === 'lookstats') {
+        lookSeconds = Number(value) || 10;
+        return;
+      }
       args.push('--' + key);
       if (value !== '') args.push(value);
     });
@@ -135,15 +141,17 @@
     var output = [];
     // Runs that end by themselves (?frames=... or ?autofly=...) post their statistics back when
     // served from this computer or the local network (to measure a phone); never on the public site.
-    window.emeraldFinished = function () {
+    var report = function (fields) {
       var host = location.hostname;
       if (host === 'localhost' || host === '127.0.0.1' || /\.local$/.test(host) ||
           /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host)) {
-        fetch('/report', { method: 'POST', body: JSON.stringify({
-          browser: navigator.userAgent, query: location.search, pixelRatio: window.devicePixelRatio,
-          size: [window.innerWidth, window.innerHeight], output: output }) });
+        var body = { browser: navigator.userAgent, query: location.search, pixelRatio: window.devicePixelRatio,
+                     size: [window.innerWidth, window.innerHeight] };
+        for (var k in fields) body[k] = fields[k];
+        fetch('/report', { method: 'POST', body: JSON.stringify(body) });
       }
     };
+    window.emeraldFinished = function () { report({ output: output }); };
     if (touch) {
       args.push('--touch');
       document.body.classList.add('touch');
@@ -175,7 +183,76 @@
       },
     };
 
+    // ?lookstats=N (development): records N seconds of pointer-locked mouse look from the first
+    // locked move, then posts frame intervals, event-to-frame latency (event to the start of the
+    // frame that applies it), events per frame, movement the camera failed to turn by, and the
+    // app's work per frame.
+    function recordMouseLook(seconds) {
+      var look = Module.mouseLook;
+      var note = document.createElement('div');
+      note.style.cssText = 'position:fixed;left:12px;top:12px;z-index:5;padding:7px 11px;border-radius:8px;' +
+                           'background:var(--panel);font-size:13px';
+      note.textContent = 'Click the scene, then move the mouse or trackpad for ' + seconds + ' s';
+      document.body.appendChild(note);
+      var start = 0, done = false, stamps = [], movedX = 0, frames = [], takes = [], latencies = [];
+      look.onMove = function (e) {
+        if (done) return;
+        if (!start) {
+          start = performance.now();
+          note.textContent = 'Recording mouse look…';
+          requestAnimationFrame(function tick(t) {
+            frames.push(t);
+            if (!done) requestAnimationFrame(tick);
+          });
+        }
+        stamps.push(e.timeStamp);
+        movedX += e.movementX;
+      };
+      look.onTake = function () {
+        if (!start || done) return;
+        var now = performance.now();
+        for (var i = 0; i < stamps.length; ++i) latencies.push(now - stamps[i]);
+        var s = JSON.parse(Module.ccall('emerald_state', 'string', [], []));
+        takes.push({ events: stamps.length, x: movedX, yaw: s.yaw, work: s.workMs, terrain: s.terrainMs });
+        stamps = [];
+        movedX = 0;
+        if (now - start >= seconds * 1000) finish();
+      };
+      function stats(values) {
+        var v = values.slice().sort(function (a, b) { return a - b; });
+        var at = function (q) { return v.length ? +v[Math.min(v.length - 1, Math.floor(q * v.length))].toFixed(2) : null; };
+        return { n: v.length, median: at(0.5), p95: at(0.95), p99: at(0.99), max: at(1) };
+      }
+      function finish() {
+        done = true;
+        var intervals = [];
+        for (var i = 1; i < frames.length; ++i) intervals.push(frames[i] - frames[i - 1]);
+        var typical = stats(intervals).median || 16.7;
+        // A take's movement shows in the yaw read at the next take (0.0025 rad per pixel).
+        var moved = 0, lost = 0;
+        for (var k = 0; k + 1 < takes.length; ++k) {
+          moved += Math.abs(takes[k].x);
+          lost += Math.abs((takes[k + 1].yaw - takes[k].yaw) / 0.0025 - takes[k].x);
+        }
+        var result = {
+          seconds: seconds,
+          frameIntervalMs: stats(intervals),
+          longFrames: intervals.filter(function (d) { return d > typical * 1.5; }).length,
+          eventToFrameMs: stats(latencies),
+          eventsPerFrame: stats(takes.filter(function (t) { return t.events > 0; }).map(function (t) { return t.events; })),
+          movedPx: +moved.toFixed(1),
+          unturnedPx: +lost.toFixed(1),
+          workMs: stats(takes.map(function (t) { return t.work; })),
+          terrainMs: stats(takes.map(function (t) { return t.terrain; })),
+        };
+        console.log('lookstats', JSON.stringify(result));
+        report({ lookStats: result });
+        note.textContent = 'Mouse look recorded and posted';
+      }
+    }
+
     window.emeraldReady = function () {
+      if (lookSeconds > 0 && Module.mouseLook) recordMouseLook(lookSeconds);
       document.getElementById('loading').classList.add('done');
       var intro = document.getElementById('intro');
       intro.classList.remove('hidden');

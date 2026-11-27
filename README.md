@@ -160,6 +160,7 @@ The [live demo](https://leahweldon.github.io/emerald-isle/) is the same C++ sour
 
   Low quality has no MSAA, so FXAA smooths edges in the final tone-mapping pass instead (on whenever the scene has no MSAA; `--fxaa on|off`, or the FXAA switch in the desktop panel). On the iPhone it made no measurable difference: 60 FPS and the same frame times with it on or off.
 - **Options in the address:** any option can be passed as a URL parameter, for example [`?view=shore&rain=1&time=13:30`](https://leahweldon.github.io/emerald-isle/?view=shore&rain=1&time=13:30). Without any, the demo opens on golden hour over Dingle Bay, orbiting slowly until you press a key, click or scroll.
+- **Measuring mouse look (development):** `?lookstats=10`, served locally (`localhost` or the local network), records 10 s of pointer-locked mouse look from the first locked move and posts the results to the page's server at `/report`: frame intervals, time from each mouse event to the frame that applies it, events per frame, any movement the camera did not turn by, and the app's work per frame. On a MacBook trackpad, after the pointer-lock fix: no long frames, and event-to-frame times of 9 ms (median) in Chrome at 120 Hz and 15 ms in Safari at 60 Hz, with all movement turned in both.
 
 ## Building
 
