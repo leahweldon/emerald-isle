@@ -1,5 +1,7 @@
 #pragma once
 
+#include "world/Cdlod.hpp"
+#include "world/TileCache.hpp"
 #include "world/TileStreamer.hpp"
 
 #include "platform/Gl.hpp"
@@ -8,7 +10,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <unordered_map>
 #include <vector>
 
 namespace emerald {
@@ -72,7 +73,7 @@ public:
     void setSlowDevice(bool slow);
 
     // Split distance in child-node sizes: lower gives coarser terrain sooner (default 2.5).
-    void setLodRange(double factor) { m_rangeFactor = factor; }
+    void setLodRange(double factor) { m_lodSettings.rangeFactor = factor; }
 
     // Main-thread time per frame for generating tiles when there is no worker thread (the web).
     void setGenerationBudget(double ms) { m_generationBudgetMs = ms; }
@@ -82,11 +83,8 @@ public:
     const Stats& stats() const { return m_stats; }
 
 private:
-    struct Slot {
-        TileKey key;
-        float minY = 0.0f;
-        float maxY = 0.0f;
-        std::uint64_t lastUsed = 0;
+    // GPU textures of the tile in the TileCache slot with the same index.
+    struct GpuTile {
         GLuint texture = 0; // 0 when the slot is free
         GLuint horizon = 0; // 2-layer array, or 0 for fine nodes without one
     };
@@ -97,32 +95,20 @@ private:
         double distance; // camera to node bounds, for front-to-back order
     };
 
-    void selectNode(const TileKey& key, const glm::dvec3& cameraPos, const glm::vec4 planes[6],
-                    std::vector<TileStreamer::Request>& wanted);
     // Loaded nodes inside planes (skipping plane skipPlane, or none if -1) into m_casterList.
     void selectCasters(const glm::mat4& viewProj, double lodScale, int skipPlane);
-    void selectCaster(const TileKey& key, const glm::vec4 planes[6], double lodScale, int skipPlane);
     // horizonUnit < 0 skips the horizon maps (depth passes).
     void drawNodes(Shader& shader, GLuint heightTileUnit, int horizonUnit,
                    const std::vector<DrawNode>& nodes, GLsizei indexCount);
-    // Keeps coarse tiles loaded outside the view, so turning reveals terrain rather than holes.
-    void prefetchNode(const TileKey& key, const glm::dvec3& cameraPos,
-                      std::vector<TileStreamer::Request>& wanted);
-    // Slot index of a loaded tile (marking it used this frame), or -1.
-    int residentSlot(const TileKey& key);
     void uploadTile(const TileData& tile);
     void buildGridMesh();
-    double lodRange(int level) const;
-    float requestPriority(int level, double distance, bool visible) const;
     void buildCoastMask(const HeightField& heightField);
 
     std::unique_ptr<TileStreamer> m_streamer;
     // One small R32F texture per resident tile. Each upload creates a fresh texture, so the driver
     // never has to wait for frames in flight that still read an older tile.
-    int m_capacity = 0;
-    std::vector<Slot> m_slots;
-    std::unordered_map<TileKey, int, TileKeyHash> m_lookup;
-    std::uint64_t m_frame = 0;
+    TileCache m_cache;
+    std::vector<GpuTile> m_gpuTiles; // by cache slot
 
     GLuint m_vao = 0;
     GLuint m_vbo = 0;
@@ -141,8 +127,7 @@ private:
     std::int64_t m_rootZ = 0;
     bool m_settled = false;
     double m_generationBudgetMs = 4.0;
-    double m_rangeFactor = 2.5;
-    bool m_nearFirst = false;
+    CdlodSettings m_lodSettings;
     Stats m_stats;
 };
 
