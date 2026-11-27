@@ -285,7 +285,14 @@ void Application::frame()
         return std::chrono::duration<double, std::milli>(b - a).count();
     };
     const auto frameStart = Clock::now();
-    const float delta = m_timer.tick();
+    float delta = m_timer.tick();
+    // Recording: a fixed timestep per saved frame. The clock stands still while tiles are still
+    // streaming in, so every saved frame has its terrain complete.
+    const bool recording = !m_options.recordDir.empty();
+    if (recording) {
+        delta = m_recordAdvance ? kRecordStep : 0.0f;
+        m_recordSeconds += static_cast<double>(delta);
+    }
 
     m_window.pollEvents();
     const auto afterEvents = Clock::now();
@@ -319,9 +326,15 @@ void Application::frame()
     if (timedOut && m_settledFrames < m_options.frameLimit) {
         std::fprintf(stderr, "Terrain still streaming after 60 s; capturing anyway\n");
     }
-    const int counted = screenshot ? m_settledFrames : m_frameCount;
+    if (recording && !recordFrame()) {
+        m_exitCode = EXIT_FAILURE;
+        m_window.requestClose();
+        return;
+    }
+    const int counted = recording ? m_recordedFrames : screenshot ? m_settledFrames : m_frameCount;
+    const double runSeconds = recording ? m_recordSeconds : m_timer.elapsedSeconds();
     const bool autoflyDone = m_options.autoflySeconds > 0.0f &&
-                             m_timer.elapsedSeconds() >= static_cast<double>(m_options.autoflySeconds);
+                             runSeconds >= static_cast<double>(m_options.autoflySeconds) && (!recording || m_recordAdvance);
     const bool lastFrame = autoflyDone ||
                            (m_options.frameLimit > 0 && (counted >= m_options.frameLimit || timedOut));
     if (lastFrame && !m_options.screenshotPath.empty()) {
@@ -384,10 +397,42 @@ int Application::finish()
     std::printf("Rendered %d frames, last average %.1f FPS (%.2f ms/frame)\n",
                 m_frameCount, m_timer.framesPerSecond(), m_timer.frameTimeMs());
     printRunStats();
+    if (!m_options.recordDir.empty()) {
+        std::printf("Recorded %d frames (%.2f s at %.0f fps) to %s\n", m_recordedFrames, m_recordSeconds,
+                    1.0 / static_cast<double>(kRecordStep), m_options.recordDir.c_str());
+    }
     if (m_options.validateMinTiles > 0 && !reportValidation()) {
         return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;
+}
+
+bool Application::recordFrame()
+{
+    // Waits for the terrain (up to kRecordMaxWait frames), then saves this frame.
+    ++m_recordWait;
+    m_recordAdvance = false;
+    if (!m_terrain->settled() && m_recordWait < kRecordMaxWait) {
+        return true;
+    }
+    if (!m_terrain->settled()) {
+        std::fprintf(stderr, "Terrain still streaming after %d frames; recording anyway\n", kRecordMaxWait);
+    }
+    if (m_recordedFrames == 0) {
+        std::error_code ec;
+        std::filesystem::create_directories(m_options.recordDir, ec);
+    }
+    char name[32];
+    std::snprintf(name, sizeof(name), "frame_%05d.png", m_recordedFrames);
+    const std::string path = (std::filesystem::path(m_options.recordDir) / name).string();
+    const unsigned source = m_offscreen ? m_offscreen->readFramebuffer() : 0;
+    if (!saveFramebufferPng(source, m_window.framebufferWidth(), m_window.framebufferHeight(), path, false)) {
+        return false;
+    }
+    ++m_recordedFrames;
+    m_recordWait = 0;
+    m_recordAdvance = true;
+    return true;
 }
 
 void Application::update(float deltaSeconds)
@@ -635,7 +680,9 @@ void Application::render()
     m_seaShader->use();
     setSceneUniforms(*m_seaShader);
     // Screenshots freeze the waves, so they are reproducible.
-    const double waveTime = m_options.screenshotPath.empty() ? m_timer.elapsedSeconds() : 0.0;
+    const double waveTime = !m_options.recordDir.empty()       ? m_recordSeconds
+                            : m_options.screenshotPath.empty() ? m_timer.elapsedSeconds()
+                                                               : 0.0;
     m_sea->apply(*m_seaShader, m_camera.position, waveTime, kRippleUnit);
     m_seabed->apply(*m_seaShader, kSeabedUnit);
     m_reflection->bindTexture(kReflectionUnit);

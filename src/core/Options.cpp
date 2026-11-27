@@ -26,6 +26,8 @@ void printUsage(const char* program)
         "                        --frames, --screenshot or --autofly\n"
         "  --frames <n>          Exit after rendering n frames\n"
         "  --screenshot <file>   Save the last frame as a PNG, then exit\n"
+        "  --record <dir>        Save every frame as a PNG at a fixed 30 fps timestep (with --frames\n"
+        "                        or --autofly), waiting for the terrain before each\n"
         "  --view <name>         Start from a camera preset: %s\n"
         "  --time <HH:MM>        Local clock time, Irish civil time (default 18:00)\n"
         "  --date <MM-DD>        Date (default 06-21, midsummer)\n"
@@ -128,6 +130,8 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
             options.frameLimit = parsePositive(arg, argv[++i]);
         } else if (std::strcmp(arg, "--screenshot") == 0 && hasValue) {
             options.screenshotPath = argv[++i];
+        } else if (std::strcmp(arg, "--record") == 0 && hasValue) {
+            options.recordDir = argv[++i];
         } else if (std::strcmp(arg, "--view") == 0 && hasValue) {
             options.view = argv[++i];
             if (!findViewPreset(options.view)) {
@@ -233,6 +237,9 @@ bool parseOptions(int argc, char** argv, AppOptions& options)
     // A screenshot run needs a few frames so the swap chain has settled.
     if (!options.screenshotPath.empty() && options.frameLimit == 0) {
         options.frameLimit = 10;
+    }
+    if (!options.recordDir.empty() && options.frameLimit == 0 && options.autoflySeconds <= 0.0f) {
+        throw std::invalid_argument("--record needs --frames or --autofly");
     }
     // Runs that end by themselves keep the sun still, so they are reproducible.
     options.timeRunning = options.frameLimit == 0 && options.autoflySeconds <= 0.0f && !options.paused;
