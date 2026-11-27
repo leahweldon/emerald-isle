@@ -220,3 +220,35 @@ add_custom_target(emerald-assets ALL
     VERBATIM)
 add_dependencies(emerald-isle emerald-assets)
 endif()
+
+# ---------------------------------------------------------------------------
+# Unit tests (native only): emerald-isle-tests, run by ctest
+# ---------------------------------------------------------------------------
+option(EMERALD_BUILD_TESTS "Build the unit tests" ON)
+if(EMERALD_BUILD_TESTS AND NOT EMSCRIPTEN)
+    FetchContent_Declare(doctest
+        GIT_REPOSITORY https://github.com/doctest/doctest.git
+        GIT_TAG        v2.4.11
+        GIT_SHALLOW    TRUE
+        # Header only: no CMakeLists.txt there, so its own project (which needs a CMake older
+        # than 4) is downloaded but not added.
+        SOURCE_SUBDIR  header-only)
+    FetchContent_MakeAvailable(doctest)
+
+    add_executable(emerald-isle-tests
+        tests/main.cpp
+        tests/CameraTests.cpp
+        tests/CdlodTests.cpp
+        tests/HeightFieldTests.cpp
+        tests/OptionsTests.cpp
+        tests/SolarPositionTests.cpp
+        tests/TileCacheTests.cpp)
+    target_include_directories(emerald-isle-tests SYSTEM PRIVATE ${doctest_SOURCE_DIR}
+                               $<TARGET_PROPERTY:glfw,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_link_libraries(emerald-isle-tests PRIVATE emerald-core)
+    target_compile_definitions(emerald-isle-tests PRIVATE EMERALD_TEST_ASSETS="${CMAKE_SOURCE_DIR}/assets")
+    emerald_warnings(emerald-isle-tests)
+
+    enable_testing()
+    add_test(NAME unit-tests COMMAND emerald-isle-tests)
+endif()
