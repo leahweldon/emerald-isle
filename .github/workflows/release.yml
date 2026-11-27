@@ -67,6 +67,19 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
+      # The release notes promise Apple silicon and Intel: fail if either slice is missing.
+      - name: Check the macOS binary is universal
+        if: runner.os == 'macOS'
+        run: |
+          archs=$(lipo -archs build/emerald-isle)
+          echo "Architectures: $archs"
+          for arch in arm64 x86_64; do
+            case " $archs " in
+              *" $arch "*) ;;
+              *) echo "::error::build/emerald-isle has no $arch slice (has: $archs)"; exit 1 ;;
+            esac
+          done
+
       - name: Tests
         run: ctest --test-dir build -C Release --output-on-failure
 
